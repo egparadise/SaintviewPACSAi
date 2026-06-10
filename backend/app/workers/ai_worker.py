@@ -58,7 +58,7 @@ def process_once() -> int:
     with SessionLocal() as db:
         jobs = list(
             db.execute(
-                select(AiJob).where(AiJob.status == "queued").order_by(AiJob.id).limit(5)
+                select(AiJob).where(AiJob.status == "queued").order_by(AiJob.id).limit(20)
             ).scalars()
         )
         for job in jobs:
