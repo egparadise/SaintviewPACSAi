@@ -19,7 +19,11 @@ router = APIRouter(prefix="/api", tags=["worklist"])
 
 @router.get("/worklist")
 def worklist(
-    q: str = Query("", description="환자 ID/이름"),
+    q: str = Query("", description="통합 검색(환자 ID/이름)"),
+    pid: str = Query("", description="환자 ID (필드별)"),
+    pname: str = Query("", description="환자 이름 (필드별)"),
+    sex: str = "",
+    desc: str = Query("", description="검사명 (Study Description)"),
     modality: str = "",
     body_part: str = "",
     status: str = "",
@@ -36,6 +40,10 @@ def worklist(
         db,
         WorklistFilter(
             patient_query=q,
+            patient_id=pid,
+            patient_name=pname,
+            sex=sex,
+            study_desc=desc,
             modality=modality,
             body_part=body_part,
             status=status,
@@ -87,6 +95,31 @@ def set_priority(
                     detail={"by": user["sub"], "emergency": body.emergency}))
     db.commit()
     return {"ok": True, "emergency": study.emergency}
+
+
+@router.get("/studies/{study_id}/series-tree")
+def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """시리즈→인스턴스 트리 + 썸네일 URL — 자체 뷰어 세로 썸네일용."""
+    from app.config import get_settings
+    from app.dicom.orthanc import OrthancClient
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not study.orthanc_id:
+        return {"study_uid": study.study_uid, "series": []}
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            return {"study_uid": study.study_uid, "series": []}
+        tree = client.series_tree(study.orthanc_id)
+    finally:
+        client.close()
+    base = get_settings().orthanc_url
+    for s in tree:
+        for inst in s["instances"]:
+            inst["preview_url"] = f"{base}/instances/{inst['orthanc_id']}/preview"
+    return {"study_uid": study.study_uid, "series": tree}
 
 
 @router.get("/studies/{study_id}/instances")

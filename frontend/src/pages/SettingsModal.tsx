@@ -1,7 +1,7 @@
 // 설정 — INFINITT Setting options 패턴(좌측 트리 + 우측 페이지, 화면분석 §5)
 import { useEffect, useState } from "react";
 import { api, type AiQuality, type OrthancStatus } from "../api";
-import { COLUMN_DEFS, DEFAULT_COLUMNS } from "./Worklist";
+import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS } from "./Worklist";
 
 const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "env", label: "환경 (Environment)" },
@@ -22,6 +22,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [refreshSec, setRefreshSec] = useState(10);
   const [defaultStatus, setDefaultStatus] = useState("");
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
+  const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [hangingCT, setHangingCT] = useState("default");
   const [hangingMR, setHangingMR] = useState("default");
   const [hospital, setHospital] = useState("");
@@ -35,10 +37,15 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
 
   useEffect(() => {
     api.getSetting("worklist.prefs").then((r) => {
-      const v = r.value as { auto_refresh_sec?: number; default_status?: string; columns?: string[] };
+      const v = r.value as {
+        auto_refresh_sec?: number; default_status?: string; columns?: string[];
+        find_fields?: string[]; dbl_action?: "viewer2d" | "ohif";
+      };
       if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
       setDefaultStatus(v.default_status ?? "");
       if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
+      if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
+      if (v.dbl_action) setDblAction(v.dbl_action);
     }).catch(() => {});
     api.getSetting("viewer.prefs").then((r) => {
       const h = (r.value as { hanging?: Record<string, string> }).hanging ?? {};
@@ -69,7 +76,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
 
   const save = async () => {
     await api.putSetting("worklist.prefs",
-      { auto_refresh_sec: refreshSec, default_status: defaultStatus, columns }, "user");
+      { auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
+        find_fields: findFields, dbl_action: dblAction }, "user");
     await api.putSetting("viewer.prefs", { hanging: { CT: hangingCT, MR: hangingMR } }, "user");
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
@@ -121,7 +129,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </select>
                   </Row>
                   <Row label="더블클릭 동작">
-                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>View&Draft (뷰어+초안 패널) — 고정</span>
+                    <select value={dblAction} onChange={(e) => setDblAction(e.target.value as "viewer2d" | "ohif")}>
+                      <option value="viewer2d">자체 뷰어 (View&Draft)</option>
+                      <option value="ohif">OHIF 뷰어</option>
+                    </select>
                   </Row>
                 </Group>
               </>
@@ -156,17 +167,27 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
             )}
 
             {page === "worklist" && (
-              <Group title="그리드 컬럼 구성 (Header Columns — F-8)">
-                <DualList
-                  all={Object.keys(COLUMN_DEFS)}
-                  selected={columns}
-                  labelOf={(k) => COLUMN_DEFS[k].label}
-                  onChange={setColumns}
-                />
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  선택 컬럼·순서는 서버에 저장되어 어느 PC에서 로그인해도 동일하게 적용됩니다.
-                </div>
-              </Group>
+              <>
+                <Group title="그리드 컬럼 구성 (Header Columns — F-8)">
+                  <DualList
+                    all={Object.keys(COLUMN_DEFS)}
+                    selected={columns}
+                    labelOf={(k) => COLUMN_DEFS[k].label}
+                    onChange={setColumns}
+                  />
+                </Group>
+                <Group title="검색 필드 구성 (Find criteria)">
+                  <DualList
+                    all={Object.keys(FIND_FIELDS)}
+                    selected={findFields}
+                    labelOf={(k) => FIND_FIELDS[k]}
+                    onChange={setFindFields}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.
+                  </div>
+                </Group>
+              </>
             )}
 
             {page === "report" && (

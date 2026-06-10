@@ -158,7 +158,17 @@ export const api = {
       body: JSON.stringify({ emergency }),
     }),
   orthancStatus: () => req<OrthancStatus>("/api/admin/orthanc-status"),
+  seriesTree: (studyId: number) =>
+    req<{ study_uid: string; series: SeriesNode[] }>(`/api/studies/${studyId}/series-tree`),
 };
+
+export interface SeriesNode {
+  series_uid: string;
+  modality: string;
+  series_desc: string;
+  series_number: number;
+  instances: { orthanc_id: string; sop_uid: string; instance_number: number; preview_url: string }[];
+}
 
 export interface OrthancStatus {
   alive: boolean;

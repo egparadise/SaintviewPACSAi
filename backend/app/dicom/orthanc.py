@@ -47,6 +47,35 @@ class OrthancClient:
         r.raise_for_status()
         return r.json()
 
+    def series_tree(self, orthanc_study_id: str) -> list[dict]:
+        """시리즈 → 인스턴스 2단 트리 — 뷰어 썸네일(INFINITT 시리즈/개별 이미지 패턴)."""
+        r = self._client.get(f"/studies/{orthanc_study_id}/series")
+        r.raise_for_status()
+        out = []
+        for s in r.json():
+            tags = s.get("MainDicomTags", {})
+            instances = []
+            for iid in s.get("Instances", []):
+                ir = self._client.get(f"/instances/{iid}")
+                if ir.status_code != 200:
+                    continue
+                itags = ir.json().get("MainDicomTags", {})
+                instances.append({
+                    "orthanc_id": iid,
+                    "sop_uid": itags.get("SOPInstanceUID", ""),
+                    "instance_number": int(itags.get("InstanceNumber") or 0),
+                })
+            instances.sort(key=lambda x: x["instance_number"])
+            out.append({
+                "series_uid": tags.get("SeriesInstanceUID", ""),
+                "modality": tags.get("Modality", ""),
+                "series_desc": tags.get("SeriesDescription", ""),
+                "series_number": int(tags.get("SeriesNumber") or 0),
+                "instances": instances,
+            })
+        out.sort(key=lambda x: x["series_number"])
+        return out
+
     def study_instances(self, orthanc_study_id: str) -> list[dict]:
         """검사 인스턴스 목록 — 키이미지 선택 UI용(F-16)."""
         r = self._client.get(f"/studies/{orthanc_study_id}/instances")

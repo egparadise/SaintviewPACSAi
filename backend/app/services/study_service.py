@@ -11,7 +11,11 @@ from app.models import AiJob, Patient, Report, Series, Study
 
 @dataclass
 class WorklistFilter:
-    patient_query: str = ""       # ID 또는 이름
+    patient_query: str = ""       # 통합 검색(ID 또는 이름)
+    patient_id: str = ""          # 필드별 검색 (Zetta/PiView 패턴)
+    patient_name: str = ""
+    sex: str = ""
+    study_desc: str = ""
     modality: str = ""
     body_part: str = ""
     status: str = ""
@@ -95,6 +99,14 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
     if f.patient_query:
         like = f"%{f.patient_query}%"
         q = q.where(or_(Patient.patient_key.like(like), Patient.name_masked.like(like)))
+    if f.patient_id:
+        q = q.where(Patient.patient_key.like(f"%{f.patient_id}%"))
+    if f.patient_name:
+        q = q.where(Patient.name_masked.like(f"%{f.patient_name}%"))
+    if f.sex:
+        q = q.where(Patient.sex == f.sex)
+    if f.study_desc:
+        q = q.where(Study.study_desc.like(f"%{f.study_desc}%"))
     if f.modality:
         q = q.where(Study.modality == f.modality)
     if f.body_part:

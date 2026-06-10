@@ -24,6 +24,7 @@ import {
 } from "../api";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
+const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 
 /* ── F-18 행잉 매핑 ─────────────────────────────── */
 let hangingMap: Record<string, string> = {};
@@ -122,48 +123,90 @@ function ActionToolbar({
   );
 }
 
-/* ── [B] 콤보 필터 바 ──────────────────────────── */
-function FilterBar({ filters, setFilters, onSearch }: {
+/* ── [B] 필드별 검색 필터 바 (Zetta: ID/NAME/SEX/MODALITY/DATE/DESC 개별 콤보) ── */
+export const FIND_FIELDS: Record<string, string> = {
+  pid: "환자 ID", pname: "환자 이름", sex: "성별", modality: "Modality",
+  date: "검사일", desc: "검사명(Description)", body_part: "부위",
+  status: "상태", finding: "소견 검색(F-2)", emergency: "Emergency",
+};
+export const DEFAULT_FIND_FIELDS = ["pid", "pname", "sex", "modality", "date", "desc", "status", "finding", "emergency"];
+
+function FilterBar({ filters, setFilters, fields, onSearch }: {
   filters: Record<string, string>;
   setFilters: (f: Record<string, string>) => void;
+  fields: string[];
   onSearch: () => void;
 }) {
   const set = (k: string, v: string) => setFilters({ ...filters, [k]: v });
+  const enter = (e: React.KeyboardEvent) => e.key === "Enter" && onSearch();
+  const F = (key: string) => {
+    switch (key) {
+      case "pid":
+        return <input key={key} placeholder="*Any 환자 ID" value={filters.pid ?? ""} style={{ width: 110 }}
+                      onChange={(e) => set("pid", e.target.value)} onKeyDown={enter} />;
+      case "pname":
+        return <input key={key} placeholder="*Any 이름" value={filters.pname ?? ""} style={{ width: 110 }}
+                      onChange={(e) => set("pname", e.target.value)} onKeyDown={enter} />;
+      case "sex":
+        return (
+          <select key={key} value={filters.sex ?? ""} onChange={(e) => set("sex", e.target.value)}>
+            <option value="">*Any 성별</option><option value="M">M</option>
+            <option value="F">F</option><option value="O">O</option>
+          </select>
+        );
+      case "modality":
+        return (
+          <select key={key} value={filters.modality ?? ""} onChange={(e) => set("modality", e.target.value)}>
+            <option value="">*Any Modality</option>
+            {["CR", "CT", "MR", "US", "MG", "XA", "NM", "DX", "ES", "RF", "OT"].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        );
+      case "date":
+        return (
+          <span key={key} style={{ display: "flex", gap: 3, alignItems: "center" }}>
+            <input type="date" value={filters.date_from_iso ?? ""} title="검사일 From"
+                   onChange={(e) => set("date_from_iso", e.target.value)} />
+            <span style={{ color: "var(--text-secondary)" }}>~</span>
+            <input type="date" value={filters.date_to_iso ?? ""} title="검사일 To"
+                   onChange={(e) => set("date_to_iso", e.target.value)} />
+          </span>
+        );
+      case "desc":
+        return <input key={key} placeholder="*Any 검사명" value={filters.desc ?? ""} style={{ width: 140 }}
+                      onChange={(e) => set("desc", e.target.value)} onKeyDown={enter} />;
+      case "body_part":
+        return <input key={key} placeholder="*Any 부위" value={filters.body_part ?? ""} style={{ width: 90 }}
+                      onChange={(e) => set("body_part", e.target.value)} onKeyDown={enter} />;
+      case "status":
+        return (
+          <select key={key} value={filters.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+            <option value="">*Any 상태</option><option value="received">도착</option>
+            <option value="draft_ready">AI초안</option><option value="reading">판독중</option>
+            <option value="finalized">확정</option>
+          </select>
+        );
+      case "finding":
+        return <input key={key} placeholder="소견/임프레션 검색 (F-2)" value={filters.finding ?? ""}
+                      style={{ width: 180 }} onChange={(e) => set("finding", e.target.value)} onKeyDown={enter} />;
+      case "emergency":
+        return (
+          <label key={key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+            <input type="checkbox" checked={filters.emergency === "true"}
+                   onChange={(e) => set("emergency", e.target.checked ? "true" : "")} />
+            ⚠ Emergency
+          </label>
+        );
+      default: return null;
+    }
+  };
   return (
     <div style={{
       display: "flex", gap: 6, padding: "5px 8px", background: "var(--bg-panel)",
       borderBottom: "1px solid var(--border)", alignItems: "center", flexWrap: "wrap",
     }}>
-      <select value={filters.modality ?? ""} onChange={(e) => set("modality", e.target.value)}>
-        <option value="">*Any Modality</option>
-        {["CR", "CT", "MR", "US", "MG", "XA", "NM", "DX", "ES", "RF", "OT"].map((m) => (
-          <option key={m} value={m}>{m}</option>
-        ))}
-      </select>
-      <select value={filters.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-        <option value="">*Any 상태</option>
-        <option value="received">도착</option>
-        <option value="draft_ready">AI초안</option>
-        <option value="reading">판독중</option>
-        <option value="finalized">확정</option>
-      </select>
-      <input placeholder="*Any 부위" value={filters.body_part ?? ""} style={{ width: 110 }}
-             onChange={(e) => set("body_part", e.target.value)}
-             onKeyDown={(e) => e.key === "Enter" && onSearch()} />
-      <input type="date" value={filters.date_from_iso ?? ""} title="검사일 From"
-             onChange={(e) => set("date_from_iso", e.target.value)} />
-      <span style={{ color: "var(--text-secondary)" }}>~</span>
-      <input type="date" value={filters.date_to_iso ?? ""} title="검사일 To"
-             onChange={(e) => set("date_to_iso", e.target.value)} />
-      <input placeholder="소견/임프레션 검색 (F-2)" value={filters.finding ?? ""}
-             style={{ flex: 1, minWidth: 160, maxWidth: 300 }}
-             onChange={(e) => set("finding", e.target.value)}
-             onKeyDown={(e) => e.key === "Enter" && onSearch()} />
-      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-        <input type="checkbox" checked={filters.emergency === "true"}
-               onChange={(e) => set("emergency", e.target.checked ? "true" : "")} />
-        ⚠ Emergency만
-      </label>
+      {fields.map(F)}
     </div>
   );
 }
@@ -632,8 +675,8 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
       boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: "4px 0",
     }}>
-      <Item a="viewdraft" label="View&Draft" />
-      <Item a="viewer" label="뷰어 열기 (OHIF)" />
+      <Item a="viewdraft" label="View&Draft (자체 뷰어)" />
+      <Item a="viewer" label="OHIF 뷰어 (보조)" />
       <Item a="3d" label="3D 뷰어 (MPR/MIP)" />
       <Item a="compare" label="비교세트에 추가" />
       <Sep />
@@ -750,8 +793,11 @@ export function Worklist() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshSec, setRefreshSec] = useState(10);
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
+  const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
+  const [viewer2dDetail, setViewer2dDetail] = useState<StudyDetail | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
   const insertRef = useRef<((t: string) => void) | null>(null);
 
@@ -759,20 +805,27 @@ export function Worklist() {
   useEffect(() => {
     loadHangingPrefs();
     api.getSetting("worklist.prefs").then((r) => {
-      const v = r.value as { auto_refresh_sec?: number; default_status?: string; columns?: string[] };
+      const v = r.value as {
+        auto_refresh_sec?: number; default_status?: string; columns?: string[];
+        find_fields?: string[]; dbl_action?: "viewer2d" | "ohif";
+      };
       if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
       if (v.default_status) setFilters((f) => ({ ...f, status: v.default_status! }));
       if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
+      if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
+      if (v.dbl_action) setDblAction(v.dbl_action);
     }).catch(() => {});
+    // ETC 섹션의 3D 버튼(Viewer2D 내부) → 3D 뷰어 전환
+    const h = (e: Event) => setViewer3dUid((e as CustomEvent).detail as string);
+    window.addEventListener("sv-open-3d", h);
+    return () => window.removeEventListener("sv-open-3d", h);
   }, []);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
-    if (filters.modality) p.modality = filters.modality;
-    if (filters.status) p.status = filters.status;
-    if (filters.body_part) p.body_part = filters.body_part;
-    if (filters.finding) p.finding = filters.finding;
-    if (filters.emergency) p.emergency = filters.emergency;
+    for (const k of ["pid", "pname", "sex", "desc", "modality", "status", "body_part", "finding", "emergency"]) {
+      if (filters[k]) p[k] = filters[k];
+    }
     if (filters.date_from_iso) p.date_from = filters.date_from_iso.replaceAll("-", "");
     if (filters.date_to_iso) p.date_to = filters.date_to_iso.replaceAll("-", "");
     if (filters.tree_from) p.date_from = filters.tree_from;
@@ -804,7 +857,18 @@ export function Worklist() {
     switch (a) {
       case "refresh": setRefreshKey((k) => k + 1); break;
       case "batch": setBatchOpen(true); break;
-      case "viewdraft": if (target) { onSelect(target as StudyRow); openStudy(target); } break;
+      case "viewdraft":
+        // View&Draft = 자체 뷰어(기본) — 더블클릭 동작은 환경설정에서 변경 가능
+        if (target) {
+          const d = await api.study(target.id);
+          setSelected(d);
+          if (dblAction === "ohif") openStudy(d);
+          else setViewer2dDetail(d);
+        }
+        break;
+      case "viewer2d":
+        if (target) { const d = await api.study(target.id); setSelected(d); setViewer2dDetail(d); }
+        break;
       case "viewer": if (target) openStudy(target); break;
       case "3d": if (target) setViewer3dUid(target.study_uid); break;
       case "compare":
@@ -837,7 +901,8 @@ export function Worklist() {
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
                      onSearch={() => setRefreshKey((k) => k + 1)} />
-      <FilterBar filters={filters} setFilters={setFilters} onSearch={() => setRefreshKey((k) => k + 1)} />
+      <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
+                 onSearch={() => setRefreshKey((k) => k + 1)} />
 
       {/* 중단: 날짜트리 + 메인 그리드 */}
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
@@ -885,6 +950,15 @@ export function Worklist() {
       </footer>
 
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
+      {viewer2dDetail && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
+            뷰어 로딩…
+          </div>
+        }>
+          <Viewer2D detail={viewer2dDetail} onClose={() => setViewer2dDetail(null)} />
+        </Suspense>
+      )}
       {viewer3dUid && (
         <Suspense fallback={
           <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
