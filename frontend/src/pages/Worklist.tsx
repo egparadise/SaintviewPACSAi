@@ -355,11 +355,14 @@ function ComparisonSetGrid({ items, current, onRemove, onOpenCompare }: {
   );
 }
 
-/* ── [E-좌] 상용구 패널 (F-18, 화면분석 §5.6) ─────── */
-interface Phrase { id: number; group: string; name: string; text: string }
-function PhrasePanel({ onInsert }: { onInsert: (text: string) => void }) {
+/* ── [E-좌] 상용구 패널 (F-18 — Modality×BodyPart 축, 화면분석 §5.6) ─────── */
+interface Phrase { id: number; group: string; name: string; text: string; modality?: string; body_part?: string }
+function PhrasePanel({ onInsert, current }: { onInsert: (text: string) => void; current: StudyDetail | null }) {
   const [items, setItems] = useState<Phrase[]>([]);
   const [sel, setSel] = useState<Phrase | null>(null);
+  const [fitOnly, setFitOnly] = useState(true); // 현재 검사 맞춤(모달리티 일치 or 공통)
+  const visible = items.filter((p) =>
+    !fitOnly || !current || !p.modality || p.modality === current.modality);
 
   const load = useCallback(() => {
     api.getSetting("report.phrases").then((r) => {
@@ -373,11 +376,15 @@ function PhrasePanel({ onInsert }: { onInsert: (text: string) => void }) {
     setItems(next);
   };
   const add = async () => {
-    const group = prompt("그룹 (예: CT-CHEST)") ?? "";
+    const modality = prompt("Modality (빈칸=공통)", current?.modality ?? "") ?? "";
+    const body_part = prompt("부위 (빈칸=공통)", current?.body_part ?? "") ?? "";
     const name = prompt("상용구 이름") ?? "";
     const text = prompt("본문") ?? "";
     if (!name || !text) return;
-    await save([...items, { id: Date.now(), group, name, text }]);
+    await save([...items, {
+      id: Date.now(), group: [modality, body_part].filter(Boolean).join("-") || "공통",
+      name, text, modality, body_part,
+    }]);
   };
   const edit = async () => {
     if (!sel) return;
@@ -392,26 +399,45 @@ function PhrasePanel({ onInsert }: { onInsert: (text: string) => void }) {
 
   return (
     <PanelBox title="상용구 (Std)" right={
+      <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        <label style={{ fontSize: 10, display: "flex", gap: 2, alignItems: "center", textTransform: "none" }}>
+          <input type="checkbox" checked={fitOnly} onChange={(e) => setFitOnly(e.target.checked)} />맞춤
+        </label>
+        {phraseButtons()}
+      </span>
+    }>
+      {phraseBody()}
+    </PanelBox>
+  );
+
+  function phraseButtons() {
+    return (
       <span style={{ display: "flex", gap: 3 }}>
         <MiniBtn onClick={() => sel && onInsert(sel.text)} disabled={!sel}>삽입</MiniBtn>
         <MiniBtn onClick={add}>New</MiniBtn>
         <MiniBtn onClick={edit} disabled={!sel}>Edit</MiniBtn>
         <MiniBtn onClick={del} disabled={!sel}>Del</MiniBtn>
       </span>
-    }>
+    );
+  }
+
+  function phraseBody() {
+    return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
           <table className="grid-table">
-            <thead><tr><th>GROUP</th><th>NAME</th></tr></thead>
+            <thead><tr><th>분류</th><th>NAME</th></tr></thead>
             <tbody>
-              {items.map((p) => (
+              {visible.map((p) => (
                 <tr key={p.id} className={sel?.id === p.id ? "selected" : ""}
                     onClick={() => setSel(p)} onDoubleClick={() => onInsert(p.text)}>
                   <td>{p.group}</td><td title={p.text}>{p.name}</td>
                 </tr>
               ))}
-              {items.length === 0 && (
-                <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>New로 상용구 등록</td></tr>
+              {visible.length === 0 && (
+                <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>
+                  {items.length ? "맞춤 해제 시 전체 표시" : "New로 상용구 등록"}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -425,8 +451,8 @@ function PhrasePanel({ onInsert }: { onInsert: (text: string) => void }) {
           </div>
         )}
       </div>
-    </PanelBox>
-  );
+    );
+  }
 }
 
 /* ── 키이미지 스트립 (F-16) ───────────────────── */
@@ -681,6 +707,7 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       <Item a="compare" label="비교세트에 추가" />
       <Sep />
       <Item a="pdf" label="PDF 내보내기" />
+      <Item a="copyreport" label="과거 판독 복사 (Copy Report)" />
       <Item a="regen" label="AI 초안 재생성" />
       <Sep />
       <Item a="emergency" label={row.emergency ? "Emergency 해제" : "⚠ Emergency 지정"} danger={!row.emergency} />
@@ -900,6 +927,28 @@ export function Worklist() {
         break;
       }
       case "regen": if (target) { await api.analyze(target.id); onChanged(); } break;
+      case "copyreport": {
+        // ③ report_copy(UBPACS-Z): 동일 환자 최근 확정 판독을 현재 초안 Conclusion에 복사
+        if (!target) break;
+        const d = await api.study(target.id);
+        for (const rel of d.related_exams) {
+          if (rel.status !== "finalized") continue;
+          const prior = (await api.reports(rel.id)).items.find((r) => r.status === "finalized");
+          const cur = (await api.reports(target.id)).items[0];
+          if (prior && cur && cur.status !== "finalized") {
+            const sr = structuredClone(cur.sr_json);
+            const copied = prior.sr_json.impression.map((i) => i.statement).join("\n");
+            sr.impression[0].statement =
+              (sr.impression[0].statement ? sr.impression[0].statement + "\n" : "") +
+              `[과거판독 복사 ${rel.study_date}]\n${copied}`;
+            await api.updateReport(cur.id, sr);
+            onChanged();
+            alert(`과거 확정 판독(${rel.study_date})을 Conclusion에 복사했습니다.`);
+          }
+          break;
+        }
+        break;
+      }
       case "emergency":
         if (target) { await api.setPriority(target.id, !target.emergency); onChanged(); }
         break;
@@ -945,7 +994,7 @@ export function Worklist() {
       {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) */}
       <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
         <div style={{ width: 230, display: "flex", flexShrink: 0 }}>
-          <PhrasePanel onInsert={(t) => insertRef.current?.(t)} />
+          <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
         </div>
         <div style={{ flex: 1.6, display: "flex", minWidth: 0 }}>
           <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />

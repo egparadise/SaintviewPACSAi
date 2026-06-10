@@ -139,6 +139,40 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             {page === "env" && (
               <>
+                <Group title="제품 모드 프리셋 (05 Mode Profile v1)">
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <select id="sv-mode" defaultValue="">
+                      <option value="" disabled>모드 선택…</option>
+                      <option value="saintvidw">saintvidw (기본 — AI 중심)</option>
+                      <option value="infinitt">INFINITT 에뮬레이션</option>
+                      <option value="ubpacs">UBPACS-Z 에뮬레이션</option>
+                      <option value="sonic">SonicPACS 에뮬레이션</option>
+                    </select>
+                    <button onClick={async () => {
+                      const m = (document.getElementById("sv-mode") as HTMLSelectElement).value;
+                      if (!m) return;
+                      const P: Record<string, { wl: Record<string, unknown>; vw: Record<string, unknown> }> = {
+                        saintvidw: { wl: { columns: DEFAULT_COLUMNS, find_fields: DEFAULT_FIND_FIELDS, dbl_action: "viewer2d" },
+                                     vw: { paletteSide: "left", thumbSide: "left", thumbMode: "series", reportDock: true } },
+                        infinitt:  { wl: { columns: ["status","patient_name","patient_key","sex","study_date","accession_no","modality","series_count","instance_count","body_part","impression"], find_fields: DEFAULT_FIND_FIELDS, dbl_action: "viewer2d" },
+                                     vw: { paletteSide: "top", thumbSide: "bottom", thumbMode: "series", reportDock: false } },
+                        ubpacs:    { wl: { columns: DEFAULT_COLUMNS, find_fields: ["pid","pname","sex","modality","date","desc","status"], dbl_action: "viewer2d" },
+                                     vw: { paletteSide: "left", thumbSide: "left", thumbMode: "all", reportDock: true } },
+                        sonic:     { wl: { columns: ["status","patient_key","patient_name","study_date","modality","study_desc","impression"], find_fields: ["pid","pname","modality","date"], dbl_action: "ohif" },
+                                     vw: { paletteSide: "top", thumbSide: "bottom", thumbMode: "series", reportDock: false } },
+                      };
+                      const prof = P[m];
+                      const cur = (await api.getSetting("worklist.prefs")).value;
+                      await api.putSetting("worklist.prefs", { ...cur, ...prof.wl }, "user");
+                      const curv = (await api.getSetting("viewer.prefs")).value;
+                      await api.putSetting("viewer.prefs", { ...curv, ...prof.vw }, "user");
+                      setSaved(`'${m}' 모드 적용 — 새로고침 시 반영`);
+                    }}>적용</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
+                  </div>
+                </Group>
                 <Group title="워크리스트 동작">
                   <Row label="자동 갱신">
                     <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>

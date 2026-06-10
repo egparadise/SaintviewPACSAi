@@ -37,9 +37,14 @@ class OrthancClient:
         return r.json()
 
     def study_metadata(self, orthanc_study_id: str) -> dict:
-        r = self._client.get(f"/studies/{orthanc_study_id}")
+        # ModalitiesInStudy는 requestedTags로 요청해야 채워짐
+        r = self._client.get(
+            f"/studies/{orthanc_study_id}", params={"requestedTags": "ModalitiesInStudy"}
+        )
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        data.setdefault("MainDicomTags", {}).update(data.get("RequestedTags", {}))
+        return data
 
     def list_changes(self, since: int = 0, limit: int = 100) -> dict:
         """Orthanc 변경 피드 — 신규 검사 동기화(폴링)."""

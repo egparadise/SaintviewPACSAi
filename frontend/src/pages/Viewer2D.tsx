@@ -10,6 +10,18 @@ const LAYOUTS: Record<string, { cols: number; rows: number; count: number }> = {
   "1x2": { cols: 2, rows: 1, count: 2 },
   "2x2": { cols: 2, rows: 2, count: 4 },
 };
+/** ② 자동 최적 W/L (03c Image-Manipulation 의도, v1=결정적 규칙. 추후 AI 추론 교체 지점) */
+function autoWL(modality: string, bodyPart: string): { q: string; label: string } | null {
+  const bp = (bodyPart || "").toUpperCase();
+  if (modality === "CT") {
+    if (bp.includes("CHEST") || bp.includes("LUNG")) return { q: "-600,1500", label: "폐" };
+    if (bp.includes("BRAIN") || bp.includes("HEAD")) return { q: "40,80", label: "뇌" };
+    if (bp.includes("ABD") || bp.includes("PEL")) return { q: "60,400", label: "복부" };
+    return { q: "40,400", label: "종격동" };
+  }
+  return null; // MR/CR 등은 서버 VOI 기본
+}
+
 const WL_PRESETS = [
   { key: "auto", label: "Auto", q: "" },
   { key: "lung", label: "폐", q: "-600,1500" },
@@ -96,14 +108,20 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       setSeries(imgSeries);
       if (imgSeries[0]) {
         setSelSeries(imgSeries[0].series_uid);
+        // ② AI 추천 W/L 자동 적용(수동 변경 가능). modality 누락 시 시리즈에서 폴백
+        const mod = detail.modality || imgSeries[0].modality;
+        const bp = detail.body_part || detail.study_desc;
+        const ai = autoWL(mod, bp);
         setPanes((prev) => {
           const next = { ...prev };
           PANE_IDS.forEach((pid, i) => {
             const s = imgSeries[Math.min(i, imgSeries.length - 1)];
-            next[pid] = { ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) };
+            next[pid] = { ...initPane(detail.study_uid), series: s,
+                          index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" };
           });
           return next;
         });
+        if (ai) setStatus(`AI 추천 W/L 적용: ${ai.label} (2D 섹션에서 변경 가능)`);
       }
     }).catch(() => setStatus("시리즈 조회 실패"));
     api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => {});
@@ -119,7 +137,17 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       setPriorTrees((p) => ({ ...p, [examId]: tree }));
     }
     const s = tree.series[0];
-    if (s) patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+    if (!s) return;
+    // ④ 변화강조 비교 동선: 1x1이면 자동 1x2 전환, 현재=좌(p0)·과거=우(p1), Link 동기 on
+    if (LAYOUTS[layout].count === 1) {
+      setLayout("1x2");
+      patch("p1", { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+      setActivePane("p1");
+    } else {
+      patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+    }
+    setSyncScroll(true);
+    setStatus("비교 모드: 과거검사 로드 + 동기 스크롤 ON");
   };
 
   const step = useCallback((pid: string, dir: number) => {
