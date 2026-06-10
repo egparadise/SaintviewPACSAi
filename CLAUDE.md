@@ -94,7 +94,8 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
 - [x] 하네스: `harness/smoke_dicom_pipeline.py` **SMOKE PASS**(DICOM→Orthanc→QIDO→Postgres 동기화→AI 초안), `harness/eval_rag.py` **EVAL PASS**(스키마 5/5·critical 2/2·PHI 1/1)
 - [x] 프론트엔드: Vite+React+TS, 디자인 토큰(theme.css), 로그인+워크리스트(필터바·StudyGrid·Related Exams·AI 리포트 패널·확정 흐름). 빌드 통과
 - [x] **2차 구현 완료(2026-06-11)**: OHIF 뷰어 통합(compose `ohif` 서비스 + nginx `/dicom-web` 프록시, View&Draft 더블클릭/버튼 연동) · Orthanc 자동 동기화 워커(변경 피드 폴링, seq 영속화) · Alembic 초기 마이그레이션(`bc8a938bfda7`, 신규 DB 검증) · **PDF 출력**(한글 CID 폰트, 사이트 템플릿 `pdf.template`, AI 초안 경고) · **F-22 일괄 검토**(critical 자동 제외 + batch-finalize + 모달). **pytest 20/20**
-- [ ] 남은 것: live AI 모드 검증(ANTHROPIC_API_KEY 미보유로 스킵 — 키 설정 후 `SAINTVIEW_AI_MODE=live`), DICOM SR 출력(P1 후반), 행잉 프로토콜·GSPS(F-16/F-18), 사용자 설정 화면
+- [x] **live AI 모드 검증 완료(2026-06-11)**: `claude-opus-4-8` 실호출 — 구조화 출력 100% 유효, prior UID 반영(프롬프트 보정 1fa52e2), **환각 억제 확인**(근거 없는 케이스에서 "자료 부족, 재판독 필요"로 응답). 서버 전구간 E2E(업로드→자동 감지→live 초안) PASS. 비용 ≈ \$0.02/건, 11~23s. 키는 `backend/.env`(gitignore) — **절대 커밋 금지**
+- [ ] 남은 것: DICOM SR 출력(P1 후반), 행잉 프로토콜·GSPS(F-16/F-18), 사용자 설정 화면, 키이미지 vision 분석(F-11, P2)
 - 실행: `docker compose -f deploy/docker-compose.yml up -d` (db+orthanc+**OHIF:3000**) → `cd backend && py -3.11 -m uvicorn app.main:app` → `cd frontend && npm run dev` (admin/admin1234, 운영 전 변경). DB 스키마는 `alembic upgrade head`
 
 ---
