@@ -23,7 +23,8 @@ let initialized = false;
 export async function ensureCornerstone() {
   if (initialized) return;
   await csInit();
-  dicomImageLoaderInit();
+  // vite dev에서 디코드 워커 무음 정지 이슈 → 메인스레드 디코드(소량 스택엔 충분)
+  dicomImageLoaderInit({ maxWebWorkers: 0 });
   toolsInit();
   for (const T of [
     WindowLevelTool, PanTool, ZoomTool, StackScrollTool, MagnifyTool,

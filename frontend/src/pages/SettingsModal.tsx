@@ -26,6 +26,14 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [hangingCT, setHangingCT] = useState("default");
   const [hangingMR, setHangingMR] = useState("default");
+  // Viewer2D 레이아웃(요청 2·4·5)
+  const [paletteSide, setPaletteSide] = useState<"left" | "top">("left");
+  const [thumbSide, setThumbSide] = useState<"left" | "bottom">("left");
+  const [thumbSize, setThumbSize] = useState(84);
+  const [thumbMode, setThumbMode] = useState<"series" | "all">("series");
+  const [h2dCT, setH2dCT] = useState("1x1");
+  const [h2dMR, setH2dMR] = useState("1x2");
+  const [reportDock, setReportDock] = useState(true);
   const [hospital, setHospital] = useState("");
   const [department, setDepartment] = useState("");
   const [footer, setFooter] = useState("");
@@ -48,9 +56,21 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (v.dbl_action) setDblAction(v.dbl_action);
     }).catch(() => {});
     api.getSetting("viewer.prefs").then((r) => {
-      const h = (r.value as { hanging?: Record<string, string> }).hanging ?? {};
+      const v = r.value as {
+        hanging?: Record<string, string>; hanging2d?: Record<string, string>;
+        paletteSide?: "left" | "top"; thumbSide?: "left" | "bottom";
+        thumbSize?: number; thumbMode?: "series" | "all"; reportDock?: boolean;
+      };
+      const h = v.hanging ?? {};
       setHangingCT(h.CT ?? "default");
       setHangingMR(h.MR ?? "default");
+      if (v.paletteSide) setPaletteSide(v.paletteSide);
+      if (v.thumbSide) setThumbSide(v.thumbSide);
+      if (v.thumbSize) setThumbSize(v.thumbSize);
+      if (v.thumbMode) setThumbMode(v.thumbMode);
+      if (v.hanging2d?.CT) setH2dCT(v.hanging2d.CT);
+      if (v.hanging2d?.MR) setH2dMR(v.hanging2d.MR);
+      if (v.reportDock !== undefined) setReportDock(v.reportDock);
     }).catch(() => {});
     api.getSetting("report.phrases").then((r) => {
       setPhraseCount(((r.value as { items?: unknown[] }).items ?? []).length);
@@ -78,7 +98,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     await api.putSetting("worklist.prefs",
       { auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
         find_fields: findFields, dbl_action: dblAction }, "user");
-    await api.putSetting("viewer.prefs", { hanging: { CT: hangingCT, MR: hangingMR } }, "user");
+    await api.putSetting("viewer.prefs", {
+      hanging: { CT: hangingCT, MR: hangingMR },
+      hanging2d: { CT: h2dCT, MR: h2dMR },
+      paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
+    }, "user");
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
       await api.putSetting("ai.policy", { auto_generate: autoGenerate, vision }, "global");
@@ -217,10 +241,48 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </select>
                   </Row>
                 ))}
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  내장 3D 뷰어(MPR/MIP)는 워크리스트 [3D] 버튼으로 항상 사용 가능.
-                </div>
               </Group>
+            )}
+            {page === "viewer" && (
+              <>
+                <Group title="자체 2D 뷰어 레이아웃 (요청: 방향·크기 전환)">
+                  <Row label="툴 팔레트 위치">
+                    <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top")}>
+                      <option value="left">세로 (좌측)</option><option value="top">가로 (상단)</option>
+                    </select>
+                  </Row>
+                  <Row label="썸네일 위치">
+                    <select value={thumbSide} onChange={(e) => setThumbSide(e.target.value as "left" | "bottom")}>
+                      <option value="left">세로 (좌측)</option><option value="bottom">가로 (하단)</option>
+                    </select>
+                  </Row>
+                  <Row label="썸네일 크기">
+                    <input type="range" min={56} max={140} step={4} value={thumbSize}
+                           onChange={(e) => setThumbSize(Number(e.target.value))} /> {thumbSize}px
+                  </Row>
+                  <Row label="썸네일 모드">
+                    <select value={thumbMode} onChange={(e) => setThumbMode(e.target.value as "series" | "all")}>
+                      <option value="series">시리즈 (선택 시 개별 전개)</option>
+                      <option value="all">전체 이미지 나열</option>
+                    </select>
+                  </Row>
+                  <Row label="판독창 도크">
+                    <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
+                      <input type="checkbox" checked={reportDock} onChange={(e) => setReportDock(e.target.checked)} />
+                      뷰어 우측에 리포트·과거검사 표시
+                    </label>
+                  </Row>
+                </Group>
+                <Group title="2D 행잉 (모달리티 → 분할)">
+                  {([["CT", h2dCT, setH2dCT], ["MR", h2dMR, setH2dMR]] as const).map(([m, v, set]) => (
+                    <Row key={m} label={m}>
+                      <select value={v} onChange={(e) => set(e.target.value)}>
+                        <option value="1x1">1 X 1</option><option value="1x2">1 X 2</option><option value="2x2">2 X 2</option>
+                      </select>
+                    </Row>
+                  ))}
+                </Group>
+              </>
             )}
 
             {page === "pdf" && isAdmin && (
