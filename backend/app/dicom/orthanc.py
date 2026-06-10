@@ -47,6 +47,41 @@ class OrthancClient:
         r.raise_for_status()
         return r.json()
 
+    def study_instances(self, orthanc_study_id: str) -> list[dict]:
+        """검사 인스턴스 목록 — 키이미지 선택 UI용(F-16)."""
+        r = self._client.get(f"/studies/{orthanc_study_id}/instances")
+        r.raise_for_status()
+        out = []
+        for inst in r.json():
+            tags = inst.get("MainDicomTags", {})
+            out.append({
+                "orthanc_id": inst["ID"],
+                "sop_uid": tags.get("SOPInstanceUID", ""),
+                "instance_number": int(tags.get("InstanceNumber") or 0),
+            })
+        out.sort(key=lambda x: x["instance_number"])
+        return out
+
+    def instance_meta(self, orthanc_instance_id: str) -> dict:
+        """SOPClassUID·SeriesUID 등 — KOS 참조 무결성용."""
+        r = self._client.get(f"/instances/{orthanc_instance_id}/tags?simplify")
+        r.raise_for_status()
+        t = r.json()
+        return {
+            "sop_class_uid": t.get("SOPClassUID", ""),
+            "series_uid": t.get("SeriesInstanceUID", ""),
+        }
+
+    def instance_preview_png(self, orthanc_instance_id: str) -> bytes | None:
+        try:
+            r = self._client.get(
+                f"/instances/{orthanc_instance_id}/preview", headers={"Accept": "image/png"}
+            )
+            r.raise_for_status()
+            return r.content
+        except httpx.HTTPError:
+            return None
+
     def study_preview_png(self, orthanc_study_id: str) -> bytes | None:
         """검사 대표(중간) 인스턴스의 렌더링 PNG — vision 분석용(F-11).
 

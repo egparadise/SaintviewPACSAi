@@ -12,8 +12,23 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [vision, setVision] = useState(false);
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [saved, setSaved] = useState("");
+  // 사용자 환경설정 (화면분석 §5.4/§5.5)
+  const [refreshSec, setRefreshSec] = useState(10);
+  const [defaultStatus, setDefaultStatus] = useState("");
+  const [hangingCT, setHangingCT] = useState("default");
+  const [hangingMR, setHangingMR] = useState("default");
 
   useEffect(() => {
+    api.getSetting("worklist.prefs").then((r) => {
+      const v = r.value as { auto_refresh_sec?: number; default_status?: string };
+      if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
+      setDefaultStatus(v.default_status ?? "");
+    }).catch(() => {});
+    api.getSetting("viewer.prefs").then((r) => {
+      const h = (r.value as { hanging?: Record<string, string> }).hanging ?? {};
+      setHangingCT(h.CT ?? "default");
+      setHangingMR(h.MR ?? "default");
+    }).catch(() => {});
     if (!isAdmin) return;
     api.getSetting("pdf.template").then((r) => {
       const v = r.value as Record<string, string>;
@@ -30,12 +45,22 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   }, [isAdmin]);
 
   const save = async () => {
+    await api.putSetting(
+      "worklist.prefs",
+      { auto_refresh_sec: refreshSec, default_status: defaultStatus },
+      "user",
+    );
+    await api.putSetting(
+      "viewer.prefs",
+      { hanging: { CT: hangingCT, MR: hangingMR } },
+      "user",
+    );
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
       await api.putSetting("ai.policy", { auto_generate: autoGenerate, vision }, "global");
     }
-    setSaved("저장되었습니다");
-    setTimeout(onClose, 600);
+    setSaved("저장되었습니다 — 새로고침 시 적용");
+    setTimeout(onClose, 800);
   };
 
   return (
@@ -52,6 +77,41 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <b>설정</b>
           <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
         </div>
+
+        <Section title="워크리스트 (사용자)">
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            자동 갱신
+            <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
+              <option value={0}>끔</option>
+              <option value={5}>5초</option>
+              <option value={10}>10초</option>
+              <option value={30}>30초</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            기본 상태 필터
+            <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
+              <option value="">전체</option>
+              <option value="draft_ready">AI초안</option>
+              <option value="reading">판독중</option>
+              <option value="received">도착</option>
+            </select>
+          </label>
+        </Section>
+
+        <Section title="뷰어 행잉 프로토콜 (F-18, 사용자)">
+          {([["CT", hangingCT, setHangingCT], ["MR", hangingMR, setHangingMR]] as const).map(
+            ([mod, val, set]) => (
+              <label key={mod} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                {mod}
+                <select value={val} onChange={(e) => set(e.target.value)}>
+                  <option value="default">기본 (스택)</option>
+                  <option value="mpr">MPR</option>
+                </select>
+              </label>
+            ),
+          )}
+        </Section>
 
         {isAdmin ? (
           <>
@@ -90,16 +150,12 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
               </Section>
             )}
           </>
-        ) : (
-          <div style={{ color: "var(--text-secondary)", fontSize: 12.5 }}>
-            사용자 환경 설정(기본 필터·뷰어)은 다음 버전에서 제공됩니다.
-          </div>
-        )}
+        ) : null}
 
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {saved && <span style={{ color: "var(--stat-final)", fontSize: 12 }}>{saved}</span>}
           <div style={{ flex: 1 }} />
-          {isAdmin && <button className="primary" onClick={save}>저장</button>}
+          <button className="primary" onClick={save}>저장</button>
         </div>
       </div>
     </div>

@@ -98,8 +98,17 @@ def export_report(
         patient = db.get(Patient, report.study.patient_id)
         payload = sr_bytes(build_sr_dataset(report=report, study=report.study, patient=patient))
         media, ext = "application/dicom", "dcm"
+    elif format == "fhir":
+        import json
+
+        from app.services.fhir_service import to_diagnostic_report
+
+        payload = json.dumps(to_diagnostic_report(db, report), ensure_ascii=False, indent=2).encode(
+            "utf-8"
+        )
+        media, ext = "application/fhir+json", "json"
     else:
-        raise HTTPException(status_code=400, detail="지원 형식: pdf | dicom-sr (FHIR는 P2)")
+        raise HTTPException(status_code=400, detail="지원 형식: pdf | dicom-sr | fhir")
     db.add(AuditLog(action="report_export", target_type="report", target_id=str(report_id),
                     detail={"by": user["sub"], "format": format}))
     db.commit()

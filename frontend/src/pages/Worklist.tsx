@@ -5,11 +5,24 @@ import {
   downloadReportPdf,
   openViewer,
   type BatchCandidate,
+  type InstanceThumb,
+  type KeyImage,
   type Report,
   type SrJson,
   type StudyDetail,
   type StudyRow,
 } from "../api";
+
+/** F-18: 모달리티별 행잉 매핑 (viewer.prefs.hanging) — 모듈 레벨 캐시 */
+let hangingMap: Record<string, string> = {};
+export function loadHangingPrefs() {
+  api.getSetting("viewer.prefs").then((r) => {
+    hangingMap = ((r.value as { hanging?: Record<string, string> }).hanging) ?? {};
+  }).catch(() => {});
+}
+function hpFor(modality: string): string | undefined {
+  return hangingMap[modality] ?? hangingMap.default;
+}
 
 const STATUS_LABEL: Record<string, string> = {
   received: "도착",
@@ -97,7 +110,7 @@ function StudyGrid({
               onClick={() => onSelect(row)}
               onDoubleClick={() => {
                 onSelect(row);
-                openViewer(row.study_uid); // View&Draft: 더블클릭 = 뷰어 + 초안 패널 (§3.1)
+                openViewer(row.study_uid, hpFor(row.modality)); // View&Draft (§3.1) + F-18 행잉
               }}
             >
               <td><StatusBadge status={row.status} /></td>
@@ -315,6 +328,85 @@ function RelatedExams({ detail }: { detail: StudyDetail }) {
   );
 }
 
+/* ── F-16: 키이미지 선택 (KOS) ────────────────────── */
+function KeyImagePicker({ studyId }: { studyId: number }) {
+  const [items, setItems] = useState<InstanceThumb[]>([]);
+  const [selected, setSelected] = useState<Map<string, KeyImage>>(new Map());
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    api.instances(studyId).then((r) => {
+      setItems(r.items);
+      setSelected(new Map(r.key_images.map((k) => [k.sop_uid, k])));
+    }).catch(() => setItems([]));
+  }, [studyId]);
+
+  if (items.length === 0) return null;
+
+  const toggle = (it: InstanceThumb) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(it.sop_uid)) next.delete(it.sop_uid);
+      else next.set(it.sop_uid, {
+        sop_uid: it.sop_uid, orthanc_id: it.orthanc_id, instance_number: it.instance_number,
+      });
+      return next;
+    });
+  };
+
+  const save = async (sendKos: boolean) => {
+    setBusy(true);
+    setMsg("");
+    try {
+      await api.setKeyImages(studyId, [...selected.values()]);
+      if (sendKos && selected.size > 0) {
+        await api.sendKos(studyId);
+        setMsg("KOS 전송 완료");
+      } else {
+        setMsg("저장됨");
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "실패");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 4, overflowX: "auto", padding: "4px 0" }}>
+        {items.slice(0, 24).map((it) => {
+          const on = selected.has(it.sop_uid);
+          return (
+            <img
+              key={it.sop_uid}
+              src={it.preview_url}
+              alt={`#${it.instance_number}`}
+              title={`Instance ${it.instance_number}${on ? " — 키이미지" : ""}`}
+              onClick={() => toggle(it)}
+              style={{
+                width: 64, height: 64, objectFit: "cover", cursor: "pointer",
+                borderRadius: 3, flexShrink: 0,
+                border: on ? "2px solid var(--anno-keyimage)" : "1px solid var(--border)",
+              }}
+            />
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+          {selected.size}장 선택{msg && ` · ${msg}`}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => save(false)} disabled={busy}>저장</button>
+        <button onClick={() => save(true)} disabled={busy || selected.size === 0}
+                title="키이미지를 DICOM KOS로 검사에 저장 (F-16)">
+          KOS 전송
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── F-22: AI 초안 일괄 검토 모달 (디자인 §3.3) ────── */
 function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [items, setItems] = useState<BatchCandidate[]>([]);
@@ -414,6 +506,17 @@ export function Worklist() {
   const [selected, setSelected] = useState<StudyDetail | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [refreshSec, setRefreshSec] = useState(10);
+
+  // 사용자 환경설정 로드 (worklist.prefs + viewer.prefs) — 화면분석 §5.4
+  useEffect(() => {
+    loadHangingPrefs();
+    api.getSetting("worklist.prefs").then((r) => {
+      const v = r.value as { auto_refresh_sec?: number; default_status?: string };
+      if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
+      if (v.default_status) setParams((p) => ({ ...p, status: v.default_status! }));
+    }).catch(() => {});
+  }, []);
 
   const search = useCallback((p: Record<string, string>) => {
     setParams(p);
@@ -426,11 +529,12 @@ export function Worklist() {
     }).catch(() => {});
   }, [params, refreshKey]);
 
-  // 자동 갱신 (화면분석 §5.4 Status Check → 10초 폴링)
+  // 자동 갱신 (화면분석 §5.4 Status Check — 주기는 사용자 설정, 0=끔)
   useEffect(() => {
-    const t = setInterval(() => setRefreshKey((k) => k + 1), 10000);
+    if (!refreshSec) return;
+    const t = setInterval(() => setRefreshKey((k) => k + 1), refreshSec * 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [refreshSec]);
 
   const onSelect = useCallback((row: StudyRow) => {
     api.study(row.id).then(setSelected);
@@ -481,13 +585,17 @@ export function Worklist() {
                   {selected.patient_key} · {selected.modality} · {selected.study_date}
                 </span>
               </div>
-              <button className="primary" onClick={() => openViewer(selected.study_uid)}>
+              <button className="primary" onClick={() => openViewer(selected.study_uid, hpFor(selected.modality))}>
                 뷰어 열기
               </button>
             </div>
             <div style={{ padding: "4px 10px" }}>
               <PanelTitle>Related Exams (F-14)</PanelTitle>
               <RelatedExams detail={selected} />
+            </div>
+            <div style={{ padding: "4px 10px", borderTop: "1px solid var(--border)" }}>
+              <PanelTitle>Key Images (F-16)</PanelTitle>
+              <KeyImagePicker studyId={selected.id} />
             </div>
             <div style={{ flex: 1, minHeight: 0, borderTop: "1px solid var(--border)" }}>
               <ReportPanel detail={selected} onChanged={onChanged} />

@@ -51,6 +51,11 @@ def generate_for_study(db: Session, study: Study) -> Report:
         try:
             if client.alive():
                 key_image = client.study_preview_png(study.orthanc_id)
+                if key_image:
+                    # P2 가드: 번인 PHI 관례 영역(상·하단) 마스킹 후 전송 (설계 §8.1)
+                    from app.rag.image_guard import mask_burn_in
+
+                    key_image = mask_burn_in(key_image)
         finally:
             client.close()
 

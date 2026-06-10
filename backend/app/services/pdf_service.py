@@ -151,6 +151,31 @@ def render_report_pdf(db: Session, report: Report) -> bytes:
     ]))
     story.append(st)
 
+    # F-16: 키이미지 첨부 (Orthanc 가용 시)
+    key_images = study.key_images or []
+    if key_images:
+        try:
+            from reportlab.platypus import Image as RLImage
+
+            from app.dicom.orthanc import OrthancClient
+
+            client = OrthancClient()
+            try:
+                if client.alive():
+                    imgs = []
+                    for ki in key_images[:4]:  # 최대 4장
+                        png = client.instance_preview_png(ki.get("orthanc_id", ""))
+                        if png:
+                            imgs.append(RLImage(io.BytesIO(png), width=55 * mm, height=55 * mm))
+                    if imgs:
+                        story.append(Spacer(1, 4 * mm))
+                        _section("Key Images")
+                        story.append(Table([imgs], colWidths=[58 * mm] * len(imgs)))
+            finally:
+                client.close()
+        except Exception:
+            pass  # 키이미지 첨부 실패가 PDF 발행을 막지 않는다
+
     # AI 초안 경고 (절대 규칙 2 — 미확정이면 명시)
     if report.status != "finalized":
         story.append(Spacer(1, 4 * mm))

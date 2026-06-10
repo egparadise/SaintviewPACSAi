@@ -2,9 +2,16 @@
 const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 const OHIF_BASE = import.meta.env.VITE_OHIF_BASE ?? "http://localhost:3000";
 
-/** View&Draft 동선: OHIF 뷰어를 해당 검사로 오픈 (디자인 §3.1 [A]) */
-export function openViewer(studyUid: string) {
-  window.open(`${OHIF_BASE}/viewer?StudyInstanceUIDs=${encodeURIComponent(studyUid)}`, "_blank");
+/** View&Draft 동선: OHIF 뷰어를 해당 검사로 오픈 (디자인 §3.1 [A]).
+ *  F-18: hangingProtocolId — 모달리티별 매핑(viewer.prefs.hanging)을 호출부에서 전달 */
+export function openViewer(studyUid: string, hangingProtocolId?: string) {
+  const hp = hangingProtocolId && hangingProtocolId !== "default"
+    ? `&hangingProtocolId=${encodeURIComponent(hangingProtocolId)}`
+    : "";
+  window.open(
+    `${OHIF_BASE}/viewer?StudyInstanceUIDs=${encodeURIComponent(studyUid)}${hp}`,
+    "_blank",
+  );
 }
 
 let token: string | null = sessionStorage.getItem("sv_token");
@@ -136,7 +143,28 @@ export const api = {
       body: JSON.stringify({ value, scope }),
     }),
   aiQuality: () => req<AiQuality>("/api/admin/ai-quality"),
+  instances: (studyId: number) =>
+    req<{ items: InstanceThumb[]; key_images: KeyImage[] }>(`/api/studies/${studyId}/instances`),
+  setKeyImages: (studyId: number, items: KeyImage[]) =>
+    req<{ ok: boolean }>(`/api/studies/${studyId}/key-images`, {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    }),
+  sendKos: (studyId: number) =>
+    req<{ ok: boolean }>(`/api/studies/${studyId}/send-kos`, { method: "POST" }),
 };
+
+export interface InstanceThumb {
+  orthanc_id: string;
+  sop_uid: string;
+  instance_number: number;
+  preview_url: string;
+}
+export interface KeyImage {
+  sop_uid: string;
+  orthanc_id: string;
+  instance_number: number;
+}
 
 export interface AiQuality {
   finalized_total: number;

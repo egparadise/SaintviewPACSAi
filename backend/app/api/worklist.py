@@ -65,3 +65,85 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     job = queue_ai_job(db, study, kind="regenerate")
     return {"job_id": job.id, "status": job.status}
+
+
+@router.get("/studies/{study_id}/instances")
+def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """인스턴스 목록 + 썸네일 URL — 키이미지 선택 UI (F-16)."""
+    from app.config import get_settings
+    from app.dicom.orthanc import OrthancClient
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not study.orthanc_id:
+        return {"items": [], "key_images": study.key_images or []}
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            return {"items": [], "key_images": study.key_images or []}
+        items = client.study_instances(study.orthanc_id)
+    finally:
+        client.close()
+    base = get_settings().orthanc_url
+    for it in items:
+        it["preview_url"] = f"{base}/instances/{it['orthanc_id']}/preview"
+    return {"items": items, "key_images": study.key_images or []}
+
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class KeyImagesBody(BaseModel):
+    items: list[dict]  # [{"sop_uid","orthanc_id","instance_number"}]
+
+
+@router.put("/studies/{study_id}/key-images")
+def set_key_images(
+    study_id: int, body: KeyImagesBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    from app.models import AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    study.key_images = body.items
+    db.add(AuditLog(action="key_images_set", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "count": len(body.items)}))
+    db.commit()
+    return {"ok": True, "count": len(body.items)}
+
+
+@router.post("/studies/{study_id}/send-kos")
+def send_kos(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """키이미지 선택을 KOS 표준 객체로 Orthanc에 저장 (F-16)."""
+    import io
+
+    from app.dicom.kos import build_kos_dataset
+    from app.dicom.orthanc import OrthancClient
+    from app.models import AuditLog, Patient
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not study.key_images:
+        raise HTTPException(status_code=409, detail="선택된 키이미지가 없습니다")
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            raise HTTPException(status_code=503, detail="Orthanc에 연결할 수 없습니다")
+        enriched = []
+        for ki in study.key_images:
+            meta = client.instance_meta(ki["orthanc_id"]) if ki.get("orthanc_id") else {}
+            enriched.append({**ki, **meta})
+        patient = db.get(Patient, study.patient_id)
+        ds = build_kos_dataset(study=study, patient=patient, key_images=enriched, creator=user["sub"])
+        buf = io.BytesIO()
+        ds.save_as(buf, write_like_original=False)
+        result = client.upload_dicom(buf.getvalue())
+        db.add(AuditLog(action="send_kos", target_type="study", target_id=str(study_id),
+                        detail={"by": user["sub"], "orthanc": result.get("ID", "")}))
+        db.commit()
+        return {"ok": True, "sop_instance_uid": ds.SOPInstanceUID}
+    finally:
+        client.close()

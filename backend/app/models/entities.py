@@ -70,6 +70,8 @@ class Study(Base):
         String(16), default="received", index=True
     )  # received | draft_ready | reading | finalized
     emergency: Mapped[bool] = mapped_column(Boolean, default=False)  # F-15
+    # F-16: 키이미지 선택 [{"sop_uid", "orthanc_id", "instance_number"}]
+    key_images: Mapped[list] = mapped_column(JSON, default=list)
     series_count: Mapped[int] = mapped_column(Integer, default=0)
     instance_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
