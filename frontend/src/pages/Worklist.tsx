@@ -39,6 +39,7 @@ function hpFor(modality: string): string | undefined {
 
 const STATUS_LABEL: Record<string, string> = {
   received: "도착", draft_ready: "AI초안", reading: "판독중", finalized: "확정",
+  suspended: "보류", draft: "초안", in_review: "검토중",
 };
 function StatusBadge({ status }: { status: string }) {
   return <span className={`badge ${status}`}>{STATUS_LABEL[status] ?? status}</span>;
@@ -112,8 +113,23 @@ function ActionToolbar({
       <Btn a="batch" label="일괄 검토" title="AI 초안 일괄 검토 (F-22)" />
       <Btn a="refresh" label="새로고침" />
       <div style={{ flex: 1 }} />
+      {/* 07 A.2 SearchShortcut: 검색 바로가기 저장/적용 */}
+      <select title="검색 바로가기" defaultValue="" onChange={(e) => {
+        const sc = JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]")
+          .find((s: { label: string }) => s.label === e.target.value);
+        if (sc) window.dispatchEvent(new CustomEvent("sv-apply-shortcut", { detail: sc }));
+        e.target.value = "";
+      }}>
+        <option value="">바로가기…</option>
+        {JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]").map((s: { label: string }) => (
+          <option key={s.label} value={s.label}>{s.label}</option>
+        ))}
+      </select>
+      <button title="현재 검색조건을 바로가기로 저장" onClick={() => {
+        window.dispatchEvent(new CustomEvent("sv-save-shortcut"));
+      }}>★저장</button>
       <input
-        placeholder="SEARCH — 환자 ID/이름" value={searchText}
+        placeholder="SEARCH — 환자 ID/이름 (=정확 / 접두% / !제외)" value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && onSearch()}
         style={{ width: 280, background: "var(--bg-canvas)" }}
@@ -589,7 +605,8 @@ function ReportPanel({ detail, onChanged, insertRef }: {
               <th>Reporter</th>
               <td colSpan={5}>
                 Dictator: {current?.created_by === "ai" ? `AI(${current.ai_model})` : current?.created_by ?? "-"} ·
-                Reader: {current?.reviewed_by || "-"} · Conf1: {finalized ? current?.reviewed_by : "-"} · Conf2: -
+                Reader: {current?.reviewed_by || "-"} · Conf1: {finalized ? current?.reviewed_by : "-"} ·
+                Conf2: {(current?.diff_metrics as { confirm2?: { by: string } })?.confirm2?.by ?? "-"}
               </td>
               <th>확정일</th>
               <td>{current?.finalized_at ? current.finalized_at.slice(0, 10) : "-"}</td>
@@ -643,6 +660,16 @@ function ReportPanel({ detail, onChanged, insertRef }: {
             <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
               <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
               <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
+              {!finalized && (
+                <MiniBtn title="판독 보류(Suspend) — 토글" onClick={async () => {
+                  await api.suspendReport(current.id); onChanged();
+                }}>{current.status === "suspended" ? "보류 해제" : "보류"}</MiniBtn>
+              )}
+              {finalized && !(current.diff_metrics as { confirm2?: unknown })?.confirm2 && (
+                <MiniBtn title="2차 승인(Conf2) — 1차와 다른 판독의 권장" onClick={async () => {
+                  await api.confirm2Report(current.id); onChanged();
+                }}>2차 승인</MiniBtn>
+              )}
               {finalized && (
                 <MiniBtn onClick={async () => { setBusy(true); try { await api.sendSr(current.id); alert("DICOM SR 전송 완료"); } finally { setBusy(false); } }}>
                   SR 전송
@@ -847,8 +874,33 @@ export function Worklist() {
     // ETC 섹션의 3D 버튼(Viewer2D 내부) → 3D 뷰어 전환
     const h = (e: Event) => setViewer3dUid((e as CustomEvent).detail as string);
     window.addEventListener("sv-open-3d", h);
-    return () => window.removeEventListener("sv-open-3d", h);
+    // 07 A.2 SearchShortcut 저장/적용
+    const onSave = () => {
+      const label = prompt("바로가기 이름 (예: 오늘 CT 미판독)");
+      if (!label) return;
+      const list = JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]")
+        .filter((s: { label: string }) => s.label !== label);
+      list.push({ label, filters: filtersRef.current, searchText: searchRef.current });
+      localStorage.setItem("sv_shortcuts", JSON.stringify(list));
+      alert(`'${label}' 저장됨`);
+    };
+    const onApply = (e: Event) => {
+      const sc = (e as CustomEvent).detail as { filters: Record<string, string>; searchText: string };
+      setFilters(sc.filters ?? {});
+      setSearchText(sc.searchText ?? "");
+      setRefreshKey((k) => k + 1);
+    };
+    window.addEventListener("sv-save-shortcut", onSave);
+    window.addEventListener("sv-apply-shortcut", onApply);
+    return () => {
+      window.removeEventListener("sv-open-3d", h);
+      window.removeEventListener("sv-save-shortcut", onSave);
+      window.removeEventListener("sv-apply-shortcut", onApply);
+    };
   }, []);
+  const filtersRef = useRef(filters);
+  const searchRef = useRef(searchText);
+  useEffect(() => { filtersRef.current = filters; searchRef.current = searchText; }, [filters, searchText]);
 
   // 판독 단축키(UBPACS-Z §5): Enter=View&Draft, B=일괄검토, E=Emergency, F5=새로고침
   useEffect(() => {

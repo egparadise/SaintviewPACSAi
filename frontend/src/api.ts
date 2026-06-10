@@ -134,6 +134,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ report_ids }),
     }),
+  suspendReport: (id: number) =>
+    req<Report>(`/api/reports/${id}/suspend`, { method: "POST" }),
+  confirm2Report: (id: number) =>
+    req<Report>(`/api/reports/${id}/confirm2`, { method: "POST" }),
   sendSr: (reportId: number) =>
     req<{ ok: boolean; sop_instance_uid: string }>(`/api/reports/${reportId}/send-sr`, {
       method: "POST",

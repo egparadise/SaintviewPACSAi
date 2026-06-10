@@ -72,6 +72,46 @@ def finalize(report_id: int, db: Session = Depends(get_db), user: dict = Depends
     return _report_out(report)
 
 
+@router.post("/reports/{report_id}/suspend")
+def suspend(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """판독 보류(07 A.5 suspended — UBPACS Suspend): 확정 전 상태 유지·후순위 표시."""
+    from app.models import AuditLog
+
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+    if report.status == "finalized":
+        raise HTTPException(status_code=409, detail="확정된 판독은 보류할 수 없습니다")
+    report.status = "suspended" if report.status != "suspended" else "in_review"
+    report.study.status = "reading"
+    db.add(AuditLog(action="report_suspend", target_type="report", target_id=str(report_id),
+                    detail={"by": user["sub"], "to": report.status}))
+    db.commit()
+    return _report_out(report)
+
+
+@router.post("/reports/{report_id}/confirm2")
+def confirm2(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """F-17 2차 승인(Conf2): 확정본에 2차 확인자 기록. 1차 확정자와 동일 계정이면 경고만."""
+    from datetime import datetime, timezone
+
+    from app.models import AuditLog
+
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+    if report.status != "finalized":
+        raise HTTPException(status_code=409, detail="확정된 판독만 2차 승인할 수 있습니다")
+    dm = dict(report.diff_metrics or {})
+    dm["confirm2"] = {"by": user["sub"], "at": datetime.now(timezone.utc).isoformat(),
+                      "same_as_reader": user["sub"] == report.reviewed_by}
+    report.diff_metrics = dm
+    db.add(AuditLog(action="report_confirm2", target_type="report", target_id=str(report_id),
+                    detail=dm["confirm2"]))
+    db.commit()
+    return _report_out(report)
+
+
 @router.get("/reports/{report_id}/export")
 def export_report(
     report_id: int,

@@ -27,6 +27,18 @@ class WorklistFilter:
     offset: int = 0
 
 
+def _op_clause(col, raw: str):
+    """07 A.2 검색 연산자: '=K' 정확 / 'K%' 접두 / '!K' 제외 / 기본 포함(%K%)."""
+    v = raw.strip()
+    if v.startswith("="):
+        return col == v[1:]
+    if v.startswith("!"):
+        return ~col.like(f"%{v[1:]}%")
+    if v.endswith("%") and not v.startswith("%"):
+        return col.like(v)
+    return col.like(f"%{v}%")
+
+
 def get_or_create_patient(db: Session, patient_key: str, name: str, birth: str, sex: str) -> Patient:
     p = db.execute(select(Patient).where(Patient.patient_key == patient_key)).scalar_one_or_none()
     if p:
@@ -100,13 +112,13 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         like = f"%{f.patient_query}%"
         q = q.where(or_(Patient.patient_key.like(like), Patient.name_masked.like(like)))
     if f.patient_id:
-        q = q.where(Patient.patient_key.like(f"%{f.patient_id}%"))
+        q = q.where(_op_clause(Patient.patient_key, f.patient_id))
     if f.patient_name:
-        q = q.where(Patient.name_masked.like(f"%{f.patient_name}%"))
+        q = q.where(_op_clause(Patient.name_masked, f.patient_name))
     if f.sex:
         q = q.where(Patient.sex == f.sex)
     if f.study_desc:
-        q = q.where(Study.study_desc.like(f"%{f.study_desc}%"))
+        q = q.where(_op_clause(Study.study_desc, f.study_desc))
     if f.modality:
         q = q.where(Study.modality == f.modality)
     if f.body_part:
