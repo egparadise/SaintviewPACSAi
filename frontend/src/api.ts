@@ -14,12 +14,14 @@ export function openViewer(studyUid: string, hangingProtocolId?: string) {
   );
 }
 
-let token: string | null = sessionStorage.getItem("sv_token");
+// 자동 로그인(UBPACS-Z §1): remember=localStorage, 아니면 sessionStorage
+let token: string | null = localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
 
-export function setToken(t: string | null) {
+export function setToken(t: string | null, remember = false) {
   token = t;
-  if (t) sessionStorage.setItem("sv_token", t);
-  else sessionStorage.removeItem("sv_token");
+  sessionStorage.removeItem("sv_token");
+  localStorage.removeItem("sv_token");
+  if (t) (remember ? localStorage : sessionStorage).setItem("sv_token", t);
 }
 
 export function hasToken() {
@@ -229,7 +231,7 @@ export interface BatchCandidate {
 /** PDF 다운로드 — 인증 헤더가 필요하므로 fetch→blob 방식 */
 export async function downloadReportPdf(reportId: number) {
   const res = await fetch(`${BASE}/api/reports/${reportId}/export?format=pdf`, {
-    headers: { Authorization: `Bearer ${sessionStorage.getItem("sv_token")}` },
+    headers: { Authorization: `Bearer ${localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token")}` },
   });
   if (!res.ok) throw new Error("PDF 생성 실패");
   const blob = await res.blob();

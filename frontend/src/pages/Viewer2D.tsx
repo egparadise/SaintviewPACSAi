@@ -136,6 +136,33 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
     });
   }, [syncScroll, layout]);
 
+  /* 뷰어 단축키: ←→=이미지, I=반전, R=회전, F=Fit, L=Link, 1/2/4=분할, Space=Cine, Esc=닫기 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      switch (e.key) {
+        case "ArrowRight": case "ArrowDown": e.preventDefault(); step(activePane, 1); break;
+        case "ArrowLeft": case "ArrowUp": e.preventDefault(); step(activePane, -1); break;
+        case "Escape": onClose(); break;
+        case " ": e.preventDefault(); act("cine"); break;
+        case "1": setLayout("1x1"); break;
+        case "2": setLayout("1x2"); break;
+        case "4": setLayout("2x2"); break;
+        default:
+          switch (e.key.toLowerCase()) {
+            case "i": act("invert"); break;
+            case "r": act("rotR"); break;
+            case "f": act("fit"); break;
+            case "l": setSyncScroll((s) => !s); break;
+          }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePane, step]);
+
   /* 마우스 상호작용 */
   const dragRef = useRef<{ pid: string; x: number; y: number; btn: number } | null>(null);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {

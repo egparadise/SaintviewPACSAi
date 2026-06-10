@@ -152,6 +152,12 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                       <option value="reading">판독중</option><option value="received">도착</option>
                     </select>
                   </Row>
+                  <Row label="단축키">
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                      워크리스트: Enter=View&Draft · B=일괄검토 · E=Emergency │
+                      뷰어: ←→ 이미지 · I 반전 · R 회전 · F Fit · L Link · 1/2/4 분할 · Space Cine · Esc 닫기
+                    </span>
+                  </Row>
                   <Row label="더블클릭 동작">
                     <select value={dblAction} onChange={(e) => setDblAction(e.target.value as "viewer2d" | "ohif")}>
                       <option value="viewer2d">자체 뷰어 (View&Draft)</option>

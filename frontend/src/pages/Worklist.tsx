@@ -737,6 +737,8 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
     const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
   const confirm = async () => {
+    // 03b 가드레일: 대량 확정 = 파괴적 액션 — 대상·건수 명시 후 사용자 확인 강제
+    if (!window.confirm(`AI 초안 ${checked.size}건을 일괄 확정(서명)합니다.\n확정 후에는 수정할 수 없습니다. 진행할까요?`)) return;
     setBusy(true);
     try { const r = await api.batchFinalize([...checked]); setResult(`${r.finalized}/${r.total}건 확정`); onDone(); }
     finally { setBusy(false); }
@@ -820,6 +822,21 @@ export function Worklist() {
     window.addEventListener("sv-open-3d", h);
     return () => window.removeEventListener("sv-open-3d", h);
   }, []);
+
+  // 판독 단축키(UBPACS-Z §5): Enter=View&Draft, B=일괄검토, E=Emergency, F5=새로고침
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (viewer2dDetail || viewer3dUid || batchOpen) return; // 모달/뷰어 우선
+      if (e.key === "Enter" && selected) { e.preventDefault(); void doAction("viewdraft"); }
+      else if (e.key.toLowerCase() === "b") setBatchOpen(true);
+      else if (e.key.toLowerCase() === "e" && selected) void doAction("emergency");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, viewer2dDetail, viewer3dUid, batchOpen]);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };

@@ -8,13 +8,15 @@ import { SettingsModal } from "./pages/SettingsModal";
 function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(localStorage.getItem("sv_remember") === "1");
   const [error, setError] = useState("");
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const r = await api.login(username, password);
-      setToken(r.token);
+      setToken(r.token, remember);
+      localStorage.setItem("sv_remember", remember ? "1" : "0");
       onLogin(r.username, r.role);
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인 실패");
@@ -39,6 +41,10 @@ function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
           placeholder="비밀번호" type="password" value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          자동 로그인 (이 PC에 유지)
+        </label>
         {error && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{error}</div>}
         <button className="primary" type="submit">로그인</button>
       </form>
@@ -50,8 +56,8 @@ export default function App() {
   const [user, setUser] = useState<{ name: string; role: string } | null>(
     hasToken()
       ? {
-          name: sessionStorage.getItem("sv_user") ?? "",
-          role: sessionStorage.getItem("sv_role") ?? "",
+          name: localStorage.getItem("sv_user") ?? sessionStorage.getItem("sv_user") ?? "",
+          role: localStorage.getItem("sv_role") ?? sessionStorage.getItem("sv_role") ?? "",
         }
       : null,
   );
@@ -61,8 +67,8 @@ export default function App() {
     return (
       <Login
         onLogin={(name, role) => {
-          sessionStorage.setItem("sv_user", name);
-          sessionStorage.setItem("sv_role", role);
+          localStorage.setItem("sv_user", name);
+          localStorage.setItem("sv_role", role);
           setUser({ name, role });
         }}
       />

@@ -18,6 +18,7 @@
 | 첫 산출물 | 설계 문서 → 검토 후 MVP 구현 | 2026-06-10 | |
 | 기능 벤치마크 | **INFINITT PiViewSTAR/RapidiaMPR 정밀 분석** 채택 | 2026-06-11 | `docs/ANALYSIS_INFINITT_PiViewSTAR_분석.md` — 기능 갭 G-1~G-12를 §2.1에 반영 |
 | **화면 디자인** | **차세대 PACS 레퍼런스 디자인 채택** | 2026-06-11 | `docs/UI_DESIGN_Saintview_화면디자인.md` — 다크 토큰·워크리스트 5구역·검사 탭+도구 팔레트 뷰어. PiViewSTAR 기능 × 레퍼런스 디자인 결합 |
+| **신규 기획문서 채택** | PACS_AI 개발문서(01~06)+UBPACS-Z 지침을 보완 명세로 채택 | 2026-06-11 | `docs/ANALYSIS_신규기획문서_갭분석.md` — 03b 훅 5대 정책은 필수 게이트, 05 Mode Profile은 차별화 로드맵(대), UBPACS-Z UX 체크리스트 순차 반영 |
 
 **미결정 확정(2026-06-11):**
 | ID | 결정 | 비고 |
