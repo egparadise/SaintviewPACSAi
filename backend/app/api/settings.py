@@ -14,8 +14,9 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 ALLOWED_KEYS = {
     "pdf.template",          # 기관/부서/푸터 (관리자)
     "ai.policy",             # 자동생성·vision 토글 (관리자)
-    "worklist.prefs",        # 사용자 기본 필터·자동갱신 주기
-    "viewer.prefs",          # 사용자 뷰어 환경
+    "worklist.prefs",        # 사용자 기본 필터·자동갱신·컬럼 구성(F-8)
+    "viewer.prefs",          # 사용자 뷰어 환경(행잉·오버레이)
+    "report.phrases",        # 상용구 사전 (화면분석 §5.6 Predefined Readings)
 }
 
 

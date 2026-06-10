@@ -57,6 +57,36 @@ def audit(limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(
     }
 
 
+@router.get("/orthanc-status")
+def orthanc_status(db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """네트워크 설정 페이지(화면분석 §5.3) — 연결 상태 + 시스템 정보 + 검사 수."""
+    import httpx as _httpx
+
+    from app.config import get_settings
+    from app.dicom.orthanc import OrthancClient
+
+    s = get_settings()
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            return {"alive": False, "url": s.orthanc_url}
+        sys_info = client._client.get("/system").json()
+        count = len(client._client.get("/studies").json())
+        return {
+            "alive": True,
+            "url": s.orthanc_url,
+            "name": sys_info.get("Name"),
+            "aet": sys_info.get("DicomAet"),
+            "dicom_port": sys_info.get("DicomPort"),
+            "version": sys_info.get("Version"),
+            "studies_count": count,
+        }
+    except _httpx.HTTPError as e:
+        return {"alive": False, "url": s.orthanc_url, "error": str(e)[:200]}
+    finally:
+        client.close()
+
+
 @router.get("/ai-quality")
 def ai_quality(db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """F-20: AI 품질 지표 — 확정 판독의 diff_metrics 집계 (설계 §10 수용도)."""

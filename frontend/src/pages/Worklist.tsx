@@ -1,9 +1,19 @@
-// 워크리스트 워크스페이스 — 디자인 명세 §3 (5구역 중 MVP: 필터바+메인그리드+우측 패널)
-import { useCallback, useEffect, useMemo, useState } from "react";
+// 워크리스트 워크스페이스 — 디자인 명세 §3 5구역 레이아웃 충실 구현
+// [A]툴바 [B]필터 [C-좌]날짜트리|[C]메인그리드 [D]과거검사|비교세트 [E]상용구|리포트|오더 + 컨텍스트메뉴
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   api,
   downloadReportPdf,
   openViewer,
+  openViewerCompare,
   type BatchCandidate,
   type InstanceThumb,
   type KeyImage,
@@ -13,12 +23,9 @@ import {
   type StudyRow,
 } from "../api";
 
-import { Suspense, lazy } from "react";
-
-// Cornerstone3D 번들(~3MB)은 3D 뷰어 첫 사용 시에만 로드 (코드 분할)
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 
-/** F-18: 모달리티별 행잉 매핑 (viewer.prefs.hanging) — 모듈 레벨 캐시 */
+/* ── F-18 행잉 매핑 ─────────────────────────────── */
 let hangingMap: Record<string, string> = {};
 export function loadHangingPrefs() {
   api.getSetting("viewer.prefs").then((r) => {
@@ -30,118 +37,208 @@ function hpFor(modality: string): string | undefined {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  received: "도착",
-  draft_ready: "AI초안",
-  reading: "판독중",
-  finalized: "확정",
+  received: "도착", draft_ready: "AI초안", reading: "판독중", finalized: "확정",
 };
-
 function StatusBadge({ status }: { status: string }) {
   return <span className={`badge ${status}`}>{STATUS_LABEL[status] ?? status}</span>;
 }
 
-/* ── [B] 필터 바 (§3.1) ───────────────────────────── */
-function FilterBar({ onSearch }: { onSearch: (p: Record<string, string>) => void }) {
-  const [q, setQ] = useState("");
-  const [modality, setModality] = useState("");
-  const [status, setStatus] = useState("");
-  const [finding, setFinding] = useState("");
+/* ── 컬럼 정의 (F-8: 설정에서 구성 가능) ──────────── */
+export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) => React.ReactNode; width?: number }> = {
+  status: { label: "상태", render: (r) => <StatusBadge status={r.status} /> },
+  ai: {
+    label: "AI",
+    render: (r) =>
+      r.critical ? <span className="badge critical">CRITICAL</span>
+        : r.report_status === "draft" ? <span className="badge ai">초안</span> : null,
+  },
+  patient_key: { label: "ID", render: (r) => r.patient_key },
+  patient_name: { label: "이름", render: (r) => r.patient_name },
+  sex: { label: "성별", render: (r) => r.sex },
+  birth_date: { label: "생년월일", render: (r) => r.birth_date },
+  study_date: { label: "검사일", render: (r) => r.study_date },
+  modality: { label: "MOD", render: (r) => r.modality },
+  body_part: { label: "부위", render: (r) => r.body_part },
+  study_desc: { label: "검사명", render: (r) => <span title={r.study_desc}>{r.study_desc}</span> },
+  accession_no: { label: "Accession", render: (r) => r.accession_no },
+  impression: {
+    label: "임프레션 (AI 미리보기)",
+    render: (r) => (
+      <span style={{ color: "var(--ai)" }} title={r.impression_preview}>{r.impression_preview}</span>
+    ),
+  },
+  series_count: { label: "Srs", render: (r) => r.series_count },
+  instance_count: { label: "Img", render: (r) => r.instance_count },
+  priority: {
+    label: "우선순위",
+    render: (r) => (r.emergency ? <span style={{ color: "var(--stat-emergency)" }}>Emergency</span> : "Normal"),
+  },
+};
+export const DEFAULT_COLUMNS = [
+  "status", "ai", "patient_key", "patient_name", "sex", "study_date",
+  "modality", "body_part", "study_desc", "impression", "series_count", "instance_count", "priority",
+];
 
-  const fire = useCallback(() => {
-    onSearch({ q, modality, status, finding });
-  }, [q, modality, status, finding, onSearch]);
-
+/* ── [A] 액션 툴바 ─────────────────────────────── */
+function ActionToolbar({
+  selected, onAction, searchText, setSearchText, onSearch,
+}: {
+  selected: StudyDetail | null;
+  onAction: (a: string) => void;
+  searchText: string;
+  setSearchText: (s: string) => void;
+  onSearch: () => void;
+}) {
+  const need = !selected;
+  const Btn = ({ a, label, primary, title }: { a: string; label: string; primary?: boolean; title?: string }) => (
+    <button className={primary ? "primary" : ""} disabled={need && a !== "batch" && a !== "refresh"}
+            title={title} onClick={() => onAction(a)}>
+      {label}
+    </button>
+  );
   return (
-    <div
-      style={{
-        display: "flex", gap: 6, padding: 8, background: "var(--bg-panel)",
-        borderBottom: "1px solid var(--border)", alignItems: "center",
-      }}
-    >
+    <div style={{
+      display: "flex", gap: 5, padding: "6px 8px", alignItems: "center",
+      background: "var(--bg-panel)", borderBottom: "1px solid var(--border)",
+    }}>
+      <Btn a="viewdraft" label="View&Draft" primary title="뷰어 + 초안 패널 동시 오픈 (더블클릭과 동일)" />
+      <Btn a="viewer" label="뷰어" title="OHIF 뷰어 열기" />
+      <Btn a="3d" label="3D" title="내장 Cornerstone3D MPR/MIP" />
+      <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
+      <Btn a="pdf" label="PDF" title="판독서 PDF" />
+      <Btn a="emergency" label="⚠ Emergency" title="응급 우선순위 토글 (F-15)" />
+      <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
+      <Btn a="batch" label="일괄 검토" title="AI 초안 일괄 검토 (F-22)" />
+      <Btn a="refresh" label="새로고침" />
+      <div style={{ flex: 1 }} />
       <input
-        placeholder="환자 ID / 이름" value={q} style={{ width: 160 }}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && fire()}
+        placeholder="SEARCH — 환자 ID/이름" value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && onSearch()}
+        style={{ width: 280, background: "var(--bg-canvas)" }}
       />
-      <select value={modality} onChange={(e) => setModality(e.target.value)}>
-        <option value="">전체 Modality</option>
-        {["CR", "CT", "MR", "US", "MG", "XA", "NM", "DX"].map((m) => (
+      <button className="primary" onClick={onSearch}>SEARCH</button>
+    </div>
+  );
+}
+
+/* ── [B] 콤보 필터 바 ──────────────────────────── */
+function FilterBar({ filters, setFilters, onSearch }: {
+  filters: Record<string, string>;
+  setFilters: (f: Record<string, string>) => void;
+  onSearch: () => void;
+}) {
+  const set = (k: string, v: string) => setFilters({ ...filters, [k]: v });
+  return (
+    <div style={{
+      display: "flex", gap: 6, padding: "5px 8px", background: "var(--bg-panel)",
+      borderBottom: "1px solid var(--border)", alignItems: "center", flexWrap: "wrap",
+    }}>
+      <select value={filters.modality ?? ""} onChange={(e) => set("modality", e.target.value)}>
+        <option value="">*Any Modality</option>
+        {["CR", "CT", "MR", "US", "MG", "XA", "NM", "DX", "ES", "RF", "OT"].map((m) => (
           <option key={m} value={m}>{m}</option>
         ))}
       </select>
-      <select value={status} onChange={(e) => setStatus(e.target.value)}>
-        <option value="">전체 상태</option>
+      <select value={filters.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+        <option value="">*Any 상태</option>
         <option value="received">도착</option>
         <option value="draft_ready">AI초안</option>
         <option value="reading">판독중</option>
         <option value="finalized">확정</option>
       </select>
-      <input
-        placeholder="소견/임프레션 검색 (F-2)" value={finding} style={{ flex: 1, maxWidth: 320 }}
-        onChange={(e) => setFinding(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && fire()}
-      />
-      <button className="primary" onClick={fire}>SEARCH</button>
+      <input placeholder="*Any 부위" value={filters.body_part ?? ""} style={{ width: 110 }}
+             onChange={(e) => set("body_part", e.target.value)}
+             onKeyDown={(e) => e.key === "Enter" && onSearch()} />
+      <input type="date" value={filters.date_from_iso ?? ""} title="검사일 From"
+             onChange={(e) => set("date_from_iso", e.target.value)} />
+      <span style={{ color: "var(--text-secondary)" }}>~</span>
+      <input type="date" value={filters.date_to_iso ?? ""} title="검사일 To"
+             onChange={(e) => set("date_to_iso", e.target.value)} />
+      <input placeholder="소견/임프레션 검색 (F-2)" value={filters.finding ?? ""}
+             style={{ flex: 1, minWidth: 160, maxWidth: 300 }}
+             onChange={(e) => set("finding", e.target.value)}
+             onKeyDown={(e) => e.key === "Enter" && onSearch()} />
+      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+        <input type="checkbox" checked={filters.emergency === "true"}
+               onChange={(e) => set("emergency", e.target.checked ? "true" : "")} />
+        ⚠ Emergency만
+      </label>
     </div>
   );
 }
 
-/* ── [C] 메인 검사 그리드 (§3.1) ───────────────────── */
+/* ── [C-좌] 날짜/폴더 트리 ─────────────────────── */
+const DATE_PRESETS = [
+  { key: "today", label: "Today", days: 0 },
+  { key: "3d", label: "최근 3일", days: 3 },
+  { key: "1w", label: "최근 1주", days: 7 },
+  { key: "1m", label: "최근 1개월", days: 30 },
+  { key: "all", label: "전체", days: -1 },
+];
+function DateTree({ active, onPick }: { active: string; onPick: (key: string, from: string) => void }) {
+  const pick = (p: { key: string; days: number }) => {
+    if (p.days < 0) return onPick(p.key, "");
+    const d = new Date();
+    d.setDate(d.getDate() - p.days);
+    onPick(p.key, d.toISOString().slice(0, 10).replaceAll("-", ""));
+  };
+  return (
+    <div style={{
+      width: 120, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+      padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
+    }}>
+      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px" }}>
+        기간
+      </div>
+      {DATE_PRESETS.map((p) => (
+        <div key={p.key} onClick={() => pick(p)}
+             style={{
+               padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+               background: active === p.key ? "var(--accent-subtle)" : undefined,
+               color: active === p.key ? "var(--text-primary)" : "var(--text-secondary)",
+             }}>
+          {p.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── [C] 메인 검사 그리드 (컬럼 구성형) ───────────── */
 function StudyGrid({
-  items, selectedId, onSelect,
+  items, columns, selectedId, onSelect, onOpen, onContext,
 }: {
   items: StudyRow[];
+  columns: string[];
   selectedId: number | null;
   onSelect: (row: StudyRow) => void;
+  onOpen: (row: StudyRow) => void;
+  onContext: (e: React.MouseEvent, row: StudyRow) => void;
 }) {
   return (
-    <div style={{ overflow: "auto", flex: 1 }}>
+    <div style={{ overflow: "auto", flex: 1, minWidth: 0 }}>
       <table className="grid-table">
         <thead>
           <tr>
-            <th>상태</th><th>AI</th><th>ID</th><th>이름</th><th>성별</th>
-            <th>검사일</th><th>MOD</th><th>부위</th><th>검사명</th>
-            <th>임프레션 (AI 미리보기)</th><th>Srs</th><th>Img</th>
+            <th style={{ width: 30 }}>#</th>
+            {columns.map((c) => <th key={c}>{COLUMN_DEFS[c]?.label ?? c}</th>)}
           </tr>
         </thead>
         <tbody>
-          {items.map((row) => (
-            <tr
-              key={row.id}
-              className={[
-                row.id === selectedId ? "selected" : "",
-                row.emergency ? "emergency" : "",
-              ].join(" ")}
-              onClick={() => onSelect(row)}
-              onDoubleClick={() => {
-                onSelect(row);
-                openViewer(row.study_uid, hpFor(row.modality)); // View&Draft (§3.1) + F-18 행잉
-              }}
-            >
-              <td><StatusBadge status={row.status} /></td>
-              <td>
-                {row.critical ? (
-                  <span className="badge critical">CRITICAL</span>
-                ) : row.report_status === "draft" ? (
-                  <span className="badge ai">초안</span>
-                ) : null}
-              </td>
-              <td>{row.patient_key}</td>
-              <td>{row.patient_name}</td>
-              <td>{row.sex}</td>
-              <td>{row.study_date}</td>
-              <td>{row.modality}</td>
-              <td>{row.body_part}</td>
-              <td title={row.study_desc}>{row.study_desc}</td>
-              <td style={{ color: "var(--ai)", maxWidth: 280 }} title={row.impression_preview}>
-                {row.impression_preview}
-              </td>
-              <td>{row.series_count}</td>
-              <td>{row.instance_count}</td>
+          {items.map((row, i) => (
+            <tr key={row.id}
+                className={[row.id === selectedId ? "selected" : "", row.emergency ? "emergency" : ""].join(" ")}
+                onClick={() => onSelect(row)}
+                onDoubleClick={() => onOpen(row)}
+                onContextMenu={(e) => { e.preventDefault(); onSelect(row); onContext(e, row); }}>
+              <td style={{ color: "var(--text-secondary)" }}>{i + 1}</td>
+              {columns.map((c) => <td key={c}>{COLUMN_DEFS[c]?.render(row)}</td>)}
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={12} style={{ color: "var(--text-secondary)", textAlign: "center", padding: 24 }}>
+            <tr><td colSpan={columns.length + 1}
+                    style={{ color: "var(--text-secondary)", textAlign: "center", padding: 24 }}>
               검사가 없습니다
             </td></tr>
           )}
@@ -151,190 +248,146 @@ function StudyGrid({
   );
 }
 
-/* ── [E-중] 리포트 패널: AI 초안의 1급 표면 (§3.2) ──── */
-function ReportPanel({
-  detail, onChanged,
-}: {
-  detail: StudyDetail;
-  onChanged: () => void;
+/* ── [D-좌] 과거검사 (선택 환자, F-14) ────────────── */
+function PriorStudiesGrid({ detail, onAddCompare }: {
+  detail: StudyDetail | null;
+  onAddCompare: (e: { study_uid: string; study_date: string; modality: string; study_desc: string }) => void;
 }) {
-  const [reports, setReports] = useState<Report[]>([]);
-  const [draft, setDraft] = useState<SrJson | null>(null);
-  const [busy, setBusy] = useState(false);
-  const current = reports[0] ?? null;
-
-  useEffect(() => {
-    api.reports(detail.id).then((r) => {
-      setReports(r.items);
-      setDraft(r.items[0]?.sr_json ?? null);
-    });
-  }, [detail.id]);
-
-  const save = async () => {
-    if (!current || !draft) return;
-    setBusy(true);
-    try {
-      await api.updateReport(current.id, draft);
-      onChanged();
-    } finally { setBusy(false); }
-  };
-
-  const finalize = async () => {
-    if (!current || !draft) return;
-    setBusy(true);
-    try {
-      if (current.status !== "finalized") await api.updateReport(current.id, draft);
-      await api.finalizeReport(current.id);
-      onChanged();
-    } finally { setBusy(false); }
-  };
-
-  const regenerate = async () => {
-    await api.analyze(detail.id);
-    onChanged();
-  };
-
-  if (!current || !draft) {
-    return (
-      <div style={{ padding: 16, color: "var(--text-secondary)" }}>
-        리포트 없음
-        <div style={{ marginTop: 8 }}>
-          <button onClick={regenerate}>AI 초안 생성</button>
-        </div>
-      </div>
-    );
-  }
-
-  const finalized = current.status === "finalized";
-  const setImpression = (i: number, statement: string) => {
-    const next = structuredClone(draft);
-    next.impression[i].statement = statement;
-    setDraft(next);
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, overflow: "auto", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <StatusBadge status={current.status === "draft" ? "draft_ready" : current.status} />
-        {current.created_by === "ai" && (
-          <span className="badge ai">AI 생성 초안 — 반드시 검토 필요</span>
-        )}
-        <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-          v{current.version} {current.ai_model && `· ${current.ai_model}`}
-        </span>
-      </div>
-
-      {/* Comparison (§3.2: 근거 표시) */}
-      <section>
-        <PanelTitle>Comparison</PanelTitle>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{draft.comparison.summary}</div>
-      </section>
-
-      {/* Reading = findings */}
-      <section>
-        <PanelTitle>Reading</PanelTitle>
-        {draft.findings.map((f, i) => (
-          <div key={i} style={{ fontSize: 12.5, marginBottom: 4 }}>
-            <b>{f.organ}</b>: {f.observation}{" "}
-            {f.severity === "critical" && <span className="badge critical">CRITICAL</span>}
-          </div>
-        ))}
-      </section>
-
-      {/* Conclusion = impression (편집 가능) */}
-      <section>
-        <PanelTitle>Conclusion</PanelTitle>
-        {draft.impression.map((imp, i) => (
-          <textarea
-            key={i}
-            value={imp.statement}
-            disabled={finalized}
-            onChange={(e) => setImpression(i, e.target.value)}
-            style={{
-              width: "100%", background: "var(--bg-panel)", color: "var(--text-primary)",
-              border: "1px solid var(--border)", borderRadius: 4, padding: 6,
-              fontFamily: "inherit", fontSize: 12.5, resize: "vertical", minHeight: 40,
-            }}
-          />
-        ))}
-      </section>
-
-      {draft.recommendations.length > 0 && (
-        <section>
-          <PanelTitle>Recommend</PanelTitle>
-          {draft.recommendations.map((r, i) => (
-            <div key={i} style={{ fontSize: 12.5 }}>- {r.action} ({r.timeframe})</div>
-          ))}
-        </section>
-      )}
-
-      <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-        <button onClick={regenerate} disabled={busy}>초안 재생성</button>
-        <button onClick={() => downloadReportPdf(current.id)} disabled={busy}>PDF</button>
-        {finalized && (
-          <button
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api.sendSr(current.id);
-                alert("DICOM SR 전송 완료 — 뷰어에서 SR 시리즈 확인 가능");
-              } finally { setBusy(false); }
-            }}
-            disabled={busy}
-            title="확정 판독을 DICOM SR로 검사에 저장"
-          >
-            SR 전송
-          </button>
-        )}
-        <div style={{ flex: 1 }} />
-        <button onClick={save} disabled={busy || finalized}>저장</button>
-        <button className="primary" onClick={finalize} disabled={busy || finalized}>
-          {finalized ? "확정됨" : "확정 (서명)"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function PanelTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      fontSize: 11, fontWeight: 700, color: "var(--text-secondary)",
-      textTransform: "uppercase", letterSpacing: 0.5, margin: "6px 0 4px",
-      borderBottom: "1px solid var(--border)", paddingBottom: 2,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-/* ── [D-좌] 과거검사 (F-14) ───────────────────────── */
-function RelatedExams({ detail }: { detail: StudyDetail }) {
-  return (
-    <div style={{ overflow: "auto", maxHeight: 160 }}>
+    <PanelBox title={`과거검사 ${detail ? `— ${detail.patient_name}` : ""} (더블클릭=비교세트 추가)`}>
       <table className="grid-table">
-        <thead>
-          <tr><th>검사일</th><th>MOD</th><th>검사명</th><th>상태</th></tr>
-        </thead>
+        <thead><tr><th>검사일</th><th>MOD</th><th>검사명</th><th>상태</th></tr></thead>
         <tbody>
-          {detail.related_exams.map((e) => (
-            <tr key={e.id}>
+          {(detail?.related_exams ?? []).map((e) => (
+            <tr key={e.id} onDoubleClick={() => onAddCompare(e)}>
               <td>{e.study_date}</td><td>{e.modality}</td>
               <td title={e.study_desc}>{e.study_desc}</td>
               <td><StatusBadge status={e.status} /></td>
             </tr>
           ))}
-          {detail.related_exams.length === 0 && (
-            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>과거 검사 없음</td></tr>
+          {(!detail || detail.related_exams.length === 0) && (
+            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>
+              {detail ? "과거 검사 없음" : "검사를 선택하세요"}
+            </td></tr>
           )}
         </tbody>
       </table>
-    </div>
+    </PanelBox>
   );
 }
 
-/* ── F-16: 키이미지 선택 (KOS) ────────────────────── */
-function KeyImagePicker({ studyId }: { studyId: number }) {
+/* ── [D-우] 비교세트 (Complementary set) ─────────── */
+interface CompareItem { study_uid: string; study_date: string; modality: string; study_desc: string }
+function ComparisonSetGrid({ items, current, onRemove, onOpenCompare }: {
+  items: CompareItem[];
+  current: StudyDetail | null;
+  onRemove: (uid: string) => void;
+  onOpenCompare: () => void;
+}) {
+  return (
+    <PanelBox title="비교세트 (Complementary set)" right={
+      <button className="primary" disabled={!current || items.length === 0} onClick={onOpenCompare}
+              style={{ padding: "2px 10px", fontSize: 11.5 }}>
+        비교 열기 ({items.length + (current ? 1 : 0)})
+      </button>
+    }>
+      <table className="grid-table">
+        <thead><tr><th>검사일</th><th>MOD</th><th>검사명</th><th></th></tr></thead>
+        <tbody>
+          {items.map((e) => (
+            <tr key={e.study_uid}>
+              <td>{e.study_date}</td><td>{e.modality}</td>
+              <td title={e.study_desc}>{e.study_desc}</td>
+              <td><button style={{ padding: "0 7px", fontSize: 11 }} onClick={() => onRemove(e.study_uid)}>✕</button></td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>
+              과거검사를 더블클릭해 추가 → 현재 검사와 함께 뷰어에서 비교
+            </td></tr>
+          )}
+        </tbody>
+      </table>
+    </PanelBox>
+  );
+}
+
+/* ── [E-좌] 상용구 패널 (F-18, 화면분석 §5.6) ─────── */
+interface Phrase { id: number; group: string; name: string; text: string }
+function PhrasePanel({ onInsert }: { onInsert: (text: string) => void }) {
+  const [items, setItems] = useState<Phrase[]>([]);
+  const [sel, setSel] = useState<Phrase | null>(null);
+
+  const load = useCallback(() => {
+    api.getSetting("report.phrases").then((r) => {
+      setItems(((r.value as { items?: Phrase[] }).items) ?? []);
+    }).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const save = async (next: Phrase[]) => {
+    await api.putSetting("report.phrases", { items: next }, "global");
+    setItems(next);
+  };
+  const add = async () => {
+    const group = prompt("그룹 (예: CT-CHEST)") ?? "";
+    const name = prompt("상용구 이름") ?? "";
+    const text = prompt("본문") ?? "";
+    if (!name || !text) return;
+    await save([...items, { id: Date.now(), group, name, text }]);
+  };
+  const edit = async () => {
+    if (!sel) return;
+    const text = prompt("본문 수정", sel.text) ?? sel.text;
+    await save(items.map((p) => (p.id === sel.id ? { ...p, text } : p)));
+  };
+  const del = async () => {
+    if (!sel) return;
+    await save(items.filter((p) => p.id !== sel.id));
+    setSel(null);
+  };
+
+  return (
+    <PanelBox title="상용구 (Std)" right={
+      <span style={{ display: "flex", gap: 3 }}>
+        <MiniBtn onClick={() => sel && onInsert(sel.text)} disabled={!sel}>삽입</MiniBtn>
+        <MiniBtn onClick={add}>New</MiniBtn>
+        <MiniBtn onClick={edit} disabled={!sel}>Edit</MiniBtn>
+        <MiniBtn onClick={del} disabled={!sel}>Del</MiniBtn>
+      </span>
+    }>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+        <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+          <table className="grid-table">
+            <thead><tr><th>GROUP</th><th>NAME</th></tr></thead>
+            <tbody>
+              {items.map((p) => (
+                <tr key={p.id} className={sel?.id === p.id ? "selected" : ""}
+                    onClick={() => setSel(p)} onDoubleClick={() => onInsert(p.text)}>
+                  <td>{p.group}</td><td title={p.text}>{p.name}</td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>New로 상용구 등록</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {sel && (
+          <div style={{
+            borderTop: "1px solid var(--border)", padding: 6, fontSize: 11.5,
+            color: "var(--text-secondary)", maxHeight: 70, overflow: "auto",
+          }}>
+            {sel.text}
+          </div>
+        )}
+      </div>
+    </PanelBox>
+  );
+}
+
+/* ── 키이미지 스트립 (F-16) ───────────────────── */
+function KeyImageStrip({ studyId }: { studyId: number }) {
   const [items, setItems] = useState<InstanceThumb[]>([]);
   const [selected, setSelected] = useState<Map<string, KeyImage>>(new Map());
   const [busy, setBusy] = useState(false);
@@ -348,141 +401,327 @@ function KeyImagePicker({ studyId }: { studyId: number }) {
   }, [studyId]);
 
   if (items.length === 0) return null;
-
   const toggle = (it: InstanceThumb) => {
     setSelected((prev) => {
       const next = new Map(prev);
       if (next.has(it.sop_uid)) next.delete(it.sop_uid);
-      else next.set(it.sop_uid, {
-        sop_uid: it.sop_uid, orthanc_id: it.orthanc_id, instance_number: it.instance_number,
-      });
+      else next.set(it.sop_uid, { sop_uid: it.sop_uid, orthanc_id: it.orthanc_id, instance_number: it.instance_number });
       return next;
     });
   };
-
-  const save = async (sendKos: boolean) => {
+  const save = async (kos: boolean) => {
     setBusy(true);
-    setMsg("");
     try {
       await api.setKeyImages(studyId, [...selected.values()]);
-      if (sendKos && selected.size > 0) {
-        await api.sendKos(studyId);
-        setMsg("KOS 전송 완료");
-      } else {
-        setMsg("저장됨");
-      }
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : "실패");
-    } finally { setBusy(false); }
+      if (kos && selected.size > 0) { await api.sendKos(studyId); setMsg("KOS 전송됨"); }
+      else setMsg("저장됨");
+    } catch (e) { setMsg(e instanceof Error ? e.message : "실패"); }
+    finally { setBusy(false); }
   };
-
   return (
-    <div>
-      <div style={{ display: "flex", gap: 4, overflowX: "auto", padding: "4px 0" }}>
-        {items.slice(0, 24).map((it) => {
-          const on = selected.has(it.sop_uid);
-          return (
-            <img
-              key={it.sop_uid}
-              src={it.preview_url}
-              alt={`#${it.instance_number}`}
-              title={`Instance ${it.instance_number}${on ? " — 키이미지" : ""}`}
-              onClick={() => toggle(it)}
-              style={{
-                width: 64, height: 64, objectFit: "cover", cursor: "pointer",
-                borderRadius: 3, flexShrink: 0,
-                border: on ? "2px solid var(--anno-keyimage)" : "1px solid var(--border)",
-              }}
-            />
-          );
-        })}
+    <div style={{ display: "flex", gap: 4, alignItems: "center", padding: "3px 0" }}>
+      <span style={{ fontSize: 10.5, color: "var(--text-secondary)", width: 56, flexShrink: 0 }}>
+        KEY IMG<br />({selected.size}장)
+      </span>
+      <div style={{ display: "flex", gap: 3, overflowX: "auto" }}>
+        {items.slice(0, 16).map((it) => (
+          <img key={it.sop_uid} src={it.preview_url} alt="" onClick={() => toggle(it)}
+               style={{
+                 width: 40, height: 40, objectFit: "cover", borderRadius: 2, cursor: "pointer", flexShrink: 0,
+                 border: selected.has(it.sop_uid) ? "2px solid var(--anno-keyimage)" : "1px solid var(--border)",
+               }} />
+        ))}
       </div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          {selected.size}장 선택{msg && ` · ${msg}`}
-        </span>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => save(false)} disabled={busy}>저장</button>
-        <button onClick={() => save(true)} disabled={busy || selected.size === 0}
-                title="키이미지를 DICOM KOS로 검사에 저장 (F-16)">
-          KOS 전송
-        </button>
-      </div>
+      <MiniBtn onClick={() => save(false)} disabled={busy}>저장</MiniBtn>
+      <MiniBtn onClick={() => save(true)} disabled={busy || selected.size === 0}>KOS</MiniBtn>
+      {msg && <span style={{ fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</span>}
     </div>
   );
 }
 
-/* ── F-22: AI 초안 일괄 검토 모달 (디자인 §3.3) ────── */
+/* ── [E-중] 리포트 패널 (레퍼런스 메타테이블 + 3단) ── */
+function ReportPanel({ detail, onChanged, insertRef }: {
+  detail: StudyDetail | null;
+  onChanged: () => void;
+  insertRef: React.MutableRefObject<((t: string) => void) | null>;
+}) {
+  const [reports, setReports] = useState<Report[]>([]);
+  const [draft, setDraft] = useState<SrJson | null>(null);
+  const [busy, setBusy] = useState(false);
+  const current = reports[0] ?? null;
+
+  useEffect(() => {
+    if (!detail) { setReports([]); setDraft(null); return; }
+    api.reports(detail.id).then((r) => {
+      setReports(r.items);
+      setDraft(r.items[0] ? structuredClone(r.items[0].sr_json) : null);
+    });
+  }, [detail]);
+
+  // 상용구 삽입 훅 (E-좌 → E-중)
+  useEffect(() => {
+    insertRef.current = (text: string) => {
+      setDraft((d) => {
+        if (!d) return d;
+        const next = structuredClone(d);
+        if (next.impression[0]) next.impression[0].statement += (next.impression[0].statement ? "\n" : "") + text;
+        return next;
+      });
+    };
+  }, [insertRef]);
+
+  if (!detail) {
+    return <PanelBox title="REPORT"><Empty>검사를 선택하세요</Empty></PanelBox>;
+  }
+
+  const finalized = current?.status === "finalized";
+  const age = detail.birth_date ? `${new Date().getFullYear() - parseInt(detail.birth_date.slice(0, 4), 10)}세` : "-";
+
+  const save = async () => {
+    if (!current || !draft) return;
+    setBusy(true);
+    try { await api.updateReport(current.id, draft); onChanged(); } finally { setBusy(false); }
+  };
+  const finalize = async () => {
+    if (!current || !draft) return;
+    setBusy(true);
+    try {
+      if (!finalized) await api.updateReport(current.id, draft);
+      await api.finalizeReport(current.id);
+      onChanged();
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <PanelBox title="REPORT" right={
+      current && (
+        <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+          {current.created_by === "ai" && <span className="badge ai">AI 초안 — 검토 필수</span>}
+          <StatusBadge status={current.status === "draft" ? "draft_ready" : current.status} />
+        </span>
+      )
+    }>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, overflow: "auto", height: "100%", padding: "0 2px" }}>
+        {/* 메타 테이블 — 레퍼런스 [E-중] 형식 */}
+        <table className="grid-table" style={{ fontSize: 11.5 }}>
+          <tbody>
+            <tr>
+              <th style={{ width: 64 }}>ID</th><td>{detail.patient_key}</td>
+              <th style={{ width: 50 }}>NAME</th><td>{detail.patient_name}</td>
+              <th style={{ width: 42 }}>AGE</th><td>{age}</td>
+              <th style={{ width: 40 }}>SEX</th><td>{detail.sex}</td>
+            </tr>
+            <tr>
+              <th>Acc No</th><td>{detail.accession_no}</td>
+              <th>검사명</th><td colSpan={3} title={detail.study_desc}>{detail.study_desc}</td>
+              <th>검사일</th><td>{detail.study_date}</td>
+            </tr>
+            <tr>
+              <th>Reporter</th>
+              <td colSpan={5}>
+                Dictator: {current?.created_by === "ai" ? `AI(${current.ai_model})` : current?.created_by ?? "-"} ·
+                Reader: {current?.reviewed_by || "-"} · Conf1: {finalized ? current?.reviewed_by : "-"} · Conf2: -
+              </td>
+              <th>확정일</th>
+              <td>{current?.finalized_at ? current.finalized_at.slice(0, 10) : "-"}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <KeyImageStrip studyId={detail.id} />
+
+        {!current || !draft ? (
+          <Empty>
+            리포트 없음
+            <div style={{ marginTop: 6 }}>
+              <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>AI 초안 생성</MiniBtn>
+            </div>
+          </Empty>
+        ) : (
+          <>
+            <SectionTitle>READING</SectionTitle>
+            <div style={{ fontSize: 12 }}>
+              {draft.comparison.summary && (
+                <div style={{ color: "var(--text-secondary)", marginBottom: 3 }}>[비교] {draft.comparison.summary}</div>
+              )}
+              {draft.findings.map((f, i) => (
+                <div key={i}>
+                  <b>{f.organ}</b>: {f.observation}{" "}
+                  {f.severity === "critical" && <span className="badge critical">CRITICAL</span>}
+                </div>
+              ))}
+            </div>
+            <SectionTitle>CONCLUSION</SectionTitle>
+            {draft.impression.map((imp, i) => (
+              <textarea key={i} value={imp.statement} disabled={finalized}
+                        onChange={(e) => setDraft((d) => {
+                          const n = structuredClone(d!); n.impression[i].statement = e.target.value; return n;
+                        })}
+                        style={{
+                          width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
+                          border: "1px solid var(--border)", borderRadius: 3, padding: 5,
+                          fontFamily: "inherit", fontSize: 12.5, resize: "vertical", minHeight: 44,
+                        }} />
+            ))}
+            {draft.recommendations.length > 0 && (
+              <>
+                <SectionTitle>RECOMMEND</SectionTitle>
+                {draft.recommendations.map((r, i) => (
+                  <div key={i} style={{ fontSize: 12 }}>- {r.action} ({r.timeframe})</div>
+                ))}
+              </>
+            )}
+            <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
+              <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
+              <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
+              {finalized && (
+                <MiniBtn onClick={async () => { setBusy(true); try { await api.sendSr(current.id); alert("DICOM SR 전송 완료"); } finally { setBusy(false); } }}>
+                  SR 전송
+                </MiniBtn>
+              )}
+              <div style={{ flex: 1 }} />
+              <MiniBtn onClick={save} disabled={busy || finalized}>저장</MiniBtn>
+              <button className="primary" style={{ padding: "2px 12px", fontSize: 12 }}
+                      onClick={finalize} disabled={busy || finalized}>
+                {finalized ? "확정됨" : "확정 (서명)"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </PanelBox>
+  );
+}
+
+/* ── [E-우] 오더/예약 (RIS — P2 placeholder) ─────── */
+function OrdersPanel() {
+  return (
+    <PanelBox title="오더/예약 (RIS)">
+      <table className="grid-table">
+        <thead><tr><th>ID</th><th>이름</th><th>ACCESSION</th><th>오더명</th><th>MOD</th><th>예약일</th></tr></thead>
+        <tbody>
+          <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>RIS/MWL 연동 예정 (P2)</td></tr>
+        </tbody>
+      </table>
+    </PanelBox>
+  );
+}
+
+/* ── 컨텍스트 메뉴 (디자인 §3.3) ─────────────────── */
+function ContextMenu({ x, y, row, onAction, onClose }: {
+  x: number; y: number; row: StudyRow;
+  onAction: (a: string) => void; onClose: () => void;
+}) {
+  useEffect(() => {
+    const h = () => onClose();
+    window.addEventListener("click", h);
+    return () => window.removeEventListener("click", h);
+  }, [onClose]);
+  const Item = ({ a, label, danger }: { a: string; label: string; danger?: boolean }) => (
+    <div onClick={() => { onAction(a); onClose(); }}
+         style={{ padding: "5px 14px", cursor: "pointer", fontSize: 12.5, color: danger ? "var(--stat-emergency)" : undefined }}
+         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+         onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+      {label}
+    </div>
+  );
+  const Sep = () => <div style={{ height: 1, background: "var(--border)", margin: "3px 0" }} />;
+  return (
+    <div style={{
+      position: "fixed", left: x, top: y, zIndex: 300, minWidth: 180,
+      background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
+      boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: "4px 0",
+    }}>
+      <Item a="viewdraft" label="View&Draft" />
+      <Item a="viewer" label="뷰어 열기 (OHIF)" />
+      <Item a="3d" label="3D 뷰어 (MPR/MIP)" />
+      <Item a="compare" label="비교세트에 추가" />
+      <Sep />
+      <Item a="pdf" label="PDF 내보내기" />
+      <Item a="regen" label="AI 초안 재생성" />
+      <Sep />
+      <Item a="emergency" label={row.emergency ? "Emergency 해제" : "⚠ Emergency 지정"} danger={!row.emergency} />
+    </div>
+  );
+}
+
+/* ── 공통 소품 ─────────────────────────────────── */
+function PanelBox({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, flex: 1,
+      background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 4, overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", padding: "3px 8px", flexShrink: 0,
+        background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)",
+        fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase",
+      }}>
+        {title}<div style={{ flex: 1 }} />{right}
+      </div>
+      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>{children}</div>
+    </div>
+  );
+}
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", letterSpacing: 0.5,
+      borderBottom: "1px solid var(--border)", paddingBottom: 2, marginTop: 2,
+    }}>{children}</div>
+  );
+}
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div style={{ padding: 14, color: "var(--text-secondary)", fontSize: 12.5 }}>{children}</div>;
+}
+function MiniBtn(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...props} style={{ padding: "2px 9px", fontSize: 11.5, ...props.style }} />;
+}
+
+/* ── F-22 일괄 검토 모달 ─────────────────────────── */
 function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [items, setItems] = useState<BatchCandidate[]>([]);
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
-
   useEffect(() => {
     api.batchReview().then((r) => {
       setItems(r.items);
       setChecked(new Set(r.items.map((i) => i.report_id)));
     });
   }, []);
-
-  const toggle = (id: number) => {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
+  const toggle = (id: number) => setChecked((p) => {
+    const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n;
+  });
   const confirm = async () => {
     setBusy(true);
-    try {
-      const r = await api.batchFinalize([...checked]);
-      setResult(`${r.finalized}/${r.total}건 확정 완료`);
-      onDone();
-    } finally {
-      setBusy(false);
-    }
+    try { const r = await api.batchFinalize([...checked]); setResult(`${r.finalized}/${r.total}건 확정`); onDone(); }
+    finally { setBusy(false); }
   };
-
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-      display: "grid", placeItems: "center", zIndex: 100,
-    }}>
-      <div style={{
-        background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-        width: 720, maxHeight: "80vh", display: "flex", flexDirection: "column",
-      }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 100 }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, width: 760, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center" }}>
-          <b>AI 초안 일괄 검토</b>
-          <span style={{ color: "var(--text-secondary)", fontSize: 12, marginLeft: 8 }}>
-            critical 소견 초안은 자동 제외 — 개별 검토 필요
-          </span>
+          <b>AI 초안 일괄 검토 (F-22)</b>
+          <span style={{ color: "var(--text-secondary)", fontSize: 12, marginLeft: 8 }}>critical 초안은 자동 제외 — 개별 검토 필요</span>
           <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
         </div>
         <div style={{ overflow: "auto", flex: 1 }}>
           <table className="grid-table">
-            <thead>
-              <tr><th></th><th>환자</th><th>검사일</th><th>MOD</th><th>검사명</th><th>AI 임프레션</th><th>신뢰도</th></tr>
-            </thead>
+            <thead><tr><th></th><th>환자</th><th>검사일</th><th>MOD</th><th>검사명</th><th>AI 임프레션</th><th>신뢰도</th></tr></thead>
             <tbody>
               {items.map((c) => (
                 <tr key={c.report_id} onClick={() => toggle(c.report_id)}>
                   <td><input type="checkbox" checked={checked.has(c.report_id)} readOnly /></td>
                   <td>{c.patient_name} ({c.patient_key})</td>
-                  <td>{c.study_date}</td>
-                  <td>{c.modality}</td>
+                  <td>{c.study_date}</td><td>{c.modality}</td>
                   <td title={c.study_desc}>{c.study_desc}</td>
                   <td style={{ color: "var(--ai)", maxWidth: 240 }} title={c.impression}>{c.impression}</td>
                   <td>{c.confidence}</td>
                 </tr>
               ))}
               {items.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-secondary)", padding: 20 }}>
-                  일괄 검토 대상 초안이 없습니다
-                </td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-secondary)", padding: 20 }}>대상 초안 없음</td></tr>
               )}
             </tbody>
           </table>
@@ -490,11 +729,7 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
         <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
           {result && <span style={{ color: "var(--stat-final)" }}>{result}</span>}
           <div style={{ flex: 1 }} />
-          <button
-            className="primary"
-            disabled={busy || checked.size === 0}
-            onClick={confirm}
-          >
+          <button className="primary" disabled={busy || checked.size === 0} onClick={confirm}>
             선택 {checked.size}건 일괄 확정
           </button>
         </div>
@@ -503,141 +738,166 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
   );
 }
 
-/* ── 워크리스트 워크스페이스 루트 ─────────────────── */
+/* ════ 워크리스트 워크스페이스 루트 ════ */
 export function Worklist() {
-  const [params, setParams] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [searchText, setSearchText] = useState("");
+  const [datePreset, setDatePreset] = useState("all");
   const [items, setItems] = useState<StudyRow[]>([]);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<StudyDetail | null>(null);
+  const [compareSet, setCompareSet] = useState<CompareItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [batchOpen, setBatchOpen] = useState(false);
   const [refreshSec, setRefreshSec] = useState(10);
+  const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
+  const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
+  const insertRef = useRef<((t: string) => void) | null>(null);
 
-  // 사용자 환경설정 로드 (worklist.prefs + viewer.prefs) — 화면분석 §5.4
+  // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
   useEffect(() => {
     loadHangingPrefs();
     api.getSetting("worklist.prefs").then((r) => {
-      const v = r.value as { auto_refresh_sec?: number; default_status?: string };
+      const v = r.value as { auto_refresh_sec?: number; default_status?: string; columns?: string[] };
       if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
-      if (v.default_status) setParams((p) => ({ ...p, status: v.default_status! }));
+      if (v.default_status) setFilters((f) => ({ ...f, status: v.default_status! }));
+      if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
     }).catch(() => {});
   }, []);
 
-  const search = useCallback((p: Record<string, string>) => {
-    setParams(p);
-  }, []);
+  const queryParams = useMemo(() => {
+    const p: Record<string, string> = { q: searchText };
+    if (filters.modality) p.modality = filters.modality;
+    if (filters.status) p.status = filters.status;
+    if (filters.body_part) p.body_part = filters.body_part;
+    if (filters.finding) p.finding = filters.finding;
+    if (filters.emergency) p.emergency = filters.emergency;
+    if (filters.date_from_iso) p.date_from = filters.date_from_iso.replaceAll("-", "");
+    if (filters.date_to_iso) p.date_to = filters.date_to_iso.replaceAll("-", "");
+    if (filters.tree_from) p.date_from = filters.tree_from;
+    return p;
+  }, [filters, searchText]);
 
   useEffect(() => {
-    api.worklist(params).then((r) => {
-      setItems(r.items);
-      setTotal(r.total);
-    }).catch(() => {});
-  }, [params, refreshKey]);
+    api.worklist(queryParams).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => {});
+  }, [queryParams, refreshKey]);
 
-  // 자동 갱신 (화면분석 §5.4 Status Check — 주기는 사용자 설정, 0=끔)
   useEffect(() => {
     if (!refreshSec) return;
     const t = setInterval(() => setRefreshKey((k) => k + 1), refreshSec * 1000);
     return () => clearInterval(t);
   }, [refreshSec]);
 
-  const onSelect = useCallback((row: StudyRow) => {
-    api.study(row.id).then(setSelected);
-  }, []);
-
+  const onSelect = useCallback((row: StudyRow) => { api.study(row.id).then(setSelected); }, []);
   const onChanged = useCallback(() => {
     setRefreshKey((k) => k + 1);
     if (selected) api.study(selected.id).then(setSelected);
   }, [selected]);
 
+  const openStudy = useCallback((row: StudyRow | StudyDetail) => {
+    openViewer(row.study_uid, hpFor(row.modality));
+  }, []);
+
+  const doAction = useCallback(async (a: string, row?: StudyRow) => {
+    const target = row ?? selected;
+    switch (a) {
+      case "refresh": setRefreshKey((k) => k + 1); break;
+      case "batch": setBatchOpen(true); break;
+      case "viewdraft": if (target) { onSelect(target as StudyRow); openStudy(target); } break;
+      case "viewer": if (target) openStudy(target); break;
+      case "3d": if (target) setViewer3dUid(target.study_uid); break;
+      case "compare":
+        if (target) setCompareSet((prev) =>
+          prev.some((c) => c.study_uid === target.study_uid) ? prev
+            : [...prev, { study_uid: target.study_uid, study_date: target.study_date, modality: target.modality, study_desc: target.study_desc }]);
+        break;
+      case "pdf": {
+        if (!target) break;
+        const reps = await api.reports(target.id);
+        if (reps.items[0]) downloadReportPdf(reps.items[0].id);
+        break;
+      }
+      case "regen": if (target) { await api.analyze(target.id); onChanged(); } break;
+      case "emergency":
+        if (target) { await api.setPriority(target.id, !target.emergency); onChanged(); }
+        break;
+    }
+  }, [selected, onSelect, openStudy, onChanged]);
+
+  const openCompare = useCallback(() => {
+    if (!selected) return;
+    openViewerCompare([selected.study_uid, ...compareSet.map((c) => c.study_uid)], hpFor(selected.modality));
+  }, [selected, compareSet]);
+
   const emergencyCount = useMemo(() => items.filter((i) => i.emergency).length, [items]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", alignItems: "stretch" }}>
-        <div style={{ flex: 1 }}><FilterBar onSearch={search} /></div>
-        <div style={{
-          display: "flex", alignItems: "center", padding: "0 8px",
-          background: "var(--bg-panel)", borderBottom: "1px solid var(--border)",
-        }}>
-          <button onClick={() => setBatchOpen(true)}>일괄 검토 (F-22)</button>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
+      <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
+                     searchText={searchText} setSearchText={setSearchText}
+                     onSearch={() => setRefreshKey((k) => k + 1)} />
+      <FilterBar filters={filters} setFilters={setFilters} onSearch={() => setRefreshKey((k) => k + 1)} />
+
+      {/* 중단: 날짜트리 + 메인 그리드 */}
+      <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
+        <DateTree active={datePreset} onPick={(key, from) => {
+          setDatePreset(key);
+          setFilters((f) => ({ ...f, tree_from: from, date_from_iso: "", date_to_iso: "" }));
+        }} />
+        <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
+                   onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
+                   onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
+      </div>
+
+      {/* 하단1: 과거검사 | 비교세트 (디자인 §3 [D]) */}
+      <div style={{ display: "flex", gap: 3, height: 140, padding: "3px 3px 0", flexShrink: 0 }}>
+        <PriorStudiesGrid detail={selected}
+                          onAddCompare={(e) => setCompareSet((prev) =>
+                            prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+        <ComparisonSetGrid items={compareSet} current={selected}
+                           onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
+                           onOpenCompare={openCompare} />
+      </div>
+
+      {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) */}
+      <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
+        <div style={{ width: 230, display: "flex", flexShrink: 0 }}>
+          <PhrasePanel onInsert={(t) => insertRef.current?.(t)} />
+        </div>
+        <div style={{ flex: 1.6, display: "flex", minWidth: 0 }}>
+          <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />
+        </div>
+        <div style={{ width: 260, display: "flex", flexShrink: 0 }}>
+          <OrdersPanel />
         </div>
       </div>
-      {batchOpen && (
-        <BatchReviewModal
-          onClose={() => setBatchOpen(false)}
-          onDone={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
+
+      {/* 상태바 (§2) */}
+      <footer style={{
+        display: "flex", gap: 16, padding: "3px 12px", background: "var(--bg-panel)",
+        borderTop: "1px solid var(--border)", fontSize: 11.5, color: "var(--text-secondary)", flexShrink: 0,
+      }}>
+        <span>[Q][H] Server: http://localhost:8000</span>
+        <span>{total} results {selected ? "1 selected" : "0 selected"}</span>
+        {emergencyCount > 0 && <span style={{ color: "var(--stat-emergency)" }}>⚠ Emergency {emergencyCount}건</span>}
+        <span style={{ marginLeft: "auto" }}>{new Date().toLocaleString("ko-KR")}</span>
+      </footer>
+
+      {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
       {viewer3dUid && (
         <Suspense fallback={
-          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200,
-                        display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
+          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
             3D 뷰어 로딩…
           </div>
         }>
           <Viewer3D studyUid={viewer3dUid} onClose={() => setViewer3dUid(null)} />
         </Suspense>
       )}
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {/* [C] 메인 그리드 */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <StudyGrid items={items} selectedId={selected?.id ?? null} onSelect={onSelect} />
-        </div>
-        {/* 우측: [D] 과거검사 + [E-중] 리포트 패널 */}
-        {selected && (
-          <aside style={{
-            width: 420, borderLeft: "1px solid var(--border)", background: "var(--bg-panel)",
-            display: "flex", flexDirection: "column", minHeight: 0,
-          }}>
-            <div style={{
-              padding: "8px 10px", borderBottom: "1px solid var(--border)",
-              display: "flex", alignItems: "center", gap: 8,
-            }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <b>{selected.patient_name}</b>{" "}
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {selected.patient_key} · {selected.modality} · {selected.study_date}
-                </span>
-              </div>
-              <button
-                onClick={() => setViewer3dUid(selected.study_uid)}
-                title="내장 3D 뷰어 — WebGL MPR/MIP (Cornerstone3D)"
-                style={{ display: "flex", alignItems: "center", gap: 5 }}
-              >
-                <img src="/saintview-viewer.svg" alt="" width={16} height={16} />
-                3D
-              </button>
-              <button className="primary" onClick={() => openViewer(selected.study_uid, hpFor(selected.modality))}>
-                뷰어 열기
-              </button>
-            </div>
-            <div style={{ padding: "4px 10px" }}>
-              <PanelTitle>Related Exams (F-14)</PanelTitle>
-              <RelatedExams detail={selected} />
-            </div>
-            <div style={{ padding: "4px 10px", borderTop: "1px solid var(--border)" }}>
-              <PanelTitle>Key Images (F-16)</PanelTitle>
-              <KeyImagePicker studyId={selected.id} />
-            </div>
-            <div style={{ flex: 1, minHeight: 0, borderTop: "1px solid var(--border)" }}>
-              <ReportPanel detail={selected} onChanged={onChanged} />
-            </div>
-          </aside>
-        )}
-      </div>
-      {/* 상태바 (§2) */}
-      <footer style={{
-        display: "flex", gap: 16, padding: "4px 12px", background: "var(--bg-panel)",
-        borderTop: "1px solid var(--border)", fontSize: 11.5, color: "var(--text-secondary)",
-      }}>
-        <span>{total} results</span>
-        {emergencyCount > 0 && (
-          <span style={{ color: "var(--stat-emergency)" }}>⚠ Emergency {emergencyCount}건</span>
-        )}
-        <span style={{ marginLeft: "auto" }}>{new Date().toLocaleString("ko-KR")}</span>
-      </footer>
+      {ctx && (
+        <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row}
+                     onAction={(a) => doAction(a, ctx.row)} onClose={() => setCtx(null)} />
+      )}
     </div>
   );
 }

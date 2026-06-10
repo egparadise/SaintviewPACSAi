@@ -1,13 +1,29 @@
-/** OHIF 설정 — Orthanc DICOMweb (같은 오리진 /dicom-web 프록시 경유, CORS 불필요) */
+/** @type {AppTypes.Config} */
+/** Saintview — OHIF v3.9 기본 config 기반, 데이터소스만 Orthanc 프록시(/dicom-web)로 교체 */
 window.config = {
   routerBasename: '/',
+  extensions: [],
+  modes: [],
+  customizationService: {},
   showStudyList: true,
-  defaultDataSourceName: 'saintview',
+  maxNumberOfWebWorkers: 3,
+  showWarningMessageForCrossOrigin: false,
+  showCPUFallbackMessage: true,
+  showLoadingIndicator: true,
+  experimentalStudyBrowserSort: false,
+  strictZSpacingForVolumeViewport: true,
+  groupEnabledModesFirst: true,
   investigationalUseDialog: { option: 'never' },
+  maxNumRequests: {
+    interaction: 100,
+    thumbnail: 75,
+    prefetch: 25,
+  },
+  defaultDataSourceName: 'dicomweb',
   dataSources: [
     {
       namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
-      sourceName: 'saintview',
+      sourceName: 'dicomweb',
       configuration: {
         friendlyName: 'Saintview Orthanc',
         name: 'saintview',
@@ -23,7 +39,15 @@ window.config = {
         supportsWildcard: true,
         staticWado: false,
         singlepart: 'bulkdata,video',
+        bulkDataURI: {
+          enabled: true,
+          relativeResolution: 'studies',
+        },
+        omitQuotationForMultipartRequest: true,
       },
     },
   ],
+  httpErrorHandler: error => {
+    console.warn('[Saintview OHIF] HTTP error', error?.status);
+  },
 };

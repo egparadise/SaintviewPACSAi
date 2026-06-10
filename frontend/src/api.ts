@@ -152,7 +152,35 @@ export const api = {
     }),
   sendKos: (studyId: number) =>
     req<{ ok: boolean }>(`/api/studies/${studyId}/send-kos`, { method: "POST" }),
+  setPriority: (studyId: number, emergency: boolean) =>
+    req<{ ok: boolean }>(`/api/studies/${studyId}/priority`, {
+      method: "PUT",
+      body: JSON.stringify({ emergency }),
+    }),
+  orthancStatus: () => req<OrthancStatus>("/api/admin/orthanc-status"),
 };
+
+export interface OrthancStatus {
+  alive: boolean;
+  url: string;
+  name?: string;
+  aet?: string;
+  dicom_port?: number;
+  version?: string;
+  studies_count?: number;
+  error?: string;
+}
+
+/** 비교세트 열기: OHIF는 StudyInstanceUIDs 콤마 연결로 다중 검사 비교 지원 */
+export function openViewerCompare(studyUids: string[], hangingProtocolId?: string) {
+  const hp = hangingProtocolId && hangingProtocolId !== "default"
+    ? `&hangingProtocolId=${encodeURIComponent(hangingProtocolId)}`
+    : "";
+  window.open(
+    `${OHIF_BASE}/viewer?StudyInstanceUIDs=${studyUids.map(encodeURIComponent).join(",")}${hp}`,
+    "_blank",
+  );
+}
 
 export interface InstanceThumb {
   orthanc_id: string;

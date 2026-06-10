@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
@@ -67,6 +68,27 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
     return {"job_id": job.id, "status": job.status}
 
 
+class PriorityBody(BaseModel):
+    emergency: bool
+
+
+@router.put("/studies/{study_id}/priority")
+def set_priority(
+    study_id: int, body: PriorityBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """F-15: Emergency/STAT 플래그 토글 (컨텍스트 메뉴 Priority)."""
+    from app.models import AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    study.emergency = body.emergency
+    db.add(AuditLog(action="priority_set", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "emergency": body.emergency}))
+    db.commit()
+    return {"ok": True, "emergency": study.emergency}
+
+
 @router.get("/studies/{study_id}/instances")
 def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """인스턴스 목록 + 썸네일 URL — 키이미지 선택 UI (F-16)."""
@@ -89,9 +111,6 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
     for it in items:
         it["preview_url"] = f"{base}/instances/{it['orthanc_id']}/preview"
     return {"items": items, "key_images": study.key_images or []}
-
-
-from pydantic import BaseModel  # noqa: E402
 
 
 class KeyImagesBody(BaseModel):
