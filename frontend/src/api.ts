@@ -1,5 +1,11 @@
 // API 클라이언트 — 백엔드 FastAPI
 const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const OHIF_BASE = import.meta.env.VITE_OHIF_BASE ?? "http://localhost:3000";
+
+/** View&Draft 동선: OHIF 뷰어를 해당 검사로 오픈 (디자인 §3.1 [A]) */
+export function openViewer(studyUid: string) {
+  window.open(`${OHIF_BASE}/viewer?StudyInstanceUIDs=${encodeURIComponent(studyUid)}`, "_blank");
+}
 
 let token: string | null = sessionStorage.getItem("sv_token");
 
@@ -113,4 +119,37 @@ export const api = {
     req<Report>(`/api/reports/${id}`, { method: "PUT", body: JSON.stringify({ sr_json }) }),
   finalizeReport: (id: number) =>
     req<Report>(`/api/reports/${id}/finalize`, { method: "POST" }),
+  batchReview: () => req<{ items: BatchCandidate[] }>("/api/batch-review"),
+  batchFinalize: (report_ids: number[]) =>
+    req<{ finalized: number; total: number }>("/api/reports/batch-finalize", {
+      method: "POST",
+      body: JSON.stringify({ report_ids }),
+    }),
 };
+
+export interface BatchCandidate {
+  report_id: number;
+  study_id: number;
+  patient_key: string;
+  patient_name: string;
+  modality: string;
+  study_date: string;
+  study_desc: string;
+  impression: string;
+  confidence: string;
+}
+
+/** PDF 다운로드 — 인증 헤더가 필요하므로 fetch→blob 방식 */
+export async function downloadReportPdf(reportId: number) {
+  const res = await fetch(`${BASE}/api/reports/${reportId}/export?format=pdf`, {
+    headers: { Authorization: `Bearer ${sessionStorage.getItem("sv_token")}` },
+  });
+  if (!res.ok) throw new Error("PDF 생성 실패");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] ?? "report.pdf";
+  a.click();
+  URL.revokeObjectURL(url);
+}

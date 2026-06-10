@@ -25,7 +25,8 @@ services:
       ORTHANC__DICOM_PORT: "4242"
       ORTHANC__HTTP_PORT: "8042"
       ORTHANC__REGISTERED_USERS: '{"saintview": "${ORTHANC_PASSWORD:-saintview_dev}"}'
-      ORTHANC__AUTHENTICATION_ENABLED: "true"
+      # 개발: OHIF 프록시(인증 헤더 없음) 허용을 위해 비활성. 운영 배포 시 true + 프록시 인증 필수
+      ORTHANC__AUTHENTICATION_ENABLED: "${ORTHANC_AUTH:-false}"
       ORTHANC__DICOM_WEB__ENABLE: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
       ORTHANC__OVERWRITE_INSTANCES: "true"
@@ -36,6 +37,17 @@ services:
       - "4242:4242"   # DICOM C-STORE
     volumes:
       - saintview_orthanc:/var/lib/orthanc/db
+
+  ohif:
+    image: ohif/app:v3.9.2
+    container_name: saintview-ohif
+    depends_on:
+      - orthanc
+    ports:
+      - "3000:80"
+    volumes:
+      - ./ohif/app-config.js:/usr/share/nginx/html/app-config.js:ro
+      - ./ohif/nginx-default.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   saintview_pgdata:

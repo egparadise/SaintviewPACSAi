@@ -2,6 +2,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
+  downloadReportPdf,
+  openViewer,
+  type BatchCandidate,
   type Report,
   type SrJson,
   type StudyDetail,
@@ -92,6 +95,10 @@ function StudyGrid({
                 row.emergency ? "emergency" : "",
               ].join(" ")}
               onClick={() => onSelect(row)}
+              onDoubleClick={() => {
+                onSelect(row);
+                openViewer(row.study_uid); // View&Draft: 더블클릭 = 뷰어 + 초안 패널 (§3.1)
+              }}
             >
               <td><StatusBadge status={row.status} /></td>
               <td>
@@ -245,6 +252,7 @@ function ReportPanel({
 
       <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
         <button onClick={regenerate} disabled={busy}>초안 재생성</button>
+        <button onClick={() => downloadReportPdf(current.id)} disabled={busy}>PDF</button>
         <div style={{ flex: 1 }} />
         <button onClick={save} disabled={busy || finalized}>저장</button>
         <button className="primary" onClick={finalize} disabled={busy || finalized}>
@@ -292,6 +300,97 @@ function RelatedExams({ detail }: { detail: StudyDetail }) {
   );
 }
 
+/* ── F-22: AI 초안 일괄 검토 모달 (디자인 §3.3) ────── */
+function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [items, setItems] = useState<BatchCandidate[]>([]);
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+
+  useEffect(() => {
+    api.batchReview().then((r) => {
+      setItems(r.items);
+      setChecked(new Set(r.items.map((i) => i.report_id)));
+    });
+  }, []);
+
+  const toggle = (id: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const r = await api.batchFinalize([...checked]);
+      setResult(`${r.finalized}/${r.total}건 확정 완료`);
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+      display: "grid", placeItems: "center", zIndex: 100,
+    }}>
+      <div style={{
+        background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+        width: 720, maxHeight: "80vh", display: "flex", flexDirection: "column",
+      }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center" }}>
+          <b>AI 초안 일괄 검토</b>
+          <span style={{ color: "var(--text-secondary)", fontSize: 12, marginLeft: 8 }}>
+            critical 소견 초안은 자동 제외 — 개별 검토 필요
+          </span>
+          <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
+        </div>
+        <div style={{ overflow: "auto", flex: 1 }}>
+          <table className="grid-table">
+            <thead>
+              <tr><th></th><th>환자</th><th>검사일</th><th>MOD</th><th>검사명</th><th>AI 임프레션</th><th>신뢰도</th></tr>
+            </thead>
+            <tbody>
+              {items.map((c) => (
+                <tr key={c.report_id} onClick={() => toggle(c.report_id)}>
+                  <td><input type="checkbox" checked={checked.has(c.report_id)} readOnly /></td>
+                  <td>{c.patient_name} ({c.patient_key})</td>
+                  <td>{c.study_date}</td>
+                  <td>{c.modality}</td>
+                  <td title={c.study_desc}>{c.study_desc}</td>
+                  <td style={{ color: "var(--ai)", maxWidth: 240 }} title={c.impression}>{c.impression}</td>
+                  <td>{c.confidence}</td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-secondary)", padding: 20 }}>
+                  일괄 검토 대상 초안이 없습니다
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center" }}>
+          {result && <span style={{ color: "var(--stat-final)" }}>{result}</span>}
+          <div style={{ flex: 1 }} />
+          <button
+            className="primary"
+            disabled={busy || checked.size === 0}
+            onClick={confirm}
+          >
+            선택 {checked.size}건 일괄 확정
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── 워크리스트 워크스페이스 루트 ─────────────────── */
 export function Worklist() {
   const [params, setParams] = useState<Record<string, string>>({});
@@ -299,6 +398,7 @@ export function Worklist() {
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<StudyDetail | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [batchOpen, setBatchOpen] = useState(false);
 
   const search = useCallback((p: Record<string, string>) => {
     setParams(p);
@@ -330,7 +430,21 @@ export function Worklist() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <FilterBar onSearch={search} />
+      <div style={{ display: "flex", alignItems: "stretch" }}>
+        <div style={{ flex: 1 }}><FilterBar onSearch={search} /></div>
+        <div style={{
+          display: "flex", alignItems: "center", padding: "0 8px",
+          background: "var(--bg-panel)", borderBottom: "1px solid var(--border)",
+        }}>
+          <button onClick={() => setBatchOpen(true)}>일괄 검토 (F-22)</button>
+        </div>
+      </div>
+      {batchOpen && (
+        <BatchReviewModal
+          onClose={() => setBatchOpen(false)}
+          onDone={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* [C] 메인 그리드 */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -342,11 +456,19 @@ export function Worklist() {
             width: 420, borderLeft: "1px solid var(--border)", background: "var(--bg-panel)",
             display: "flex", flexDirection: "column", minHeight: 0,
           }}>
-            <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-              <b>{selected.patient_name}</b>{" "}
-              <span style={{ color: "var(--text-secondary)" }}>
-                {selected.patient_key} · {selected.modality} · {selected.study_date}
-              </span>
+            <div style={{
+              padding: "8px 10px", borderBottom: "1px solid var(--border)",
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <b>{selected.patient_name}</b>{" "}
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {selected.patient_key} · {selected.modality} · {selected.study_date}
+                </span>
+              </div>
+              <button className="primary" onClick={() => openViewer(selected.study_uid)}>
+                뷰어 열기
+              </button>
             </div>
             <div style={{ padding: "4px 10px" }}>
               <PanelTitle>Related Exams (F-14)</PanelTitle>

@@ -11,12 +11,45 @@ import logging
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import AiJob
+from app.models import AiJob, AppSetting
 from app.services.ai_service import run_draft_job
 
 logger = logging.getLogger("saintview.ai_worker")
 
 POLL_INTERVAL_SEC = 2.0
+ORTHANC_SYNC_EVERY = 5  # 워커 폴링 N회마다 Orthanc 동기화 (≈10초)
+_SYNC_SEQ_KEY = "orthanc.last_change_seq"
+
+
+def sync_orthanc_once() -> int:
+    """Orthanc 변경 피드 1회 동기화. last seq는 app_setting에 영속화.
+
+    Orthanc 미가동이면 0 반환(다음 주기 재시도) — 검사 도착 자동 감지의 본체.
+    """
+    from app.dicom.orthanc import OrthancClient, sync_new_studies
+
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            return 0
+        with SessionLocal() as db:
+            row = db.execute(
+                select(AppSetting).where(
+                    AppSetting.scope == "global", AppSetting.key == _SYNC_SEQ_KEY
+                )
+            ).scalar_one_or_none()
+            since = int((row.value or {}).get("seq", 0)) if row else 0
+            registered, last = sync_new_studies(db, client, since=since)
+            if row is None:
+                db.add(AppSetting(scope="global", scope_id="", key=_SYNC_SEQ_KEY, value={"seq": last}))
+            else:
+                row.value = {"seq": last}
+            db.commit()
+            if registered:
+                logger.info("Orthanc 동기화: 신규 검사 %d건 (seq→%s)", registered, last)
+            return registered
+    finally:
+        client.close()
 
 
 def process_once() -> int:
@@ -39,12 +72,16 @@ def process_once() -> int:
 
 
 async def worker_loop(stop_event: asyncio.Event) -> None:
-    logger.info("AI 워커 시작 (폴링 %.1fs)", POLL_INTERVAL_SEC)
+    logger.info("AI 워커 시작 (폴링 %.1fs, Orthanc 동기화 %d주기)", POLL_INTERVAL_SEC, ORTHANC_SYNC_EVERY)
+    tick = 0
     while not stop_event.is_set():
         try:
             await asyncio.to_thread(process_once)
+            if tick % ORTHANC_SYNC_EVERY == 0:
+                await asyncio.to_thread(sync_orthanc_once)
         except Exception:
             logger.exception("워커 루프 오류")
+        tick += 1
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SEC)
         except asyncio.TimeoutError:
