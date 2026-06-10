@@ -39,6 +39,21 @@ def generate_for_study(db: Session, study: Study) -> Report:
     query_text = mask(f"{study.study_desc} {study.clinical_info}", patient_names=names).text
     similars = similar_cases(db, study, query_text)
 
+    # F-11: 키이미지 vision — ai.policy.vision 토글(기본 off) + Orthanc 가용 시
+    key_image = None
+    from app.services.settings_service import get_setting
+
+    policy = get_setting(db, "ai.policy", default={}) or {}
+    if policy.get("vision") and study.orthanc_id:
+        from app.dicom.orthanc import OrthancClient
+
+        client = OrthancClient()
+        try:
+            if client.alive():
+                key_image = client.study_preview_png(study.orthanc_id)
+        finally:
+            client.close()
+
     gi = GenerationInput(
         modality=study.modality,
         body_part=study.body_part,
@@ -46,6 +61,7 @@ def generate_for_study(db: Session, study: Study) -> Report:
         clinical_info=mask(study.clinical_info, patient_names=names).text,
         priors=priors,
         similars=similars,
+        key_image_png=key_image,
     )
     result = generate_draft(gi)
     return save_draft_from_ai(db, study, result.sr_json, model=result.model, sources=result.sources)

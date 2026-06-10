@@ -3,6 +3,7 @@ import { useState } from "react";
 import "./theme.css";
 import { hasToken, setToken, api } from "./api";
 import { Worklist } from "./pages/Worklist";
+import { SettingsModal } from "./pages/SettingsModal";
 
 function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
   const [username, setUsername] = useState("admin");
@@ -54,6 +55,7 @@ export default function App() {
         }
       : null,
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (!user) {
     return (
@@ -91,8 +93,11 @@ export default function App() {
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
           {user.name} [{user.role}]
         </span>
+        <button onClick={() => setSettingsOpen(true)}>설정</button>
         <button onClick={() => { setToken(null); setUser(null); }}>로그아웃</button>
       </header>
+
+      {settingsOpen && <SettingsModal role={user.role} onClose={() => setSettingsOpen(false)} />}
 
       <main style={{ flex: 1, minHeight: 0 }}>
         <Worklist />

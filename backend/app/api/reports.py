@@ -88,18 +88,54 @@ def export_report(
     report = db.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
-    if format != "pdf":
-        raise HTTPException(status_code=400, detail="지원 형식: pdf (DICOM SR/FHIR는 로드맵 P1/P2)")
-    pdf = render_report_pdf(db, report)
+    if format == "pdf":
+        payload = render_report_pdf(db, report)
+        media, ext = "application/pdf", "pdf"
+    elif format == "dicom-sr":
+        from app.dicom.sr import build_sr_dataset, sr_bytes
+        from app.models import Patient
+
+        patient = db.get(Patient, report.study.patient_id)
+        payload = sr_bytes(build_sr_dataset(report=report, study=report.study, patient=patient))
+        media, ext = "application/dicom", "dcm"
+    else:
+        raise HTTPException(status_code=400, detail="지원 형식: pdf | dicom-sr (FHIR는 P2)")
     db.add(AuditLog(action="report_export", target_type="report", target_id=str(report_id),
                     detail={"by": user["sub"], "format": format}))
     db.commit()
-    filename = f"report_{report.study.accession_no or report.study_id}_v{report.version}.pdf"
+    filename = f"report_{report.study.accession_no or report.study_id}_v{report.version}.{ext}"
     return Response(
-        content=pdf,
-        media_type="application/pdf",
+        content=payload,
+        media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/reports/{report_id}/send-sr")
+def send_sr(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """확정 판독을 DICOM SR로 Orthanc(검사 동일 Study)에 저장 — PACS에서 판독 표시."""
+    from app.dicom.orthanc import OrthancClient
+    from app.dicom.sr import build_sr_dataset, sr_bytes
+    from app.models import AuditLog, Patient
+
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+    if report.status != "finalized":
+        raise HTTPException(status_code=409, detail="확정된 판독만 SR로 전송할 수 있습니다")
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            raise HTTPException(status_code=503, detail="Orthanc에 연결할 수 없습니다")
+        patient = db.get(Patient, report.study.patient_id)
+        ds = build_sr_dataset(report=report, study=report.study, patient=patient)
+        result = client.upload_dicom(sr_bytes(ds))
+        db.add(AuditLog(action="report_send_sr", target_type="report", target_id=str(report_id),
+                        detail={"by": user["sub"], "orthanc": result.get("ID", "")}))
+        db.commit()
+        return {"ok": True, "sop_instance_uid": ds.SOPInstanceUID, "orthanc_id": result.get("ID", "")}
+    finally:
+        client.close()
 
 
 @router.get("/batch-review")

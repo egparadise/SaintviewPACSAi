@@ -57,6 +57,33 @@ def audit(limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(
     }
 
 
+@router.get("/ai-quality")
+def ai_quality(db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """F-20: AI 품질 지표 — 확정 판독의 diff_metrics 집계 (설계 §10 수용도)."""
+    from app.models import Report
+
+    rows = db.execute(
+        select(Report).where(Report.status == "finalized")
+    ).scalars().all()
+    with_ai = [r for r in rows if (r.diff_metrics or {}).get("has_ai_draft")]
+    n = len(with_ai)
+    if n == 0:
+        return {"finalized_total": len(rows), "with_ai_draft": 0}
+    accepted = sum(1 for r in with_ai if r.diff_metrics.get("accepted_unmodified"))
+    avg_mod = sum(r.diff_metrics.get("modified_ratio", 0) for r in with_ai) / n
+    critical_dropped = sum(1 for r in with_ai if r.diff_metrics.get("critical_dropped"))
+    critical_added = sum(1 for r in with_ai if r.diff_metrics.get("critical_added"))
+    return {
+        "finalized_total": len(rows),
+        "with_ai_draft": n,
+        "accepted_unmodified": accepted,
+        "acceptance_rate": round(accepted / n, 4),
+        "avg_modified_ratio": round(avg_mod, 4),
+        "critical_dropped": critical_dropped,  # 초안의 critical이 확정에서 빠짐 — 리뷰 대상
+        "critical_added": critical_added,      # 판독의가 critical 추가 — AI 미탐 신호
+    }
+
+
 @router.post("/sync-orthanc")
 def sync_orthanc(since: int = 0, db: Session = Depends(get_db), user: dict = Depends(admin_user)):
     """Orthanc 변경 피드 수동 동기화(운영은 워커 폴링)."""

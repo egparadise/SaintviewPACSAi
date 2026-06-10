@@ -47,6 +47,24 @@ class OrthancClient:
         r.raise_for_status()
         return r.json()
 
+    def study_preview_png(self, orthanc_study_id: str) -> bytes | None:
+        """검사 대표(중간) 인스턴스의 렌더링 PNG — vision 분석용(F-11).
+
+        ⚠ 번인 PHI 마스킹(설계 §8.1)은 P2 — 현재는 ai.policy.vision 토글로 opt-in.
+        """
+        try:
+            r = self._client.get(f"/studies/{orthanc_study_id}/instances")
+            r.raise_for_status()
+            instances = r.json()
+            if not instances:
+                return None
+            mid = instances[len(instances) // 2]["ID"]
+            r = self._client.get(f"/instances/{mid}/preview", headers={"Accept": "image/png"})
+            r.raise_for_status()
+            return r.content
+        except httpx.HTTPError:
+            return None
+
     def close(self) -> None:
         self._client.close()
 

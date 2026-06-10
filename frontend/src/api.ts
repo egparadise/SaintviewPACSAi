@@ -125,7 +125,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ report_ids }),
     }),
+  sendSr: (reportId: number) =>
+    req<{ ok: boolean; sop_instance_uid: string }>(`/api/reports/${reportId}/send-sr`, {
+      method: "POST",
+    }),
+  getSetting: (key: string) => req<{ key: string; value: Record<string, unknown> }>(`/api/settings/${key}`),
+  putSetting: (key: string, value: Record<string, unknown>, scope: "user" | "global") =>
+    req<{ ok: boolean }>(`/api/settings/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ value, scope }),
+    }),
+  aiQuality: () => req<AiQuality>("/api/admin/ai-quality"),
 };
+
+export interface AiQuality {
+  finalized_total: number;
+  with_ai_draft: number;
+  accepted_unmodified?: number;
+  acceptance_rate?: number;
+  avg_modified_ratio?: number;
+  critical_dropped?: number;
+  critical_added?: number;
+}
 
 export interface BatchCandidate {
   report_id: number;

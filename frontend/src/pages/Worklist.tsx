@@ -253,6 +253,21 @@ function ReportPanel({
       <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
         <button onClick={regenerate} disabled={busy}>초안 재생성</button>
         <button onClick={() => downloadReportPdf(current.id)} disabled={busy}>PDF</button>
+        {finalized && (
+          <button
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api.sendSr(current.id);
+                alert("DICOM SR 전송 완료 — 뷰어에서 SR 시리즈 확인 가능");
+              } finally { setBusy(false); }
+            }}
+            disabled={busy}
+            title="확정 판독을 DICOM SR로 검사에 저장"
+          >
+            SR 전송
+          </button>
+        )}
         <div style={{ flex: 1 }} />
         <button onClick={save} disabled={busy || finalized}>저장</button>
         <button className="primary" onClick={finalize} disabled={busy || finalized}>

@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, reports, worklist
+from app.api import admin, auth, reports, settings as settings_api, worklist
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.services.auth_service import ensure_default_admin
@@ -45,6 +45,7 @@ app.include_router(auth.router)
 app.include_router(worklist.router)
 app.include_router(reports.router)
 app.include_router(admin.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/api/health")
