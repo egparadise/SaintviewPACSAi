@@ -9,3 +9,9 @@ backend/dev.db
 backend/.venv/
 *.log
 .DS_Store
+
+# prod nginx (시크릿 포함 — gen_prod_conf.py 생성물)
+deploy/ohif/nginx-prod.conf
+
+# 실데이터 평가 케이스 (PHI — 원내 보관, 커밋 금지)
+harness/eval_cases/real_*.jsonl

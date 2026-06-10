@@ -13,6 +13,11 @@ import {
   type StudyRow,
 } from "../api";
 
+import { Suspense, lazy } from "react";
+
+// Cornerstone3D 번들(~3MB)은 3D 뷰어 첫 사용 시에만 로드 (코드 분할)
+const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
+
 /** F-18: 모달리티별 행잉 매핑 (viewer.prefs.hanging) — 모듈 레벨 캐시 */
 let hangingMap: Record<string, string> = {};
 export function loadHangingPrefs() {
@@ -507,6 +512,7 @@ export function Worklist() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [batchOpen, setBatchOpen] = useState(false);
   const [refreshSec, setRefreshSec] = useState(10);
+  const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
 
   // 사용자 환경설정 로드 (worklist.prefs + viewer.prefs) — 화면분석 §5.4
   useEffect(() => {
@@ -564,6 +570,16 @@ export function Worklist() {
           onDone={() => setRefreshKey((k) => k + 1)}
         />
       )}
+      {viewer3dUid && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200,
+                        display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
+            3D 뷰어 로딩…
+          </div>
+        }>
+          <Viewer3D studyUid={viewer3dUid} onClose={() => setViewer3dUid(null)} />
+        </Suspense>
+      )}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* [C] 메인 그리드 */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -585,6 +601,14 @@ export function Worklist() {
                   {selected.patient_key} · {selected.modality} · {selected.study_date}
                 </span>
               </div>
+              <button
+                onClick={() => setViewer3dUid(selected.study_uid)}
+                title="내장 3D 뷰어 — WebGL MPR/MIP (Cornerstone3D)"
+                style={{ display: "flex", alignItems: "center", gap: 5 }}
+              >
+                <img src="/saintview-viewer.svg" alt="" width={16} height={16} />
+                3D
+              </button>
               <button className="primary" onClick={() => openViewer(selected.study_uid, hpFor(selected.modality))}>
                 뷰어 열기
               </button>

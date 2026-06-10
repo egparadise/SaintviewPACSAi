@@ -20,6 +20,7 @@ logger = logging.getLogger("saintview")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_settings().validate_for_prod()  # prod 보안 게이트 (§8)
     init_db()
     with SessionLocal() as db:
         ensure_default_admin(db)

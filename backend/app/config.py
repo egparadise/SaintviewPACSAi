@@ -10,6 +10,8 @@ load_dotenv()
 
 
 class Settings:
+    # 환경: dev | prod — prod에서는 기본 시크릿을 거부한다(§8 보안 게이트)
+    env: str = os.getenv("SAINTVIEW_ENV", "dev")
     # DB (D-1: PostgreSQL+pgvector, 개발 폴백 SQLite)
     database_url: str = os.getenv(
         "SAINTVIEW_DATABASE_URL",
@@ -34,6 +36,22 @@ class Settings:
     @property
     def is_postgres(self) -> bool:
         return self.database_url.startswith("postgresql")
+
+    def validate_for_prod(self) -> None:
+        """파일럿/운영 기동 게이트 — 기본 시크릿·약한 설정이면 기동 거부."""
+        if self.env != "prod":
+            return
+        problems = []
+        if self.jwt_secret == "dev-only-change-me" or len(self.jwt_secret) < 32:
+            problems.append("SAINTVIEW_JWT_SECRET: 32자 이상 무작위 값 필요")
+        if os.getenv("SAINTVIEW_ADMIN_PASSWORD", "admin1234") == "admin1234":
+            problems.append("SAINTVIEW_ADMIN_PASSWORD: 기본값 사용 금지")
+        if self.orthanc_password == "saintview_dev":
+            problems.append("SAINTVIEW_ORTHANC_PASSWORD: 기본값 사용 금지")
+        if self.database_url.startswith("sqlite"):
+            problems.append("SAINTVIEW_DATABASE_URL: prod는 PostgreSQL 필수(D-1)")
+        if problems:
+            raise RuntimeError("prod 보안 게이트 실패:\n- " + "\n- ".join(problems))
 
 
 @lru_cache
