@@ -96,7 +96,8 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
 - [x] **2차 구현 완료(2026-06-11)**: OHIF 뷰어 통합(compose `ohif` 서비스 + nginx `/dicom-web` 프록시, View&Draft 더블클릭/버튼 연동) · Orthanc 자동 동기화 워커(변경 피드 폴링, seq 영속화) · Alembic 초기 마이그레이션(`bc8a938bfda7`, 신규 DB 검증) · **PDF 출력**(한글 CID 폰트, 사이트 템플릿 `pdf.template`, AI 초안 경고) · **F-22 일괄 검토**(critical 자동 제외 + batch-finalize + 모달). **pytest 20/20**
 - [x] **live AI 모드 검증 완료(2026-06-11)**: `claude-opus-4-8` 실호출 — 구조화 출력 100% 유효, prior UID 반영(프롬프트 보정 1fa52e2), **환각 억제 확인**(근거 없는 케이스에서 "자료 부족, 재판독 필요"로 응답). 서버 전구간 E2E(업로드→자동 감지→live 초안) PASS. 비용 ≈ \$0.02/건, 11~23s. 키는 `backend/.env`(gitignore) — **절대 커밋 금지**
 - [x] **3차 구현(2026-06-11)**: **DICOM SR 출력**(Basic Text SR, 동일 StudyUID 귀속 → `send-sr`로 Orthanc 저장, live 검증: 검사 시리즈 [CT, SR] 확인) · **설정 API+화면**(화이트리스트 키, 사용자/관리자 scope, PDF 템플릿·AI 정책 GUI) · **F-11 vision**(Orthanc preview→Claude vision, `ai.policy.vision` opt-in, "[영상 참고 관찰]" 구분 규칙) · **F-20 품질 통계**(`/api/admin/ai-quality`: 수용률·수정률·critical 변경, 설정 화면 표시). **pytest 24/24**
-- [ ] 남은 것: 행잉 프로토콜·GSPS(F-16/F-18 — OHIF 확장 영역), 사용자 환경설정 항목 확대, vision 번인 PHI 마스킹(P2), FHIR 출력(P2)
+- [x] **4차 구현(2026-06-11)**: **F-16 키이미지/KOS**(선택 UI→KOS 88.59 생성→Orthanc, live: [CT,KO] 확인, PDF 자동 첨부) · **F-18 행잉 매핑**(viewer.prefs: 모달리티→default/mpr, OHIF URL 연동) · **사용자 환경설정 적용**(자동갱신 주기·기본 필터) · **이미지 가드**(vision 전송 전 상·하단 10% 번인 마스킹) · **FHIR DiagnosticReport**(format=fhir, AI 확장 표시). 마이그레이션 c1d2e3f4. **pytest 28/28**
+- [ ] 남은 것(후순위): GSPS(뷰어 주석 캡처 — OHIF 커스텀 확장 빌드 필요), MG 4-view 행잉(동일), 번인 마스킹 OCR 고도화, MWL/MPPS(P2), 컬럼 사용자화 UI(F-8 P1)
 - 실행: `docker compose -f deploy/docker-compose.yml up -d` (db+orthanc+**OHIF:3000**) → `cd backend && py -3.11 -m uvicorn app.main:app` → `cd frontend && npm run dev` (admin/admin1234, 운영 전 변경). DB 스키마는 `alembic upgrade head`
 
 ---
