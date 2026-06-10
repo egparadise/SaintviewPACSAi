@@ -1,0 +1,118 @@
+"""SR JSON 스키마 — 설계 §6.2. Claude structured outputs의 json_schema로도 사용."""
+from __future__ import annotations
+
+SR_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "exam": {
+            "type": "object",
+            "properties": {
+                "modality": {"type": "string"},
+                "body_part": {"type": "string"},
+                "technique": {"type": "string"},
+            },
+            "required": ["modality", "body_part", "technique"],
+            "additionalProperties": False,
+        },
+        "comparison": {
+            "type": "object",
+            "properties": {
+                "prior_study_refs": {"type": "array", "items": {"type": "string"}},
+                "summary": {"type": "string"},
+            },
+            "required": ["prior_study_refs", "summary"],
+            "additionalProperties": False,
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "organ": {"type": "string"},
+                    "observation": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["normal", "minor", "significant", "critical"],
+                    },
+                    "measurements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "value": {"type": "number"},
+                                "unit": {"type": "string"},
+                            },
+                            "required": ["name", "value", "unit"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["organ", "observation", "severity", "measurements"],
+                "additionalProperties": False,
+            },
+        },
+        "impression": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rank": {"type": "integer"},
+                    "statement": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["low", "moderate", "high"]},
+                    "codes": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["rank", "statement", "confidence", "codes"],
+                "additionalProperties": False,
+            },
+        },
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "timeframe": {"type": "string"},
+                },
+                "required": ["action", "timeframe"],
+                "additionalProperties": False,
+            },
+        },
+        "ai_meta": {
+            "type": "object",
+            "properties": {
+                "caveats": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["caveats"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["exam", "comparison", "findings", "impression", "recommendations", "ai_meta"],
+    "additionalProperties": False,
+}
+
+
+def has_critical(sr_json: dict) -> bool:
+    return any(f.get("severity") == "critical" for f in (sr_json or {}).get("findings", []))
+
+
+def narrative_from_sr(sr_json: dict) -> str:
+    """SR JSON → 전문 텍스트(Reading/Conclusion/Recommend — 디자인 §3.2 매핑)."""
+    lines: list[str] = []
+    comp = (sr_json or {}).get("comparison", {})
+    if comp.get("summary"):
+        lines.append(f"[Comparison] {comp['summary']}")
+    lines.append("[Findings]")
+    for f in (sr_json or {}).get("findings", []):
+        sev = f.get("severity", "")
+        lines.append(f"- {f.get('organ', '')}: {f.get('observation', '')} ({sev})")
+    lines.append("[Conclusion]")
+    for i in sorted((sr_json or {}).get("impression", []), key=lambda x: x.get("rank", 99)):
+        lines.append(f"{i.get('rank', '')}. {i.get('statement', '')}")
+    recs = (sr_json or {}).get("recommendations", [])
+    if recs:
+        lines.append("[Recommend]")
+        for r in recs:
+            tf = f" ({r['timeframe']})" if r.get("timeframe") else ""
+            lines.append(f"- {r.get('action', '')}{tf}")
+    return "\n".join(lines)

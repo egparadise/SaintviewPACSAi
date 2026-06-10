@@ -1,0 +1,42 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: saintview-db
+    environment:
+      POSTGRES_DB: saintview
+      POSTGRES_USER: saintview
+      POSTGRES_PASSWORD: ${SAINTVIEW_DB_PASSWORD:-saintview_dev}
+    ports:
+      - "5433:5432"
+    volumes:
+      - saintview_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saintview"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orthanc:
+    image: orthancteam/orthanc:24.10.1
+    container_name: saintview-orthanc
+    environment:
+      ORTHANC__NAME: "SaintviewOrthanc"
+      ORTHANC__DICOM_AET: "SAINTVIEW"
+      ORTHANC__DICOM_PORT: "4242"
+      ORTHANC__HTTP_PORT: "8042"
+      ORTHANC__REGISTERED_USERS: '{"saintview": "${ORTHANC_PASSWORD:-saintview_dev}"}'
+      ORTHANC__AUTHENTICATION_ENABLED: "true"
+      ORTHANC__DICOM_WEB__ENABLE: "true"
+      ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
+      ORTHANC__OVERWRITE_INSTANCES: "true"
+      # 수신 검증 옵션 (화면분석 §5.3 — calling/called AE 검증은 운영 시 활성화)
+      ORTHANC__DICOM_CHECK_CALLED_AET: "false"
+    ports:
+      - "8042:8042"   # HTTP / DICOMweb
+      - "4242:4242"   # DICOM C-STORE
+    volumes:
+      - saintview_orthanc:/var/lib/orthanc/db
+
+volumes:
+  saintview_pgdata:
+  saintview_orthanc:
