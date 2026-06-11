@@ -180,6 +180,162 @@ def set_key_images(
     return {"ok": True, "count": len(body.items)}
 
 
+@router.post("/studies/{study_id}/ctr")
+def measure_ctr_endpoint(
+    study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """S2 자동계측 CTR(심흉비) — AI 초안 계측 + numeric_verify. 확정 아님(라벨 필수)."""
+    from sqlalchemy import delete
+
+    from app.models import Annotation, AuditLog
+    from app.rag.ctr import measure_ctr
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if study.modality not in ("CR", "DX"):
+        raise HTTPException(status_code=409, detail="CTR은 흉부 X선(CR/DX)에서만 계측합니다")
+
+    png: bytes | None = None
+    if study.orthanc_id:
+        from app.dicom.orthanc import OrthancClient
+        from app.rag.image_guard import mask_burn_in
+
+        client = OrthancClient()
+        try:
+            if client.alive():
+                raw = client.study_preview_png(study.orthanc_id)
+                if raw:
+                    png = mask_burn_in(raw)  # PHI 게이트(절대 규칙 1) — 번인 마스킹 후 전송
+        finally:
+            client.close()
+
+    result = measure_ctr(study.study_uid, png)
+
+    # AI 계측 주석 영속화 — 기존 ctr 주석은 교체
+    db.execute(delete(Annotation).where(Annotation.study_id == study_id, Annotation.kind == "ctr"))
+    if result["verified"] and result["ctr"] is not None:
+        for name, seg in (("cardiac", result["cardiac"]), ("thoracic", result["thoracic"])):
+            db.add(Annotation(
+                study_id=study_id, kind="ctr",
+                points=[[seg["x1"], seg["y"]], [seg["x2"], seg["y"]]],
+                value=result["ctr"], unit="ratio",
+                text=f"CTR {name} (AI 초안)",
+                source="ai", confidence=result["confidence"], verified=True,
+                created_by=user["sub"],
+            ))
+    db.add(AuditLog(action="ctr_measure", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "ctr": result["ctr"], "verified": result["verified"],
+                            "source": result["source"]}))
+    db.commit()
+    return result
+
+
+def _anno_out(a) -> dict:
+    return {
+        "id": a.id, "series_uid": a.series_uid, "sop_uid": a.sop_uid, "kind": a.kind,
+        "points": a.points or [], "value": a.value, "unit": a.unit, "text": a.text,
+        "source": a.source, "confidence": a.confidence, "verified": a.verified,
+        "created_by": a.created_by,
+    }
+
+
+@router.get("/studies/{study_id}/annotations")
+def get_annotations(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """주석/계측 목록 (07 A.4) — 뷰어 로드 시 복원."""
+    from sqlalchemy import select
+
+    from app.models import Annotation
+
+    rows = db.execute(select(Annotation).where(Annotation.study_id == study_id)).scalars().all()
+    return {"items": [_anno_out(a) for a in rows]}
+
+
+class AnnotationsBody(BaseModel):
+    items: list[dict]  # [{series_uid, sop_uid, kind, points, value?, unit?, text?, source?, confidence?, verified?}]
+
+
+@router.put("/studies/{study_id}/annotations")
+def put_annotations(
+    study_id: int, body: AnnotationsBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """주석 전체 교체 저장 — 뷰어 Save. AI 주석(source=ai)은 라벨 보존."""
+    from sqlalchemy import delete
+
+    from app.models import Annotation, AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if len(body.items) > 500:
+        raise HTTPException(status_code=400, detail="주석은 검사당 500개 이하")
+    db.execute(delete(Annotation).where(Annotation.study_id == study_id))
+    for it in body.items:
+        pts = it.get("points") or []
+        if not isinstance(pts, list):
+            continue
+        db.add(Annotation(
+            study_id=study_id,
+            series_uid=str(it.get("series_uid", ""))[:128],
+            sop_uid=str(it.get("sop_uid", ""))[:128],
+            kind=str(it.get("kind", "line"))[:32],
+            points=pts,
+            value=it.get("value"),
+            unit=str(it.get("unit", ""))[:16],
+            text=str(it.get("text", ""))[:512],
+            source="ai" if it.get("source") == "ai" else "user",
+            confidence=it.get("confidence"),
+            verified=bool(it.get("verified", False)),
+            created_by=user["sub"],
+        ))
+    db.add(AuditLog(action="annotations_save", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "count": len(body.items)}))
+    db.commit()
+    return {"ok": True, "count": len(body.items)}
+
+
+class GspsBody(BaseModel):
+    images: list[dict]        # [{sop_uid, series_uid, rows, cols}]
+    annotations: list[dict]   # 07 A.4 주석 (points 0~1)
+    wc: float | None = None
+    ww: float | None = None
+    label: str = "SAINTVIEW"
+
+
+@router.post("/studies/{study_id}/send-gsps")
+def send_gsps(
+    study_id: int, body: GspsBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """주석·W/L을 GSPS 표준 객체로 Orthanc(동일 Study)에 저장."""
+    from app.dicom.gsps import build_gsps_dataset, gsps_bytes
+    from app.dicom.orthanc import OrthancClient
+    from app.models import AuditLog, Patient
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not body.images:
+        raise HTTPException(status_code=400, detail="참조 이미지가 없습니다")
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            raise HTTPException(status_code=503, detail="Orthanc에 연결할 수 없습니다")
+        patient = db.get(Patient, study.patient_id)
+        ds = build_gsps_dataset(
+            study=study, patient=patient, images=body.images,
+            annotations=body.annotations, wc=body.wc, ww=body.ww,
+            label=body.label, creator=user["sub"],
+        )
+        result = client.upload_dicom(gsps_bytes(ds))
+        db.add(AuditLog(action="send_gsps", target_type="study", target_id=str(study_id),
+                        detail={"by": user["sub"], "annotations": len(body.annotations),
+                                "orthanc": result.get("ID", "")}))
+        db.commit()
+        return {"ok": True, "sop_instance_uid": ds.SOPInstanceUID}
+    finally:
+        client.close()
+
+
 @router.post("/studies/{study_id}/send-kos")
 def send_kos(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """키이미지 선택을 KOS 표준 객체로 Orthanc에 저장 (F-16)."""

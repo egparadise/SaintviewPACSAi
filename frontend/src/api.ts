@@ -170,6 +170,29 @@ export const api = {
     req<NlQueryResult>("/api/worklist/nl-query", { method: "POST", body: JSON.stringify({ text }) }),
   mergeReports: (study_ids: number[]) =>
     req<Report>("/api/reports/merge", { method: "POST", body: JSON.stringify({ study_ids }) }),
+  annotations: (studyId: number) =>
+    req<{ items: Anno[] }>(`/api/studies/${studyId}/annotations`),
+  saveAnnotations: (studyId: number, items: Anno[]) =>
+    req<{ ok: boolean; count: number }>(`/api/studies/${studyId}/annotations`, {
+      method: "PUT", body: JSON.stringify({ items }),
+    }),
+  ctr: (studyId: number) =>
+    req<CtrResult>(`/api/studies/${studyId}/ctr`, { method: "POST" }),
+  sendGsps: (studyId: number, body: {
+    images: { sop_uid: string; series_uid: string; rows: number; cols: number }[];
+    annotations: Anno[]; wc?: number | null; ww?: number | null; label?: string;
+  }) =>
+    req<{ ok: boolean; sop_instance_uid: string }>(`/api/studies/${studyId}/send-gsps`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  orders: (params: Record<string, string> = {}) =>
+    req<{ items: OrderRow[] }>(`/api/orders?${new URLSearchParams(params)}`),
+  createOrder: (body: Partial<OrderRow>) =>
+    req<OrderRow>("/api/orders", { method: "POST", body: JSON.stringify(body) }),
+  setOrderStatus: (id: number, status: string) =>
+    req<OrderRow>(`/api/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+  exportMwl: () =>
+    req<{ ok: boolean; count: number; dir: string }>("/api/orders/export-mwl", { method: "POST" }),
 };
 
 /** S1 자연어 검색 — 적용 전 미리보기(explanation) 필수 */
@@ -183,12 +206,63 @@ export interface NlQueryResult {
   source: "mock" | "live" | "live_fallback";
 }
 
+export interface InstanceNode {
+  orthanc_id: string;
+  sop_uid: string;
+  instance_number: number;
+  preview_url: string;
+  rows: number;
+  cols: number;
+  pixel_spacing: number[];   // [row, col] mm — 없으면 []
+  position: number[];        // ImagePositionPatient [x,y,z]
+  orientation: number[];     // ImageOrientationPatient 6개
+}
+
 export interface SeriesNode {
   series_uid: string;
   modality: string;
   series_desc: string;
   series_number: number;
-  instances: { orthanc_id: string; sop_uid: string; instance_number: number; preview_url: string }[];
+  instances: InstanceNode[];
+}
+
+/** 주석/계측 (07 A.4) — 좌표는 이미지 정규화(0~1) */
+export interface Anno {
+  id?: number;
+  series_uid: string;
+  sop_uid: string;
+  kind: string;              // length|angle|rect|ellipse|arrow|text|ctr
+  points: number[][];
+  value?: number | null;
+  unit?: string;
+  text?: string;
+  source?: "user" | "ai";
+  confidence?: number | null;
+  verified?: boolean;
+}
+
+export interface CtrResult {
+  ctr: number | null;
+  cardiac: { x1: number; x2: number; y: number } | null;
+  thoracic: { x1: number; x2: number; y: number } | null;
+  confidence: number;
+  note: string;
+  verified: boolean;
+  verify_note: string;
+  source: string;
+}
+
+export interface OrderRow {
+  id: number;
+  patient_key: string;
+  patient_name: string;
+  accession_no: string;
+  modality: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  procedure_desc: string;
+  station_aet: string;
+  status: string;            // scheduled|in_progress|completed|cancelled (MPPS 매핑)
 }
 
 export interface OrthancStatus {

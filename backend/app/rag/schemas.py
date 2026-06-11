@@ -92,6 +92,34 @@ SR_SCHEMA: dict = {
 }
 
 
+# S2 자동계측 CTR(심흉비) — vision 구조화 출력. 좌표는 이미지 정규화(0~1)
+CTR_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "cardiac": {
+            "type": "object",
+            "properties": {
+                "x1": {"type": "number"}, "x2": {"type": "number"}, "y": {"type": "number"},
+            },
+            "required": ["x1", "x2", "y"],
+            "additionalProperties": False,
+        },
+        "thoracic": {
+            "type": "object",
+            "properties": {
+                "x1": {"type": "number"}, "x2": {"type": "number"}, "y": {"type": "number"},
+            },
+            "required": ["x1", "x2", "y"],
+            "additionalProperties": False,
+        },
+        "confidence": {"type": "number"},
+        "note": {"type": "string"},
+    },
+    "required": ["cardiac", "thoracic", "confidence", "note"],
+    "additionalProperties": False,
+}
+
+
 # S1 자연어 검색(nl_to_query) — 자연어 → 워크리스트 필터 구조화 출력 스키마
 NL_QUERY_SCHEMA: dict = {
     "type": "object",

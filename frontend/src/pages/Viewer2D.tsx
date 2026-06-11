@@ -1,8 +1,19 @@
 // Saintview 2D 뷰어 — WADO-RS /rendered 기반(픽셀 보장) + Zetta/INFINITT 레이아웃
 // 설정 연동: 팔레트/썸네일 방향·크기, 썸네일 모드(시리즈/전체), 행잉(모달리티→분할), 판독 도크
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, openViewer, type Report, type SeriesNode, type StudyDetail } from "../api";
+import { api, openViewer, type Anno, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
+import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
+
+type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
+const TOOL_DEFS: [ToolKind, string, string][] = [
+  ["length", "Len", "길이 계측 (2점, mm)"],
+  ["angle", "Ang", "각도 계측 (3점)"],
+  ["rect", "Rect", "사각 ROI (면적)"],
+  ["ellipse", "Elps", "타원 ROI (면적)"],
+  ["arrow", "Arrw", "화살표"],
+  ["text", "Text", "텍스트 주석"],
+];
 
 const PANE_IDS = ["p0", "p1", "p2", "p3"];
 const LAYOUTS: Record<string, { cols: number; rows: number; count: number }> = {
@@ -85,6 +96,34 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
   // 판독 도크(요청 5)
   const [report, setReport] = useState<Report | null>(null);
   const [priorTrees, setPriorTrees] = useState<Record<number, { uid: string; series: SeriesNode[] }>>({});
+  // 측정/주석 (07 A.4) + Reference line
+  const [tool, setTool] = useState<ToolKind | null>(null);
+  const [annos, setAnnos] = useState<Anno[]>([]);
+  const [draft, setDraft] = useState<{ pid: string; sop_uid: string; series_uid: string; points: number[][] } | null>(null);
+  const [refOn, setRefOn] = useState(false);
+  const paneSizes = useRef<Record<string, { w: number; h: number }>>({});
+  const [, setSizeTick] = useState(0);
+  const observers = useRef<Record<string, ResizeObserver>>({});
+  const paneRefCbs = useRef<Record<string, (el: HTMLDivElement | null) => void>>({});
+
+  const getPaneRef = (pid: string) => {
+    if (!paneRefCbs.current[pid]) {
+      paneRefCbs.current[pid] = (el) => {
+        observers.current[pid]?.disconnect();
+        delete observers.current[pid];
+        if (el) {
+          const ro = new ResizeObserver((es) => {
+            const r = es[0].contentRect;
+            paneSizes.current[pid] = { w: r.width, h: r.height };
+            setSizeTick((t) => t + 1);
+          });
+          ro.observe(el);
+          observers.current[pid] = ro;
+        }
+      };
+    }
+    return paneRefCbs.current[pid];
+  };
 
   const patch = useCallback((pid: string, p: Partial<PaneState>) => {
     setPanes((prev) => ({ ...prev, [pid]: { ...prev[pid], ...p } }));
@@ -125,7 +164,11 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       }
     }).catch(() => setStatus("시리즈 조회 실패"));
     api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => {});
-    return () => { if (cineRef.current) window.clearInterval(cineRef.current); };
+    api.annotations(detail.id).then((r) => setAnnos(r.items)).catch(() => {});
+    return () => {
+      if (cineRef.current) window.clearInterval(cineRef.current);
+      Object.values(observers.current).forEach((o) => o.disconnect());
+    };
   }, [detail.id, detail.study_uid]);
 
   /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
@@ -172,7 +215,11 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       switch (e.key) {
         case "ArrowRight": case "ArrowDown": e.preventDefault(); step(activePane, 1); break;
         case "ArrowLeft": case "ArrowUp": e.preventDefault(); step(activePane, -1); break;
-        case "Escape": onClose(); break;
+        case "Escape":
+          if (draft) setDraft(null);
+          else if (tool) setTool(null);
+          else onClose();
+          break;
         case " ": e.preventDefault(); act("cine"); break;
         case "1": setLayout("1x1"); break;
         case "2": setLayout("1x2"); break;
@@ -189,13 +236,92 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePane, step]);
+  }, [activePane, step, tool, draft]);
 
   /* 마우스 상호작용 */
   const dragRef = useRef<{ pid: string; x: number; y: number; btn: number } | null>(null);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {
     setActivePane(pid);
+    if (tool && e.button === 0) { handleAnnoPoint(pid, e); return; }  // 측정 도구 우선
     dragRef.current = { pid, x: e.clientX, y: e.clientY, btn: e.button };
+  };
+
+  /* 측정 도구 — 클릭 점 수집 → 완성 시 주석 생성(계측값 자동 계산) */
+  const handleAnnoPoint = (pid: string, e: React.MouseEvent) => {
+    const p = panes[pid];
+    const inst = p.series?.instances[p.index];
+    if (!tool || !p.series || !inst) return;
+    const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const pt = screenToImage(e.clientX, e.clientY, rect, p, aspect);
+    if (!pt) return;
+    const need = tool === "angle" ? 3 : tool === "text" ? 1 : 2;
+    const d = draft && draft.pid === pid
+      ? draft
+      : { pid, sop_uid: inst.sop_uid, series_uid: p.series.series_uid, points: [] as number[][] };
+    const points = [...d.points, pt];
+    if (points.length < need) { setDraft({ ...d, points }); return; }
+    let text = "";
+    if (tool === "text") {
+      text = window.prompt("주석 텍스트") ?? "";
+      if (!text) { setDraft(null); return; }
+    }
+    const m = measureAnno(tool, points, inst);
+    setAnnos((prev) => [...prev, {
+      series_uid: d.series_uid, sop_uid: d.sop_uid, kind: tool, points,
+      value: m?.value ?? null, unit: m?.unit ?? "", text, source: "user",
+    }]);
+    setDraft(null);
+  };
+
+  /* S2 자동계측 CTR — AI 초안 라벨 필수 */
+  const doCtr = async () => {
+    setStatus("AI CTR 계측 중…");
+    try {
+      const r = await api.ctr(detail.id);
+      const a = await api.annotations(detail.id);
+      setAnnos((prev) => [...prev.filter((x) => x.kind !== "ctr"), ...a.items.filter((x) => x.kind === "ctr")]);
+      setStatus(r.verified && r.ctr != null
+        ? `AI CTR ${r.ctr} · 신뢰도 ${(r.confidence * 100).toFixed(0)}% (초안 — 확정 아님)`
+        : `CTR 검증 실패: ${r.verify_note || r.note}`);
+    } catch (e) { setStatus(e instanceof Error ? e.message : "CTR 실패"); }
+  };
+
+  const saveAnnos = async () => {
+    try {
+      await api.saveAnnotations(detail.id, annos);
+      setStatus(`주석 ${annos.length}건 저장됨 (서버)`);
+    } catch { setStatus("주석 저장 실패"); }
+  };
+
+  /* GSPS 내보내기 — 주석 + 현재 W/L을 표준 Presentation State로 */
+  const doGsps = async () => {
+    const p = panes[activePane];
+    const inst = p.series?.instances[p.index];
+    if (!p.series || !inst) return;
+    const findInst = (sop: string): { i: InstanceNode; s: SeriesNode } | null => {
+      for (const s of series) {
+        const i = s.instances.find((x) => x.sop_uid === sop);
+        if (i) return { i, s };
+      }
+      return null;
+    };
+    const images = new Map<string, { sop_uid: string; series_uid: string; rows: number; cols: number }>();
+    for (const a of annos) {
+      if (!a.sop_uid) continue;
+      const f = findInst(a.sop_uid);
+      if (f) images.set(a.sop_uid, { sop_uid: a.sop_uid, series_uid: f.s.series_uid, rows: f.i.rows, cols: f.i.cols });
+    }
+    if (images.size === 0) {
+      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: p.series.series_uid, rows: inst.rows, cols: inst.cols });
+    }
+    const [wc, ww] = p.wl ? p.wl.split(",").map(Number) : [null, null];
+    // sop 미지정 주석(CTR 등 study 단위)은 현재 이미지에 귀속해 내보냄
+    const list = annos.map((a) => a.sop_uid ? a : { ...a, sop_uid: inst.sop_uid, series_uid: p.series!.series_uid });
+    try {
+      await api.sendGsps(detail.id, { images: [...images.values()], annotations: list, wc, ww });
+      setStatus("GSPS 저장됨 — Orthanc 동일 검사 귀속");
+    } catch (e) { setStatus(e instanceof Error ? e.message : "GSPS 실패"); }
   };
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -241,6 +367,44 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
         break;
       }
     }
+  };
+
+  /* 주석/Reference line SVG 오버레이 — 이미지 콘텐츠 사각형에 정합(viewBox=픽셀 격자) */
+  const annoSvg = (pid: string, p: PaneState, inst: InstanceNode) => {
+    const size = paneSizes.current[pid];
+    if (!size || size.w < 10 || size.h < 10) return null;
+    const cols = inst.cols || 1000, rows = inst.rows || 1000;
+    const cr = contentRect(size.w, size.h, cols / rows);
+    const sx = (v: number) => v * cols, sy = (v: number) => v * rows;
+    const fs = Math.max(cols, rows) * 0.022;
+    const items = annos.filter((a) =>
+      a.sop_uid === inst.sop_uid || (!a.sop_uid && p.studyUid === detail.study_uid));
+    const dr = draft && draft.pid === pid ? draft : null;
+    let refSeg: [number, number][] | null = null;
+    if (refOn && pid !== activePane) {
+      const act = panes[activePane];
+      const actInst = act.series?.instances[act.index];
+      if (actInst && actInst.sop_uid !== inst.sop_uid) refSeg = refLineOn(actInst, inst);
+    }
+    if (items.length === 0 && !dr && !refSeg) return null;
+    return (
+      <svg viewBox={`0 0 ${cols} ${rows}`} preserveAspectRatio="none"
+           style={{ position: "absolute", left: cr.left, top: cr.top, width: cr.width, height: cr.height,
+                    pointerEvents: "none", overflow: "visible" }}>
+        {items.map((a, i) => <AnnoShape key={a.id ?? `local${i}`} a={a} sx={sx} sy={sy} fs={fs} />)}
+        {dr && dr.points.map((pt, i) => (
+          <circle key={i} cx={sx(pt[0])} cy={sy(pt[1])} r={fs * 0.25} fill="#ffd54a" />
+        ))}
+        {dr && dr.points.length >= 2 && (
+          <polyline points={dr.points.map((q) => `${sx(q[0])},${sy(q[1])}`).join(" ")}
+                    stroke="#ffd54a" fill="none" strokeWidth={fs * 0.08} />
+        )}
+        {refSeg && (
+          <line x1={sx(refSeg[0][0])} y1={sy(refSeg[0][1])} x2={sx(refSeg[1][0])} y2={sy(refSeg[1][1])}
+                stroke="#4dd0e1" strokeDasharray={`${fs * 0.6} ${fs * 0.4}`} strokeWidth={fs * 0.08} />
+        )}
+      </svg>
+    );
   };
 
   const L = LAYOUTS[layout];
@@ -301,11 +465,38 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
                 <ActBtn a="capture" label="Cap" title="PNG 저장" />
                 <ActBtn a="reset" label="Reset" title="초기화" />
               </>)}
-              {k === "anno" && (
-                <span style={{ fontSize: 9.5, color: "var(--text-secondary)", padding: 4, gridColumn: "1/3", maxWidth: 90 }}>
-                  측정·ROI는 Cornerstone 렌더 경로 복구 후 활성화(차기)
-                </span>
-              )}
+              {k === "anno" && (<>
+                {TOOL_DEFS.map(([tk, label, title]) => (
+                  <button key={tk} title={title}
+                          onClick={() => { setTool(tool === tk ? null : tk); setDraft(null); }}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
+                                   background: tool === tk ? "var(--accent)" : undefined }}>
+                    {label}
+                  </button>
+                ))}
+                <button title="Reference line — 활성 페인 평면을 다른 페인에 투영(scout)"
+                        onClick={() => setRefOn((r) => !r)}
+                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
+                                 background: refOn ? "var(--accent)" : undefined }}>
+                  Ref{refOn ? "●" : ""}
+                </button>
+                {(detail.modality === "CR" || detail.modality === "DX") && (
+                  <button title="AI 심흉비 자동계측 (S2) — 초안, 확정 아님" onClick={doCtr}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
+                                   color: "var(--ai)", fontWeight: 700 }}>
+                    CTR
+                  </button>
+                )}
+                <button title="주석 서버 저장 (로밍)" onClick={saveAnnos}
+                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Save</button>
+                <button title="GSPS 내보내기 — 주석·W/L 표준 저장(Orthanc)" onClick={doGsps}
+                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>GSPS</button>
+                <button title="마지막 주석 삭제" onClick={() => setAnnos((p) => p.slice(0, -1))}
+                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Del</button>
+                <button title="주석 전체 삭제" onClick={() => {
+                  if (window.confirm(`주석 ${annos.length}건을 모두 삭제할까요? (저장 전이면 복구 불가)`)) setAnnos([]);
+                }} style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Clr</button>
+              </>)}
               {k === "2d" && WL_PRESETS.map((pr) => (
                 <button key={pr.key} title={`W/L ${pr.q || "기본"}`}
                         onClick={() => patch(activePane, { wl: pr.q })}
@@ -442,21 +633,27 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
             const p = panes[pid];
             const url = renderedUrl(p);
             const isPrior = p.studyUid !== detail.study_uid;
+            const inst = p.series?.instances[p.index];
             return (
-              <div key={pid}
+              <div key={pid} ref={getPaneRef(pid)}
                    onMouseDown={(e) => onPaneMouseDown(pid, e)}
                    onWheel={(e) => step(pid, e.deltaY > 0 ? 1 : -1)}
-                   onDoubleClick={() => act("fit")}
+                   onDoubleClick={() => { if (!tool) act("fit"); }}
                    style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0,
-                            background: "#000", cursor: "crosshair",
+                            background: "#000", cursor: tool ? "copy" : "crosshair",
                             outline: activePane === pid ? "1px solid var(--accent)" : "1px solid var(--border)" }}>
                 {url && (
-                  <img src={url} alt="" draggable={false}
-                       style={{
-                         width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
-                         transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
-                         filter: p.invert ? "invert(1)" : undefined,
-                       }} />
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
+                  }}>
+                    <img src={url} alt="" draggable={false}
+                         style={{
+                           width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
+                           filter: p.invert ? "invert(1)" : undefined,
+                         }} />
+                    {inst && annoSvg(pid, p, inst)}
+                  </div>
                 )}
                 {overlayOn && p.series && (
                   <>
@@ -483,6 +680,74 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       </div>
       {thumbHoriz && thumbs}
     </div>
+  );
+}
+
+/* 주석 1건 SVG 도형 — 사용자=노랑, AI=보라(생성물 전용 색) */
+function AnnoShape({ a, sx, sy, fs }: {
+  a: Anno; sx: (v: number) => number; sy: (v: number) => number; fs: number;
+}) {
+  const color = a.source === "ai" ? "#a78bfa" : "#ffd54a";
+  const sw = fs * 0.08;
+  const pts = a.points;
+  if (!pts?.length) return null;
+  const P = (i: number) => ({ x: sx(pts[i][0]), y: sy(pts[i][1]) });
+  const label = annoLabel(a);
+  const mid = pts.length >= 2
+    ? { x: (P(0).x + P(1).x) / 2, y: (P(0).y + P(1).y) / 2 }
+    : P(0);
+  let shape: React.ReactNode = null;
+  switch (a.kind) {
+    case "length": case "line": case "ctr":
+      if (pts.length < 2) return null;
+      shape = <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(1).y} stroke={color} strokeWidth={sw} />;
+      break;
+    case "arrow": {
+      if (pts.length < 2) return null;
+      const dx = P(1).x - P(0).x, dy = P(1).y - P(0).y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len, hs = fs * 0.6;
+      shape = (
+        <g stroke={color} strokeWidth={sw} fill="none">
+          <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(1).y} />
+          <line x1={P(1).x} y1={P(1).y} x2={P(1).x - hs * (ux + uy * 0.5)} y2={P(1).y - hs * (uy - ux * 0.5)} />
+          <line x1={P(1).x} y1={P(1).y} x2={P(1).x - hs * (ux - uy * 0.5)} y2={P(1).y - hs * (uy + ux * 0.5)} />
+        </g>
+      );
+      break;
+    }
+    case "angle":
+      if (pts.length < 3) return null;
+      shape = <polyline points={pts.map((q) => `${sx(q[0])},${sy(q[1])}`).join(" ")}
+                        stroke={color} fill="none" strokeWidth={sw} />;
+      break;
+    case "rect":
+      if (pts.length < 2) return null;
+      shape = <rect x={Math.min(P(0).x, P(1).x)} y={Math.min(P(0).y, P(1).y)}
+                    width={Math.abs(P(1).x - P(0).x)} height={Math.abs(P(1).y - P(0).y)}
+                    stroke={color} fill="none" strokeWidth={sw} />;
+      break;
+    case "ellipse":
+      if (pts.length < 2) return null;
+      shape = <ellipse cx={(P(0).x + P(1).x) / 2} cy={(P(0).y + P(1).y) / 2}
+                       rx={Math.abs(P(1).x - P(0).x) / 2} ry={Math.abs(P(1).y - P(0).y) / 2}
+                       stroke={color} fill="none" strokeWidth={sw} />;
+      break;
+    case "text":
+      break;
+    default:
+      return null;
+  }
+  return (
+    <g>
+      {shape}
+      {label && (
+        <text x={mid.x + fs * 0.3} y={mid.y - fs * 0.3} fill={color} fontSize={fs}
+              stroke="#000" strokeWidth={fs * 0.1} style={{ paintOrder: "stroke" }}>
+          {label}
+        </text>
+      )}
+    </g>
   );
 }
 

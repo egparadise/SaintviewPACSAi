@@ -179,6 +179,48 @@ class AiJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class Annotation(Base):
+    """주석/계측 (07 A.4) — 이미지 정규화 좌표(0~1) 기반, GSPS 내보내기 원천."""
+
+    __tablename__ = "annotations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    study_id: Mapped[int] = mapped_column(ForeignKey("studies.id"), index=True)
+    series_uid: Mapped[str] = mapped_column(String(128), default="")
+    sop_uid: Mapped[str] = mapped_column(String(128), default="", index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="line")  # length|angle|rect|ellipse|arrow|text|ctr...
+    points: Mapped[list] = mapped_column(JSON, default=list)  # [[x,y], ...] 0~1 정규화
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str] = mapped_column(String(16), default="")  # mm|deg|ratio|mm2|px
+    text: Mapped[str] = mapped_column(String(512), default="")
+    source: Mapped[str] = mapped_column(String(16), default="user")  # user | ai
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # ai일 때
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)  # numeric_verify 결과
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Order(Base):
+    """오더/예약 (RIS — P2) — MWL 항목 원천 + MPPS 상태 매핑."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    patient_key: Mapped[str] = mapped_column(String(128), index=True)
+    patient_name: Mapped[str] = mapped_column(String(128), default="")
+    birth_date: Mapped[str] = mapped_column(String(8), default="")
+    sex: Mapped[str] = mapped_column(String(8), default="")
+    accession_no: Mapped[str] = mapped_column(String(64), default="", index=True)
+    modality: Mapped[str] = mapped_column(String(16), default="")
+    scheduled_date: Mapped[str] = mapped_column(String(8), default="", index=True)  # YYYYMMDD
+    scheduled_time: Mapped[str] = mapped_column(String(6), default="")  # HHMMSS
+    procedure_desc: Mapped[str] = mapped_column(String(256), default="")
+    station_aet: Mapped[str] = mapped_column(String(32), default="")
+    # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
+    status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class AppSetting(Base):
     """설정 — 화면분석 §5.7 교훈 5: scope 오버라이드(global → source → user)."""
 

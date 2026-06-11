@@ -18,6 +18,7 @@ import {
   type InstanceThumb,
   type KeyImage,
   type NlQueryResult,
+  type OrderRow,
   type Report,
   type SrJson,
   type StudyDetail,
@@ -555,6 +556,43 @@ function ReportPanel({ detail, onChanged, insertRef }: {
   const [busy, setBusy] = useState(false);
   const current = reports[0] ?? null;
 
+  // 음성 판독(STT, P3) — 브라우저 Web Speech API(ko-KR), 인식 결과를 Conclusion에 덧붙임
+  const [stt, setStt] = useState(false);
+  const recRef = useRef<{ stop: () => void } | null>(null);
+  const toggleStt = () => {
+    if (stt) { recRef.current?.stop(); setStt(false); return; }
+    const w = window as unknown as Record<string, unknown>;
+    const SR = (w.webkitSpeechRecognition ?? w.SpeechRecognition) as
+      (new () => {
+        lang: string; continuous: boolean; interimResults: boolean;
+        onresult: (ev: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+        onend: () => void; onerror: () => void; start: () => void; stop: () => void;
+      }) | undefined;
+    if (!SR) { alert("이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장)"); return; }
+    const rec = new SR();
+    rec.lang = "ko-KR";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (ev) => {
+      const texts: string[] = [];
+      for (let i = ev.resultIndex; i < ev.results.length; i++) texts.push(ev.results[i][0].transcript);
+      const text = texts.join(" ").trim();
+      if (!text) return;
+      setDraft((d) => {
+        if (!d) return d;
+        const n = structuredClone(d);
+        if (n.impression[0]) n.impression[0].statement += (n.impression[0].statement ? " " : "") + text;
+        return n;
+      });
+    };
+    rec.onend = () => setStt(false);
+    rec.onerror = () => setStt(false);
+    recRef.current = rec;
+    rec.start();
+    setStt(true);
+  };
+  useEffect(() => () => recRef.current?.stop(), []);
+
   useEffect(() => {
     if (!detail) { setReports([]); setDraft(null); return; }
     api.reports(detail.id).then((r) => {
@@ -681,6 +719,12 @@ function ReportPanel({ detail, onChanged, insertRef }: {
               <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
               <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
               {!finalized && (
+                <MiniBtn onClick={toggleStt} title="음성 판독(STT) — 한국어 받아쓰기 → Conclusion"
+                         style={stt ? { background: "var(--stat-emergency)", color: "#fff" } : undefined}>
+                  {stt ? "🎤 녹음중" : "🎤 음성"}
+                </MiniBtn>
+              )}
+              {!finalized && (
                 <MiniBtn title="판독 보류(Suspend) — 토글" onClick={async () => {
                   await api.suspendReport(current.id); onChanged();
                 }}>{current.status === "suspended" ? "보류 해제" : "보류"}</MiniBtn>
@@ -709,16 +753,78 @@ function ReportPanel({ detail, onChanged, insertRef }: {
   );
 }
 
-/* ── [E-우] 오더/예약 (RIS — P2 placeholder) ─────── */
-function OrdersPanel() {
+/* ── [E-우] 오더/예약 (RIS — P2): MWL 내보내기 + MPPS 상태 매핑 ─────── */
+const ORDER_STATUS: Record<string, string> = {
+  scheduled: "예약", in_progress: "진행중", completed: "완료", cancelled: "취소",
+};
+function OrdersPanel({ refreshKey }: { refreshKey: number }) {
+  const [items, setItems] = useState<OrderRow[]>([]);
+  const [msg, setMsg] = useState("");
+  const load = useCallback(() => {
+    api.orders().then((r) => setItems(r.items)).catch(() => {});
+  }, []);
+  useEffect(load, [load, refreshKey]);
+
+  const add = async () => {
+    const patient_key = prompt("환자 ID");
+    if (!patient_key) return;
+    const patient_name = prompt("환자 이름") ?? "";
+    const modality = (prompt("Modality (CR/CT/MR/US…)", "CR") ?? "CR").toUpperCase();
+    const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    const scheduled_date = prompt("예약일 (YYYYMMDD)", today) ?? "";
+    const procedure_desc = prompt("오더명 (예: Chest PA)") ?? "";
+    try {
+      await api.createOrder({ patient_key, patient_name, modality, scheduled_date, procedure_desc });
+      load();
+    } catch (e) { alert(e instanceof Error ? e.message : "오더 등록 실패"); }
+  };
+  const setSt = async (id: number, status: string) => {
+    try { await api.setOrderStatus(id, status); load(); }
+    catch (e) { alert(e instanceof Error ? e.message : "상태 변경 실패"); }
+  };
+  const exportMwl = async () => {
+    try {
+      const r = await api.exportMwl();
+      setMsg(`MWL ${r.count}건 내보냄 → 장비 C-FIND 응답`);
+    } catch (e) { setMsg(e instanceof Error ? e.message : "MWL 실패"); }
+  };
+
   return (
-    <PanelBox title="오더/예약 (RIS)">
+    <PanelBox title="오더/예약 (RIS·MWL)" right={
+      <span style={{ display: "flex", gap: 3 }}>
+        <MiniBtn onClick={add}>New</MiniBtn>
+        <MiniBtn onClick={exportMwl} title="scheduled 오더를 MWL(.wl)로 내보내기 — Orthanc worklists">MWL</MiniBtn>
+      </span>
+    }>
       <table className="grid-table">
-        <thead><tr><th>ID</th><th>이름</th><th>ACCESSION</th><th>오더명</th><th>MOD</th><th>예약일</th></tr></thead>
+        <thead><tr><th>환자</th><th>오더명</th><th>MOD</th><th>예약일</th><th>상태</th><th></th></tr></thead>
         <tbody>
-          <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>RIS/MWL 연동 예정 (P2)</td></tr>
+          {items.map((o) => (
+            <tr key={o.id}>
+              <td title={o.accession_no}>{o.patient_name || o.patient_key}</td>
+              <td title={o.procedure_desc}>{o.procedure_desc}</td>
+              <td>{o.modality}</td>
+              <td>{o.scheduled_date}</td>
+              <td>{ORDER_STATUS[o.status] ?? o.status}</td>
+              <td style={{ whiteSpace: "nowrap" }}>
+                {o.status === "scheduled" && (
+                  <MiniBtn title="검사 시작 (MPPS IN PROGRESS)" onClick={() => setSt(o.id, "in_progress")}>시작</MiniBtn>
+                )}
+                {o.status === "in_progress" && (
+                  <MiniBtn title="검사 완료 (MPPS COMPLETED)" onClick={() => setSt(o.id, "completed")}>완료</MiniBtn>
+                )}
+                {(o.status === "scheduled" || o.status === "in_progress") && (
+                  <MiniBtn title="취소 (MPPS DISCONTINUED)" onClick={() => setSt(o.id, "cancelled")}>✕</MiniBtn>
+                )}
+              </td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>오더 없음 — New로 등록, MWL로 장비 전달</td></tr>
+          )}
         </tbody>
       </table>
+      {msg && <div style={{ padding: "3px 8px", fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</div>}
     </PanelBox>
   );
 }
@@ -758,6 +864,32 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       <Item a="regen" label="AI 초안 재생성" />
       <Sep />
       <Item a="emergency" label={row.emergency ? "Emergency 해제" : "⚠ Emergency 지정"} danger={!row.emergency} />
+    </div>
+  );
+}
+
+/* ── 패널 드래그 래퍼 — 좌측 그립을 끌어 같은 행 안에서 자리 교환 ── */
+function DraggablePanel({ zone, k, onDrop, style, children }: {
+  zone: "d" | "e"; k: string;
+  onDrop: (zone: "d" | "e", src: string, dst: string) => void;
+  style?: React.CSSProperties; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", minWidth: 0, minHeight: 0, ...style }}
+         onDragOver={(e) => e.preventDefault()}
+         onDrop={(e) => {
+           const src = e.dataTransfer.getData(`text/sv-panel-${zone}`);
+           if (src) onDrop(zone, src, k);
+         }}>
+      <div draggable title="패널 이동 — 드래그해서 자리 교환"
+           onDragStart={(e) => e.dataTransfer.setData(`text/sv-panel-${zone}`, k)}
+           style={{ width: 10, flexShrink: 0, cursor: "grab", display: "flex", alignItems: "center",
+                    justifyContent: "center", color: "var(--text-secondary)", fontSize: 9,
+                    background: "var(--bg-elevated)", borderRadius: "4px 0 0 4px",
+                    border: "1px solid var(--border)", borderRight: "none" }}>
+        ⋮
+      </div>
+      <div style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0 }}>{children}</div>
     </div>
   );
 }
@@ -877,6 +1009,10 @@ export function Worklist() {
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
   const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
   const [nlBusy, setNlBusy] = useState(false);
+  // 패널 배치 사용자화(드래그) — D구역(과거검사/비교세트)·E구역(상용구/리포트/오더)
+  const [panelOrder, setPanelOrder] = useState<{ d: string[]; e: string[] }>({
+    d: ["prior", "compare"], e: ["std", "report", "orders"],
+  });
   const insertRef = useRef<((t: string) => void) | null>(null);
 
   // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
@@ -892,6 +1028,8 @@ export function Worklist() {
       if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
       if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
       if (v.dbl_action) setDblAction(v.dbl_action);
+      const po = (v as { panel_order?: { d?: string[]; e?: string[] } }).panel_order;
+      if (po?.d?.length === 2 && po?.e?.length === 3) setPanelOrder({ d: po.d, e: po.e });
     }).catch(() => {});
     // ETC 섹션의 3D 버튼(Viewer2D 내부) → 3D 뷰어 전환
     const h = (e: Event) => setViewer3dUid((e as CustomEvent).detail as string);
@@ -1058,6 +1196,21 @@ export function Worklist() {
     finally { setNlBusy(false); }
   }, []);
 
+  // 패널 자리 교환 + 서버 저장(로밍)
+  const onPanelDrop = useCallback((zone: "d" | "e", src: string, dst: string) => {
+    if (src === dst) return;
+    setPanelOrder((prev) => {
+      const arr = [...prev[zone]];
+      const i = arr.indexOf(src), j = arr.indexOf(dst);
+      if (i < 0 || j < 0) return prev;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      const next = { ...prev, [zone]: arr };
+      api.getSetting("worklist.prefs").then((r) =>
+        api.putSetting("worklist.prefs", { ...r.value, panel_order: next }, "user")).catch(() => {});
+      return next;
+    });
+  }, []);
+
   const applyNlPreview = useCallback(() => {
     if (!nlPreview) return;
     const f = nlPreview.filter;
@@ -1126,27 +1279,35 @@ export function Worklist() {
                    onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
       </div>
 
-      {/* 하단1: 과거검사 | 비교세트 (디자인 §3 [D]) */}
+      {/* 하단1: 과거검사 | 비교세트 (디자인 §3 [D]) — 드래그 재배치 */}
       <div style={{ display: "flex", gap: 3, height: 140, padding: "3px 3px 0", flexShrink: 0 }}>
-        <PriorStudiesGrid detail={selected}
-                          onAddCompare={(e) => setCompareSet((prev) =>
-                            prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
-        <ComparisonSetGrid items={compareSet} current={selected}
-                           onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
-                           onOpenCompare={openCompare} onMerge={doMerge} />
+        {panelOrder.d.map((k) => (
+          <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
+            {k === "prior" ? (
+              <PriorStudiesGrid detail={selected}
+                                onAddCompare={(e) => setCompareSet((prev) =>
+                                  prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+            ) : (
+              <ComparisonSetGrid items={compareSet} current={selected}
+                                 onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
+                                 onOpenCompare={openCompare} onMerge={doMerge} />
+            )}
+          </DraggablePanel>
+        ))}
       </div>
 
-      {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) */}
+      {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) — 드래그 재배치 */}
       <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
-        <div style={{ width: 230, display: "flex", flexShrink: 0 }}>
-          <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
-        </div>
-        <div style={{ flex: 1.6, display: "flex", minWidth: 0 }}>
-          <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />
-        </div>
-        <div style={{ width: 260, display: "flex", flexShrink: 0 }}>
-          <OrdersPanel />
-        </div>
+        {panelOrder.e.map((k) => (
+          <DraggablePanel key={k} zone="e" k={k} onDrop={onPanelDrop}
+                          style={k === "std" ? { width: 240, flexShrink: 0 }
+                               : k === "orders" ? { width: 270, flexShrink: 0 }
+                               : { flex: 1.6 }}>
+            {k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
+              : k === "orders" ? <OrdersPanel refreshKey={refreshKey} />
+              : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
+          </DraggablePanel>
+        ))}
       </div>
 
       {/* 상태바 (§2) */}

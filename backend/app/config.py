@@ -29,6 +29,8 @@ class Settings:
     ai_model: str = os.getenv("SAINTVIEW_AI_MODEL", "claude-opus-4-8")
     ai_mode: str = os.getenv("SAINTVIEW_AI_MODE", "mock")  # mock | live
     ai_auto_generate: bool = os.getenv("SAINTVIEW_AI_AUTO_GENERATE", "1") == "1"
+    # MWL (P2) — Orthanc worklists 플러그인 폴더 (compose에서 deploy/worklists 마운트)
+    mwl_dir: str = os.getenv("SAINTVIEW_MWL_DIR", "../deploy/worklists")
     # 임베딩 (D-2)
     embedding_backend: str = os.getenv("SAINTVIEW_EMBEDDING_BACKEND", "local")  # local | voyage
     embedding_dim: int = int(os.getenv("SAINTVIEW_EMBEDDING_DIM", "256"))

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from app.config import get_settings
 from app.rag.deid import mask
 from app.rag.retrieval import PriorReport, SimilarCase
-from app.rag.schemas import NL_QUERY_SCHEMA, SR_SCHEMA
+from app.rag.schemas import CTR_SCHEMA, NL_QUERY_SCHEMA, SR_SCHEMA
 
 SYSTEM_PROMPT = """당신은 영상의학과 판독 보조 시스템이다. 주어진 검사 정보, 동일 환자의 과거 판독,
 유사 증례를 근거로 Structured Report 초안을 생성한다.
@@ -180,6 +180,53 @@ def generate_nl_query(text: str, today_iso: str) -> dict:
             "cache_control": {"type": "ephemeral"},
         }],
         messages=[{"role": "user", "content": f"오늘 날짜: {today_iso}\n검색 요청: {masked}"}],
+    )
+    out = next(b.text for b in response.content if b.type == "text")
+    return json.loads(out)
+
+
+CTR_SYSTEM = """당신은 흉부 X선(정면 PA/AP)에서 심흉비(CTR, Cardiothoracic Ratio)를 계측하는 보조 도구다.
+
+규칙:
+1. cardiac: 심장 음영의 최대 좌우 폭 — x1(우측 심연 좌표), x2(좌측 심연 좌표), y(계측 높이).
+2. thoracic: 흉곽 내벽의 최대 좌우 폭 — x1, x2, y.
+3. 모든 좌표는 이미지 기준 정규화(0.0~1.0). x1 < x2.
+4. 정면 흉부 영상이 아니거나 심장/흉곽 경계를 신뢰성 있게 식별할 수 없으면
+   confidence를 0.3 미만으로 주고 note에 사유를 적는다.
+5. 이 계측은 초안이며 확정은 판독의가 한다."""
+
+
+def generate_ctr(png_bytes: bytes) -> dict:
+    """S2 CTR live 경로 — 키이미지 vision 계측(이미지는 호출 전에 image_guard 통과)."""
+    import base64
+
+    import anthropic
+
+    settings = get_settings()
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=settings.ai_model,
+        max_tokens=2000,
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": "medium",
+            "format": {"type": "json_schema", "schema": CTR_SCHEMA},
+        },
+        system=[{
+            "type": "text",
+            "text": CTR_SYSTEM,
+            "cache_control": {"type": "ephemeral"},
+        }],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png",
+                    "data": base64.standard_b64encode(png_bytes).decode(),
+                }},
+                {"type": "text", "text": "위 흉부 정면 영상에서 CTR을 계측하라."},
+            ],
+        }],
     )
     out = next(b.text for b in response.content if b.type == "text")
     return json.loads(out)

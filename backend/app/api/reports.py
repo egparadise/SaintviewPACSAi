@@ -227,6 +227,103 @@ def batch_review_candidates(
     return {"items": items}
 
 
+class ExternalAiResult(BaseModel):
+    label: str
+    observation: str = ""
+    severity: str = "normal"      # normal|minor|significant|critical
+    confidence: float = 0.0       # 0~1
+
+
+class ExternalAiBody(BaseModel):
+    vendor: str
+    model: str = ""
+    results: list[ExternalAiResult]
+
+
+@router.post("/studies/{study_id}/external-ai")
+def external_ai(
+    study_id: int, body: ExternalAiBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """F-12 외부 AI 결과 병합 — 외부 엔진 결과를 초안 findings에 [외부AI] 라벨로 병합.
+
+    03b 입력 신뢰: 화이트리스트 필드만 수용, 건수·범위 검증, 항상 라벨링(ai_result_label).
+    """
+    from app.models import AuditLog, Study
+    from app.rag.schemas import narrative_from_sr
+    from app.services.report_service import latest_report
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not body.vendor.strip():
+        raise HTTPException(status_code=400, detail="vendor는 필수입니다")
+    if not (1 <= len(body.results) <= 50):
+        raise HTTPException(status_code=400, detail="results는 1~50건이어야 합니다")
+    for r in body.results:
+        if not (0.0 <= r.confidence <= 1.0):
+            raise HTTPException(status_code=400, detail="confidence는 0~1 범위")
+        if r.severity not in ("normal", "minor", "significant", "critical"):
+            raise HTTPException(status_code=400, detail=f"severity 값 오류: {r.severity}")
+
+    report = latest_report(db, study_id)
+    if report and report.status == "finalized":
+        raise HTTPException(status_code=409, detail="확정된 판독에는 병합할 수 없습니다")
+
+    import copy
+
+    vendor = body.vendor.strip()[:64]
+    if report:
+        sr = copy.deepcopy(report.sr_json or {})
+    else:
+        sr = {
+            "exam": {"modality": study.modality, "body_part": study.body_part,
+                     "technique": study.study_desc},
+            "comparison": {"prior_study_refs": [], "summary": ""},
+            "findings": [], "impression": [], "recommendations": [],
+            "ai_meta": {"caveats": []},
+        }
+    sr.setdefault("findings", [])
+    sr.setdefault("ai_meta", {"caveats": []})
+    for r in body.results:
+        sr["findings"].append({
+            "organ": f"[외부AI {vendor}] {r.label}"[:128],
+            "observation": f"{r.observation} (신뢰도 {r.confidence:.2f})".strip(),
+            "severity": r.severity,
+            "measurements": [],
+        })
+    sr["ai_meta"].setdefault("caveats", []).append(
+        f"외부 AI({vendor} {body.model}) 결과 {len(body.results)}건 병합 — 검증되지 않은 외부 산출물, 판독의 확인 필수"
+    )
+
+    if report:
+        report.sr_json = sr
+        report.narrative_text = narrative_from_sr(sr)
+        ai_sources = dict(report.ai_sources or {})
+        ext = list(ai_sources.get("external_ai", []))
+        ext.append({"vendor": vendor, "model": body.model[:64], "count": len(body.results)})
+        ai_sources["external_ai"] = ext
+        report.ai_sources = ai_sources
+        merged_into = report
+    else:
+        merged_into = Report(
+            study_id=study_id, version=1, status="draft",
+            sr_json=sr, narrative_text=narrative_from_sr(sr),
+            created_by="ai", ai_model=f"external:{vendor}",
+            ai_sources={"external_ai": [{"vendor": vendor, "model": body.model[:64],
+                                         "count": len(body.results)}]},
+        )
+        db.add(merged_into)
+        study.status = "draft_ready"
+
+    # critical 외부 소견 → 응급 플래그 (F-15와 동일 정책)
+    if any(r.severity == "critical" for r in body.results):
+        study.emergency = True
+    db.add(AuditLog(action="external_ai_merge", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "vendor": vendor, "count": len(body.results)}))
+    db.commit()
+    return _report_out(merged_into)
+
+
 class MergeBody(BaseModel):
     study_ids: list[int]  # [0]=primary(현재 선택), 나머지=부속
 

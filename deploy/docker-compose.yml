@@ -32,11 +32,15 @@ services:
       ORTHANC__OVERWRITE_INSTANCES: "true"
       # 수신 검증 옵션 (화면분석 §5.3 — calling/called AE 검증은 운영 시 활성화)
       ORTHANC__DICOM_CHECK_CALLED_AET: "false"
+      # MWL(P2) — 백엔드 /api/orders/export-mwl이 .wl 파일을 쓰면 장비 C-FIND(MWL)에 응답
+      ORTHANC__WORKLISTS__ENABLE: "true"
+      ORTHANC__WORKLISTS__DATABASE: "/var/lib/orthanc/worklists"
     ports:
       - "8042:8042"   # HTTP / DICOMweb
       - "4242:4242"   # DICOM C-STORE
     volumes:
       - saintview_orthanc:/var/lib/orthanc/db
+      - ./worklists:/var/lib/orthanc/worklists
 
   ohif:
     image: ohif/app:v3.9.2

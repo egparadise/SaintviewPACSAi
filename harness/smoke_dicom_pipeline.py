@@ -56,14 +56,18 @@ def main() -> int:
     print("[2/4] QIDO-RS 검색 OK")
 
     # 3) 변경 피드 동기화 → studies 테이블 (StableStudy까지 폴링)
+    #    ⚠ since=0 고정이면 피드 첫 100건만 반복 스캔 — seq 커서를 따라가야 한다(운영 워커와 동일)
     synced = False
+    last_seq = 0
     with SessionLocal() as db:
         for _ in range(40):
-            sync_new_studies(db, client, since=0)
+            _, new_seq = sync_new_studies(db, client, since=last_seq)
             if db.query(Study).filter_by(study_uid=study_uid).first():
                 synced = True
                 break
-            time.sleep(2)
+            if new_seq == last_seq:  # 피드 끝 — StableStudy 대기
+                time.sleep(2)
+            last_seq = new_seq
     assert synced, "DB 동기화 실패 (StableStudy 미도달?)"
     print("[3/4] DB 동기화 OK")
 
