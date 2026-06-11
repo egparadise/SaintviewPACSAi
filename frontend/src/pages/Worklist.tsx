@@ -48,6 +48,7 @@ import {
 
 import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures } from "../lib/screens";
+import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
@@ -1812,7 +1813,18 @@ export function Worklist() {
     return () => clearInterval(t);
   }, [refreshSec]);
 
-  const onSelect = useCallback((row: StudyRow) => { api.study(row.id).then(setSelected); }, []);
+  const onSelect = useCallback((row: StudyRow) => {
+    api.study(row.id).then(setSelected);
+    postStudySync(row.id, "worklist");  // Viewer·Reading 연동
+  }, []);
+
+  // 다른 창(Viewer/Reading)에서 환자가 바뀌면 워크리스트 선택도 따라간다
+  useEffect(() => {
+    const off = onStudySync("worklist", (id) => {
+      api.study(id).then(setSelected).catch(() => {});
+    });
+    return off;
+  }, []);
   const onChanged = useCallback(() => {
     setRefreshKey((k) => k + 1);
     if (selected) api.study(selected.id).then(setSelected);

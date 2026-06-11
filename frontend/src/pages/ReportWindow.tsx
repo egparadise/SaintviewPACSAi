@@ -2,6 +2,7 @@
 // 레이아웃: [판독|판독 기록|단축키|템플릿] 탭 · Font · CVR · ◀▶ · 초기화/저장/승인 · Reading/Conclusion
 import { useEffect, useRef, useState } from "react";
 import { api, ensureToken, type PhraseRow, type Report, type StudyDetail } from "../api";
+import { onStudySync, postStudySync } from "../lib/sync";
 
 type Tab = "read" | "hist" | "std" | "tpl";
 
@@ -44,8 +45,15 @@ export function ReportWindow() {
     setConclusion((sr.impression ?? []).map((i) => i.statement).join("\n"));
   };
 
-  const loadStudy = async (id: number) => {
+  const [navLeft, setNavLeft] = useState<"past" | "recent">("past");  // Setting>정책
+  const curIdRef = useRef(0);
+
+  const navListRef = useRef<number[]>([]);
+  const loadStudy = async (id: number, broadcast = true) => {
     const d = await api.study(id);
+    curIdRef.current = id;
+    const at = navListRef.current.indexOf(id);
+    if (at >= 0) setNavIdx(at);
     setDetail(d);
     setHosp(d.memo ?? "");
     setRelatedView(null);
@@ -53,7 +61,18 @@ export function ReportWindow() {
     const r = await api.reports(id);
     setReports(r.items);
     initText(r.items[0] ?? null);
+    if (broadcast) postStudySync(id, "report");  // Worklist·Viewer 연동
   };
+  const loadStudyRef = useRef(loadStudy);
+  loadStudyRef.current = loadStudy;
+
+  // 다른 창(Viewer/Worklist)에서 환자가 바뀌면 같은 환자를 따라간다
+  useEffect(() => {
+    const off = onStudySync("report", (id) => {
+      if (id !== curIdRef.current) void loadStudyRef.current(id, false);
+    });
+    return off;
+  }, []);
 
   useEffect(() => {
     if (!initId) return;
@@ -65,8 +84,9 @@ export function ReportWindow() {
         api.worklist({ limit: "500" }).then((r) => {
           const ids = r.items.map((it) => it.id);
           setNavList(ids);
+          navListRef.current = ids;
           setNavIdx(Math.max(0, ids.indexOf(initId)));
-        }).catch(() => setNavList([initId]));
+        }).catch(() => { setNavList([initId]); navListRef.current = [initId]; });
         api.phrases().then((r) => setPhrases(r.items)).catch(() => {});
         api.getSetting("report.prefs").then((r) => {
           const v = r.value as Record<string, unknown>;
@@ -74,14 +94,27 @@ export function ReportWindow() {
           if (v.sidebar_tab === "sheet") setSideTab("sheet");
           if (v.panel_tab === "template") setRightTab("tpl");
         }).catch(() => {});
+        api.getSetting("worklist.prefs").then((r) => {
+          const nl = (r.value as { nav_left?: "past" | "recent" }).nav_left;
+          if (nl) setNavLeft(nl);
+        }).catch(() => {});
       } catch (e) { setMsg(e instanceof Error ? e.message : "검사 로드 실패"); }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initId]);
 
-  const nav = async (dir: 1 | -1) => {
-    const next = navIdx + dir;
-    if (next < 0 || next >= navList.length) return;
+  /** visual: -1=◀, 1=▶ — 시간대별 한 단계, 방향=Setting>정책(nav_left). 목록은 최신이 idx 0 */
+  const navStep = (visual: 1 | -1) => {
+    const leftStep = navLeft === "past" ? 1 : -1;
+    return visual === -1 ? leftStep : -leftStep;
+  };
+  const navTargetIdx = (visual: 1 | -1) => {
+    const next = navIdx + navStep(visual);
+    return next >= 0 && next < navList.length ? next : -1;
+  };
+  const nav = async (visual: 1 | -1) => {
+    const next = navTargetIdx(visual);
+    if (next < 0) return;
     setNavIdx(next);
     await loadStudy(navList[next]);
   };
@@ -304,10 +337,12 @@ export function ReportWindow() {
                      onChange={(e) => setRdOpts((p) => ({ ...p, cvr_notice: e.target.checked }))} />
               CVR Notice
             </label>
-            <button title="이전 환자 (워크리스트 순서 — 뷰어 ◀와 동일)" style={{ padding: "1px 10px" }}
-                    disabled={navIdx <= 0} onClick={() => void nav(-1)}>◀</button>
-            <button title="다음 환자 (워크리스트 순서 — 뷰어 ▶와 동일)" style={{ padding: "1px 10px" }}
-                    disabled={navIdx >= navList.length - 1} onClick={() => void nav(1)}>▶</button>
+            <button title={`◀ ${navLeft === "past" ? "한 단계 과거" : "한 단계 최신"} 검사 (뷰어 ◀와 동일 — 정책에서 변경)`}
+                    style={{ padding: "1px 10px" }}
+                    disabled={navTargetIdx(-1) < 0} onClick={() => void nav(-1)}>◀</button>
+            <button title={`▶ ${navLeft === "past" ? "한 단계 최신" : "한 단계 과거"} 검사 (뷰어 ▶와 동일 — 정책에서 변경)`}
+                    style={{ padding: "1px 10px" }}
+                    disabled={navTargetIdx(1) < 0} onClick={() => void nav(1)}>▶</button>
             <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>초기화</button>
             <button className="primary" title={`저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
                     disabled={!report || finalized} onClick={() => void save()}>저장</button>

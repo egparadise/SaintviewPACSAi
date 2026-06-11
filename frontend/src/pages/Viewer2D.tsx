@@ -5,6 +5,7 @@ import { api, openViewer, type Anno, type InstanceNode, type PhraseRow, type Rep
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
 import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures } from "../lib/screens";
+import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { ToolBtnInner } from "../lib/toolIcons";
@@ -123,23 +124,35 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
   const [settingsOpen, setSettingsOpen] = useState(false);  // 뷰어 내 Setting
-  // ◀▶ 환자 이동 — 워크리스트 순서. 미오픈=열면서 이동, 오픈=해당 Exam 탭으로 전환
+  // ◀▶ 환자 이동 — 시간대별 한 단계(워크리스트 정렬: 최신이 위/앞).
+  // 방향은 Setting>정책(nav_left)을 따른다: past=◀가 과거(아래 행) / recent=◀가 최신(위 행)
   const [wlIds, setWlIds] = useState<number[]>([]);
+  const [navLeft, setNavLeft] = useState<"past" | "recent">("past");
   useEffect(() => {
     api.worklist({ limit: "500" }).then((r) => setWlIds(r.items.map((it) => it.id))).catch(() => {});
+    api.getSetting("worklist.prefs").then((r) => {
+      const nl = (r.value as { nav_left?: "past" | "recent" }).nav_left;
+      if (nl) setNavLeft(nl);
+    }).catch(() => {});
   }, []);
   /** 현재 활성 페인에 보이는 검사 id — ◀▶ 이동의 기준점 */
   const currentNavId = () => {
     const curUid = panes[activePane]?.studyUid || detail.study_uid;
-    return openTabs.find((t) => t.uid === curUid)?.id ?? detail.id;
+    return openTabsRef.current.find((t) => t.uid === curUid)?.id ?? detail.id;
   };
-  const navPatient = (dir: 1 | -1) => {
+  /** visual: -1=◀, 1=▶ → 정책에 따른 목록 스텝(목록은 최신이 idx 0) */
+  const navTarget = (visual: 1 | -1): number | undefined => {
     const idx = wlIds.indexOf(currentNavId());
-    if (idx < 0) return;
-    const target = wlIds[idx + dir];
+    if (idx < 0) return undefined;
+    const leftStep = navLeft === "past" ? 1 : -1;  // 과거 = 목록 아래(idx 증가)
+    return wlIds[idx + (visual === -1 ? leftStep : -leftStep)];
+  };
+  const navPatient = (visual: 1 | -1) => {
+    const target = navTarget(visual);
     if (target === undefined) return;
+    postStudySync(target, "viewer");  // Worklist·Reading 연동
     // 이미 열린 환자(Exam 탭)면 → 새로고침 없이 그 탭으로 전환
-    const opened = openTabs.find((t) => t.id === target);
+    const opened = openTabsRef.current.find((t) => t.id === target);
     if (opened) { void loadIntoActive(opened.id); return; }
     // 미오픈 → 열면서 이동 (창 네비게이트, 탭은 localStorage로 유지·누적)
     const p = new URLSearchParams(window.location.search);
@@ -149,6 +162,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       window.location.search = p.toString();
     }
   };
+  // 다른 창(Worklist/Reading)에서 환자가 바뀌면 — 열린 탭이면 그 탭으로 전환
+  const loadIntoActiveRef = useRef<(id: number) => Promise<void>>(async () => {});
+  const openTabsRef = useRef<{ id: number; uid: string; label: string }[]>([]);
+  useEffect(() => {
+    const off = onStudySync("viewer", (id) => {
+      const opened = openTabsRef.current.find((t) => t.id === id);
+      if (opened) void loadIntoActiveRef.current(opened.id);
+    });
+    return off;
+  }, []);
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -188,6 +211,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 오픈 검사 탭 — 여러 검사가 열리면 좌→우로 탭이 쌓인다(브라우저 창 메타포, UBPACS Opened Study List)
   const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
   useEffect(() => { if (openTabs.length) savePersistedTabs(openTabs); }, [openTabs]);  // ✕/전체닫기 전까지 유지
+  openTabsRef.current = openTabs;  // 동기 리스너·◀▶ 기준점에서 최신값 사용
   const [closeDlg, setCloseDlg] = useState(false);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);
@@ -263,12 +287,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* 시리즈 트리 + 리포트 로드 */
   useEffect(() => {
-    // Exam 탭 영속 복원: 기존 탭(좌측) + 새로 연 검사(우측)
+    // Exam 탭 영속 복원: 기존 탭(좌측) + 새로 연 검사(우측). #id로 동일 라벨 검사 구분
     const main = {
       id: detail.id, uid: detail.study_uid,
-      label: `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date}`,
+      label: `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date} #${detail.id}`,
     };
     setOpenTabs([...loadPersistedTabs().filter((t) => t.id !== detail.id), main]);
+    postStudySync(detail.id, "viewer");  // Worklist·Reading 연동
     api.seriesTree(detail.id).then((r) => {
       let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
       // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
@@ -362,6 +387,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
     } catch { setStatus("검사 전환 실패"); }
   };
+  loadIntoActiveRef.current = loadIntoActive;  // 동기 리스너에서 최신 클로저 사용
 
   /* 탭 닫기: 목록에서 제거 + 해당 검사를 보이던 페인은 주 검사로 복귀 */
   const closeTab = (id: number) => {
@@ -848,13 +874,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
                                                     : { borderRight: "1px solid var(--border)" }) }),
     }}>
-      {/* ◀▶ 환자 이동 (현재 보고 있는 검사 기준 — 미오픈=열며 이동, 오픈=그 탭으로 전환) */}
+      {/* ◀▶ 환자 이동 — 시간대별 한 단계 (방향=Setting>정책, 열려 있으면 그 탭으로 전환) */}
       <div style={{ display: "flex", gap: 3, ...(paletteHoriz ? {} : { width: "100%" }) }}>
-        <button title="이전 환자(검사) — 이미 열려 있으면 그 Exam 탭으로 전환" onClick={() => navPatient(-1)}
-                disabled={wlIds.indexOf(currentNavId()) <= 0}
+        <button title={`◀ ${navLeft === "past" ? "한 단계 과거" : "한 단계 최신"} 검사 — 열려 있으면 그 Exam 탭으로 (정책에서 변경)`}
+                onClick={() => navPatient(-1)} disabled={navTarget(-1) === undefined}
                 style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>◀</button>
-        <button title="다음 환자(검사) — 이미 열려 있으면 그 Exam 탭으로 전환" onClick={() => navPatient(1)}
-                disabled={wlIds.indexOf(currentNavId()) < 0 || wlIds.indexOf(currentNavId()) >= wlIds.length - 1}
+        <button title={`▶ ${navLeft === "past" ? "한 단계 최신" : "한 단계 과거"} 검사 — 열려 있으면 그 Exam 탭으로 (정책에서 변경)`}
+                onClick={() => navPatient(1)} disabled={navTarget(1) === undefined}
                 style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>▶</button>
       </div>
       <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}

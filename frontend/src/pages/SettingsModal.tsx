@@ -34,6 +34,7 @@ const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "reading", label: "판독 (Reading)" },
   { key: "viewer", label: "뷰어" },
   { key: "monitor", label: "모니터 (Display)" },
+  { key: "policy", label: "정책 (Policy)" },
   { key: "hp", label: "행잉 (HP)" },
   { key: "pdf", label: "판독서 PDF", admin: true },
   { key: "ai", label: "AI 정책", admin: true },
@@ -89,6 +90,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [wlMon, setWlMon] = useState<number | null>(null);      // 워크리스트 창
   const [rptMon, setRptMon] = useState<number | null>(null);    // 판독(Reading) 창
   const [monitorMsg, setMonitorMsg] = useState("");
+  // 정책 — ◀(왼쪽) 버튼이 시간상 어느 방향으로 갈지 (워크리스트는 최신이 위)
+  const [polNavLeft, setPolNavLeft] = useState<"past" | "recent">("past");
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
@@ -135,6 +138,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (v.dbl_action) setDblAction(v.dbl_action);
       const pn = (v as { panels?: Record<string, boolean> }).panels;
       if (pn) setWlPanels((prev) => ({ ...prev, ...pn }));
+      const nl = (v as { nav_left?: "past" | "recent" }).nav_left;
+      if (nl) setPolNavLeft(nl);
     }).catch(() => {});
     api.getSetting("viewer.prefs").then((r) => {
       const v = r.value as {
@@ -219,7 +224,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     const cur = (await api.getSetting("worklist.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("worklist.prefs",
       { ...cur, auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
-        find_fields: findFields, dbl_action: dblAction, panels: wlPanels }, "user");
+        find_fields: findFields, dbl_action: dblAction, panels: wlPanels, nav_left: polNavLeft }, "user");
     const curV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("viewer.prefs", {
       ...curV,
@@ -1101,6 +1106,25 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                   </div>
                 </Group>
               </>
+            )}
+
+            {page === "policy" && (
+              <Group title="탐색 방향 정책 — ◀▶ 환자 이동 (뷰어·판독 창·워크리스트 공통)">
+                <Row label="◀ (왼쪽) 버튼">
+                  <select value={polNavLeft} onChange={(e) => setPolNavLeft(e.target.value as "past" | "recent")}>
+                    <option value="past">시간상 과거로 (워크리스트 아래 행 방향)</option>
+                    <option value="recent">시간상 최신으로 (워크리스트 위 행 방향)</option>
+                  </select>
+                </Row>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  워크리스트는 최신 검사가 위에 정렬됩니다. ◀▶는 열려 있는 환자(현재 보고 있는 검사)를
+                  기준으로 <b>시간대별 한 단계씩</b> 이동하며, ▶(오른쪽)는 항상 ◀의 반대 방향입니다.<br />
+                  · <b>과거로(기본)</b>: ◀=한 단계 과거(아래 행) / ▶=한 단계 최신(위 행)<br />
+                  · <b>최신으로</b>: ◀=한 단계 최신(위 행) / ▶=한 단계 과거(아래 행)<br />
+                  이동 대상 환자가 이미 Exam 탭으로 열려 있으면 그 탭으로 전환되고, 아니면 열면서 이동합니다.
+                  Worklist·Image Viewer·Reading Viewer는 열린 환자를 서로 따라갑니다(연동). OK(저장) 시 적용.
+                </div>
+              </Group>
             )}
 
             {page === "hp" && (
