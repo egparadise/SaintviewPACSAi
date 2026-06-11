@@ -4,6 +4,7 @@ import { api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api"
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
 import { DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
+import { ToolIcon } from "../lib/toolIcons";
 import {
   FolderEditModal,
   FolderTreeEditor,
@@ -715,6 +716,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                                  style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}>
                             <input type="checkbox" checked={tbConfig[t.id] !== false}
                                    onChange={(e) => setTbConfig((p) => ({ ...p, [t.id]: e.target.checked }))} />
+                            <ToolIcon id={t.id === "3d" ? "mpr" : t.id} size={14} />
                             {t.label} <span style={{ color: "var(--text-secondary)", fontSize: 10.5 }}>{t.desc.split(" — ")[0].split(" (")[0]}</span>
                           </label>
                         ))}

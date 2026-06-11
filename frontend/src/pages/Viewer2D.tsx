@@ -6,6 +6,7 @@ import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from ".
 import { GridPicker } from "../lib/GridPicker";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
+import { ToolBtnInner } from "../lib/toolIcons";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
@@ -657,13 +658,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   const ModeBtn = ({ k, label, title }: { k: "wl" | "zoom" | "pan"; label: string; title: string }) => (
     <button onClick={() => setMouseMode(k)} title={title}
-            style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
-                     background: mouseMode === k ? "var(--accent)" : undefined }}>{label}</button>
+            style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                     background: mouseMode === k ? "var(--accent)" : undefined }}>
+      <ToolBtnInner id={k} label={label} />
+    </button>
   );
+  // 액션 → 아이콘 매핑 (UBPACS 아이콘 표)
+  const ACT_ICON: Record<string, string> = {
+    fit: "fit", invert: "inv", rotL: "rotL", rotR: "rotR", flipH: "flipH",
+    flipV: "flipV", cine: "cine", capture: "cap", reset: "reset",
+  };
   const ActBtn = ({ a, label, title, on }: { a: string; label: string; title: string; on?: boolean }) => (
     <button onClick={() => act(a)} title={title}
-            style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
-                     background: on ? "var(--accent)" : undefined }}>{label}</button>
+            style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                     background: on ? "var(--accent)" : undefined }}>
+      <ToolBtnInner id={ACT_ICON[a] ?? a} label={label} />
+    </button>
   );
 
   /* 팔레트(방향 전환 가능 — 요청 2) */
@@ -716,70 +726,81 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                 {TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
                           onClick={() => { setTool(tool === tk ? null : tk); setDraft(null); }}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === tk ? "var(--accent)" : undefined }}>
-                    {label}
+                    <ToolBtnInner id={tk} label={label} />
                   </button>
                 ))}
                 {tbOn("ref") && (
                   <button title="Reference line — 활성 페인 평면을 다른 페인에 투영(scout)"
                           onClick={() => setRefOn((r) => !r)}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: refOn ? "var(--accent)" : undefined }}>
-                    Ref{refOn ? "●" : ""}
+                    <ToolBtnInner id="ref" label={`Ref${refOn ? "●" : ""}`} />
                   </button>
                 )}
                 {tbOn("ctr") && (detail.modality === "CR" || detail.modality === "DX") && (
                   <button title="AI 심흉비 자동계측 (S2) — 초안, 확정 아님" onClick={doCtr}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    color: "var(--ai)", fontWeight: 700 }}>
-                    CTR
+                    <ToolBtnInner id="ctr" label="CTR" />
                   </button>
                 )}
                 {tbOn("save") && (
                   <button title="주석 서버 저장 (로밍)" onClick={saveAnnos}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>Save</button>
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="save" label="Save" />
+                  </button>
                 )}
                 {tbOn("gsps") && (
                   <button title="GSPS 내보내기 — 주석·W/L 표준 저장(Orthanc)" onClick={doGsps}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>GSPS</button>
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="gsps" label="GSPS" />
+                  </button>
                 )}
                 {tbOn("del") && (
                   <button title="마지막 주석 삭제" onClick={() => setAnnos((p) => p.slice(0, -1))}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>Del</button>
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="del" label="Del" />
+                  </button>
                 )}
                 {tbOn("clr") && (
                   <button title="주석 전체 삭제" onClick={() => {
                     if (window.confirm(`주석 ${annos.length}건을 모두 삭제할까요? (저장 전이면 복구 불가)`)) setAnnos([]);
-                  }} style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>Clr</button>
+                  }} style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="clr" label="Clr" />
+                  </button>
                 )}
               </>)}
               {k === "2d" && (<>
                 <button title="All — W/L 프리셋을 모든 페인(전체 이미지)에 적용 (UBPACS All)"
                         onClick={() => setWlAll((a) => !a)}
-                        style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                        style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                  background: wlAll ? "var(--accent)" : undefined, fontWeight: 700 }}>
-                  All{wlAll ? "●" : ""}
+                  <ToolBtnInner id="all" label={`All${wlAll ? "●" : ""}`} />
                 </button>
                 {prefs.wl_presets.map((pr) => (
                   <button key={pr.key} title={`W/L ${pr.q || "기본"} (Presetting — 설정>뷰어에서 편집)`}
                           onClick={() => applyWl(pr.q)}
-                          style={{ padding: "8px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: panes[activePane].wl === pr.q ? "var(--accent)" : undefined }}>
-                    {pr.label}
+                    <ToolBtnInner id="wl" label={pr.label} />
                   </button>
                 ))}
               </>)}
               {k === "etc" && (<>
                 {tbOn("ohif") && (
-                  <button style={{ padding: "8px 4px", fontSize: 12 }} onClick={() => openViewer(detail.study_uid)}>OHIF</button>
+                  <button style={{ padding: "6px 4px", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}
+                          onClick={() => openViewer(detail.study_uid)}>
+                    <ToolBtnInner id="ohif" label="OHIF" />
+                  </button>
                 )}
                 {tbOn("3d") && (
                   <button title="내장 MPR/MIP — 현재 검사를 Axial/Sagittal/Coronal+MIP로 (새 창 없음)"
                           onClick={() => setMprOn((m) => !m)}
-                          style={{ padding: "8px 4px", fontSize: 12, fontWeight: 700,
+                          style={{ padding: "6px 4px", fontSize: 12, fontWeight: 700, width: paletteHoriz ? 60 : "100%",
                                    background: mprOn ? "var(--accent)" : undefined }}>
-                    3D/MPR{mprOn ? "●" : ""}
+                    <ToolBtnInner id="mpr" label={`MPR${mprOn ? "●" : ""}`} />
                   </button>
                 )}
               </>)}
