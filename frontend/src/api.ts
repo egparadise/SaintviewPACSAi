@@ -1,6 +1,9 @@
 // API 클라이언트 — 백엔드 FastAPI
 const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 const OHIF_BASE = import.meta.env.VITE_OHIF_BASE ?? "http://localhost:3000";
+/** 뷰어 창 베이스 — 별도 포트로 띄우려면 frontend/.env에 VITE_VIEWER_BASE=http://localhost:5174
+ *  설정 후 `npm run dev:viewer`(5174)를 함께 실행. 빈값=같은 출처(포트) 사용 */
+export const VIEWER_BASE: string = import.meta.env.VITE_VIEWER_BASE ?? "";
 
 /** View&Draft 동선: OHIF 뷰어를 해당 검사로 오픈 (디자인 §3.1 [A]).
  *  F-18: hangingProtocolId — 모달리티별 매핑(viewer.prefs.hanging)을 호출부에서 전달 */
@@ -26,9 +29,39 @@ if (!token && window.opener) {
   try {
     token = (window.opener as Window).__svToken ?? null;
     if (token) sessionStorage.setItem("sv_token", token);
-  } catch { /* cross-origin opener 무시 */ }
+  } catch { /* cross-origin opener — ensureToken()의 postMessage 핸드셰이크 사용 */ }
 }
 window.__svToken = token;
+
+// 뷰어 창(타 포트=타 출처)의 토큰 요청에 응답 — 허용 출처만 (postMessage 핸드셰이크)
+window.addEventListener("message", (e: MessageEvent) => {
+  const allowed = e.origin === window.location.origin || (VIEWER_BASE && e.origin === new URL(VIEWER_BASE).origin);
+  if (!allowed || !token) return;
+  if ((e.data as { type?: string })?.type === "sv:req-token") {
+    (e.source as Window | null)?.postMessage({ type: "sv:token", token }, e.origin);
+  }
+});
+
+/** 새 창(타 출처 포함)에서 토큰 확보 — 직접 인계 실패 시 opener에 postMessage 요청 */
+export function ensureToken(timeoutMs = 3000): Promise<boolean> {
+  if (token) return Promise.resolve(true);
+  if (!window.opener) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => { window.removeEventListener("message", onMsg); resolve(ok); };
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { type?: string; token?: string };
+      if (d?.type === "sv:token" && d.token) {
+        token = d.token;
+        window.__svToken = token;
+        try { sessionStorage.setItem("sv_token", token); } catch { /* 무시 */ }
+        done(true);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    try { (window.opener as Window).postMessage({ type: "sv:req-token" }, "*"); } catch { done(false); return; }
+    setTimeout(() => done(!!token), timeoutMs);
+  });
+}
 
 export function setToken(t: string | null, remember = false) {
   token = t;

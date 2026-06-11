@@ -36,7 +36,7 @@ app = FastAPI(title="Saintview PACS AI", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Vite dev
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # Vite dev + 뷰어 별도 포트
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

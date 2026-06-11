@@ -74,6 +74,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [rptAutoApply, setRptAutoApply] = useState(true);
   // 뷰어 닫기 동작 (닫기 다이얼로그 "기본으로" 체크와 동일 설정)
   const [closeMode, setCloseMode] = useState<"ask" | "save_current" | "save_all" | "discard">("ask");
+  // 모니터 설정 — 하드웨어 모니터 감지 후 뷰어 표시 모니터 선택(다중=스팬)
+  const [monitors, setMonitors] = useState<{ label: string; w: number; h: number; primary: boolean }[]>([]);
+  const [monitorSel, setMonitorSel] = useState<number[]>([]);
+  const [monitorMsg, setMonitorMsg] = useState("");
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
@@ -139,6 +143,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (wp?.length) setWlPresets(wp);
       const cm = (v as { close_mode?: "ask" | "save_current" | "save_all" | "discard" }).close_mode;
       if (cm) setCloseMode(cm);
+      const mon = (v as { monitor?: { screens?: number[] } }).monitor;
+      if (mon?.screens) setMonitorSel(mon.screens);
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -195,6 +201,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       hanging2d: { CT: h2dCT, MR: h2dMR },
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
+      monitor: { screens: monitorSel },
     }, "user");
     await api.putSetting("report.prefs", { ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
     if (isAdmin) {
@@ -682,6 +689,44 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                       뷰어 우측에 리포트·과거검사 표시
                     </label>
                   </Row>
+                  <Row label="모니터">
+                    <button onClick={async () => {
+                      const w = window as unknown as {
+                        getScreenDetails?: () => Promise<{
+                          screens: { label?: string; availWidth: number; availHeight: number; isPrimary?: boolean }[];
+                        }>;
+                      };
+                      if (!w.getScreenDetails) {
+                        setMonitorMsg("이 브라우저는 모니터 감지(Window Management API)를 지원하지 않습니다 — Chrome 권장");
+                        return;
+                      }
+                      try {
+                        const det = await w.getScreenDetails();
+                        setMonitors(det.screens.map((s, i) => ({
+                          label: s.label || `모니터 ${i + 1}`, w: s.availWidth, h: s.availHeight,
+                          primary: !!s.isPrimary,
+                        })));
+                        setMonitorMsg(`${det.screens.length}대 감지됨 — 뷰어를 표시할 모니터를 선택하세요`);
+                      } catch { setMonitorMsg("모니터 권한이 거부되었습니다"); }
+                    }}>모니터 감지</button>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{monitorMsg}</span>
+                  </Row>
+                  {monitors.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 118 }}>
+                      {monitors.map((m, i) => (
+                        <label key={i} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                          <input type="checkbox" checked={monitorSel.includes(i)}
+                                 onChange={(e) => setMonitorSel((p) =>
+                                   e.target.checked ? [...p, i].sort() : p.filter((x) => x !== i))} />
+                          🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}
+                        </label>
+                      ))}
+                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                        1대 선택=해당 모니터에 뷰어 / 2대 이상=뷰어 창이 모니터들을 스팬하고
+                        Series Layout(예: 1×2)으로 영상만 분할 표시. OK(저장) 후 다음 오픈부터 적용.
+                      </span>
+                    </div>
+                  )}
                   <Row label="닫기 동작">
                     <select value={closeMode}
                             onChange={(e) => setCloseMode(e.target.value as typeof closeMode)}>

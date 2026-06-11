@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  VIEWER_BASE,
   api,
   downloadReportPdf,
   openViewer,
@@ -49,12 +50,32 @@ import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 
-/* ── F-18 행잉 매핑 ─────────────────────────────── */
+/* ── F-18 행잉 매핑 + 모니터 배치(viewer.prefs.monitor) ─────────────────── */
 let hangingMap: Record<string, string> = {};
+let monitorScreens: number[] = [];  // 뷰어를 띄울 모니터 인덱스(다중=스팬)
 export function loadHangingPrefs() {
   api.getSetting("viewer.prefs").then((r) => {
     hangingMap = ((r.value as { hanging?: Record<string, string> }).hanging) ?? {};
+    monitorScreens = ((r.value as { monitor?: { screens?: number[] } }).monitor?.screens) ?? [];
   }).catch(() => {});
+}
+
+/** 모니터 설정 기반 창 위치/크기 — Window Management API(Chrome) 가용 시 */
+async function viewerWindowFeatures(): Promise<string> {
+  const fallback = "width=1500,height=920";
+  if (!monitorScreens.length || !("getScreenDetails" in window)) return fallback;
+  try {
+    const det = await (window as unknown as {
+      getScreenDetails: () => Promise<{ screens: { availLeft: number; availTop: number; availWidth: number; availHeight: number }[] }>;
+    }).getScreenDetails();
+    const scr = monitorScreens.map((i) => det.screens[i]).filter(Boolean);
+    if (!scr.length) return fallback;
+    const left = Math.min(...scr.map((s) => s.availLeft));
+    const top = Math.min(...scr.map((s) => s.availTop));
+    const right = Math.max(...scr.map((s) => s.availLeft + s.availWidth));
+    const bottom = Math.max(...scr.map((s) => s.availTop + s.availHeight));
+    return `left=${left},top=${top},width=${right - left},height=${bottom - top}`;
+  } catch { return fallback; }
 }
 function hpFor(modality: string): string | undefined {
   return hangingMap[modality] ?? hangingMap.default;
@@ -1719,10 +1740,15 @@ export function Worklist() {
       p.set("wo_mode", cfg.withOpen.mode);
       p.set("wo_ids", cfg.withOpen.ids.join(","));
     }
-    // 같은 이름 창 재사용 — 뷰어 창 1개에 검사가 탭으로 누적(localStorage 영속)
-    const w = window.open(`${window.location.origin}${window.location.pathname}?${p}`,
-                          "sv_viewer", "width=1500,height=920");
-    w?.focus();
+    // 같은 이름 창 재사용 — 뷰어 창 1개에 검사가 탭으로 누적.
+    // VIEWER_BASE 설정 시 별도 포트(출처)로, 모니터 설정 시 해당 모니터(들)에 배치(스팬)
+    const base = VIEWER_BASE
+      ? `${VIEWER_BASE.replace(/\/$/, "")}/`
+      : `${window.location.origin}${window.location.pathname}`;
+    void viewerWindowFeatures().then((features) => {
+      const w = window.open(`${base}?${p}`, "sv_viewer", features);
+      w?.focus();
+    });
   }, []);
 
   const doAction = useCallback(async (a: string, row?: StudyRow) => {

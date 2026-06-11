@@ -11,6 +11,8 @@ import { DICOMWEB_ROOT } from "../lib/cornerstone";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
 const Viewer3DEmbed = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
+// 뷰어 내 설정 — 워크리스트로 돌아가지 않고 Setting 진입
+const SettingsModalLazy = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
 type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
 const TOOL_DEFS: [ToolKind, string, string][] = [
@@ -118,6 +120,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
+  const [settingsOpen, setSettingsOpen] = useState(false);  // 뷰어 내 Setting
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -930,6 +933,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         </div>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
+        <button onClick={() => setSettingsOpen(true)} title="설정 — 뷰어에서 바로 Setting 진입">설정</button>
         <button onClick={() => setPrefs((p) => ({ ...p, reportDock: !p.reportDock }))}>판독창</button>
         <button onClick={() => setOverlayOn((o) => !o)}>{overlayOn ? "INFO ●" : "INFO ○"}</button>
         <button onClick={closeAllTabs} className="primary"
@@ -1111,6 +1115,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {thumbHoriz && thumbs}
       {closeDlg && (
         <CloseDialog onPick={(m, r) => void doClose(m, r)} onCancel={() => setCloseDlg(false)} />
+      )}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModalLazy
+            role={localStorage.getItem("sv_role") ?? sessionStorage.getItem("sv_role") ?? "radiologist"}
+            onClose={() => setSettingsOpen(false)} />
+        </Suspense>
       )}
     </div>
   );
