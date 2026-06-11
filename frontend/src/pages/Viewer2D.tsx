@@ -128,13 +128,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => {
     api.worklist({ limit: "500" }).then((r) => setWlIds(r.items.map((it) => it.id))).catch(() => {});
   }, []);
+  /** 현재 활성 페인에 보이는 검사 id — ◀▶ 이동의 기준점 */
+  const currentNavId = () => {
+    const curUid = panes[activePane]?.studyUid || detail.study_uid;
+    return openTabs.find((t) => t.uid === curUid)?.id ?? detail.id;
+  };
   const navPatient = (dir: 1 | -1) => {
-    const idx = wlIds.indexOf(detail.id);
+    const idx = wlIds.indexOf(currentNavId());
+    if (idx < 0) return;
     const target = wlIds[idx + dir];
     if (target === undefined) return;
+    // 이미 열린 환자(Exam 탭)면 → 새로고침 없이 그 탭으로 전환
+    const opened = openTabs.find((t) => t.id === target);
+    if (opened) { void loadIntoActive(opened.id); return; }
+    // 미오픈 → 열면서 이동 (창 네비게이트, 탭은 localStorage로 유지·누적)
     const p = new URLSearchParams(window.location.search);
     if (p.get("viewer") === "2d") {
-      // 새 창 모드: 같은 창에서 해당 검사로 네비게이트 (탭은 localStorage로 유지·누적)
       p.set("study", String(target));
       ["add", "stack", "keysops", "wo_mode", "wo_ids"].forEach((k) => p.delete(k));
       window.location.search = p.toString();
@@ -839,13 +848,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
                                                     : { borderRight: "1px solid var(--border)" }) }),
     }}>
-      {/* ◀▶ 환자 이동 (워크리스트 순서 — 미오픈=열며 이동, 오픈=해당 탭 전환) */}
+      {/* ◀▶ 환자 이동 (현재 보고 있는 검사 기준 — 미오픈=열며 이동, 오픈=그 탭으로 전환) */}
       <div style={{ display: "flex", gap: 3, ...(paletteHoriz ? {} : { width: "100%" }) }}>
-        <button title="이전 환자(검사)로 이동" onClick={() => navPatient(-1)}
-                disabled={wlIds.indexOf(detail.id) <= 0}
+        <button title="이전 환자(검사) — 이미 열려 있으면 그 Exam 탭으로 전환" onClick={() => navPatient(-1)}
+                disabled={wlIds.indexOf(currentNavId()) <= 0}
                 style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>◀</button>
-        <button title="다음 환자(검사)로 이동" onClick={() => navPatient(1)}
-                disabled={wlIds.indexOf(detail.id) < 0 || wlIds.indexOf(detail.id) >= wlIds.length - 1}
+        <button title="다음 환자(검사) — 이미 열려 있으면 그 Exam 탭으로 전환" onClick={() => navPatient(1)}
+                disabled={wlIds.indexOf(currentNavId()) < 0 || wlIds.indexOf(currentNavId()) >= wlIds.length - 1}
                 style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>▶</button>
       </div>
       <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}
