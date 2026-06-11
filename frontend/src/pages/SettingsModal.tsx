@@ -1,6 +1,6 @@
 // 설정 — INFINITT Setting options 패턴(좌측 트리 + 우측 페이지, 화면분석 §5)
 import { useEffect, useRef, useState } from "react";
-import { api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
+import { VIEWER_BASE, api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
 import { DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
@@ -32,6 +32,7 @@ const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "report", label: "리포트" },
   { key: "reading", label: "판독 (Reading)" },
   { key: "viewer", label: "뷰어" },
+  { key: "monitor", label: "모니터 (Display)" },
   { key: "hp", label: "행잉 (HP)" },
   { key: "pdf", label: "판독서 PDF", admin: true },
   { key: "ai", label: "AI 정책", admin: true },
@@ -776,44 +777,6 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                       뷰어 우측에 리포트·과거검사 표시
                     </label>
                   </Row>
-                  <Row label="모니터">
-                    <button onClick={async () => {
-                      const w = window as unknown as {
-                        getScreenDetails?: () => Promise<{
-                          screens: { label?: string; availWidth: number; availHeight: number; isPrimary?: boolean }[];
-                        }>;
-                      };
-                      if (!w.getScreenDetails) {
-                        setMonitorMsg("이 브라우저는 모니터 감지(Window Management API)를 지원하지 않습니다 — Chrome 권장");
-                        return;
-                      }
-                      try {
-                        const det = await w.getScreenDetails();
-                        setMonitors(det.screens.map((s, i) => ({
-                          label: s.label || `모니터 ${i + 1}`, w: s.availWidth, h: s.availHeight,
-                          primary: !!s.isPrimary,
-                        })));
-                        setMonitorMsg(`${det.screens.length}대 감지됨 — 뷰어를 표시할 모니터를 선택하세요`);
-                      } catch { setMonitorMsg("모니터 권한이 거부되었습니다"); }
-                    }}>모니터 감지</button>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{monitorMsg}</span>
-                  </Row>
-                  {monitors.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 118 }}>
-                      {monitors.map((m, i) => (
-                        <label key={i} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-                          <input type="checkbox" checked={monitorSel.includes(i)}
-                                 onChange={(e) => setMonitorSel((p) =>
-                                   e.target.checked ? [...p, i].sort() : p.filter((x) => x !== i))} />
-                          🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}
-                        </label>
-                      ))}
-                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        1대 선택=해당 모니터에 뷰어 / 2대 이상=뷰어 창이 모니터들을 스팬하고
-                        Series Layout(예: 1×2)으로 영상만 분할 표시. OK(저장) 후 다음 오픈부터 적용.
-                      </span>
-                    </div>
-                  )}
                   <Row label="닫기 동작">
                     <select value={closeMode}
                             onChange={(e) => setCloseMode(e.target.value as typeof closeMode)}>
@@ -889,6 +852,76 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                   </table>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     뷰어 2D 섹션에 프리셋 버튼으로 표시 — All 토글 시 전체 페인 적용. OK(저장) 시 반영.
+                  </div>
+                </Group>
+              </>
+            )}
+
+            {page === "monitor" && (
+              <>
+                <Group title="모니터 감지 · 뷰어 배치" right={
+                  <button className="primary" style={{ padding: "1px 10px", fontSize: 11.5 }} onClick={async () => {
+                    const w = window as unknown as {
+                      getScreenDetails?: () => Promise<{
+                        screens: { label?: string; availWidth: number; availHeight: number; isPrimary?: boolean }[];
+                      }>;
+                    };
+                    if (!w.getScreenDetails) {
+                      setMonitorMsg("이 브라우저는 모니터 감지(Window Management API)를 지원하지 않습니다 — Chrome/Edge 권장");
+                      return;
+                    }
+                    try {
+                      const det = await w.getScreenDetails();
+                      setMonitors(det.screens.map((s, i) => ({
+                        label: s.label || `모니터 ${i + 1}`, w: s.availWidth, h: s.availHeight,
+                        primary: !!s.isPrimary,
+                      })));
+                      setMonitorMsg(`${det.screens.length}대 감지됨 — 뷰어를 표시할 모니터를 체크하세요`);
+                    } catch { setMonitorMsg("모니터 권한이 거부되었습니다 — 주소창 권한 아이콘에서 허용 후 다시 시도"); }
+                  }}>① 모니터 감지</button>
+                }>
+                  {monitorMsg && <div style={{ fontSize: 12, color: "var(--stat-final)" }}>{monitorMsg}</div>}
+                  {monitors.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+                      아직 감지된 모니터가 없습니다 — 우측 상단 <b>① 모니터 감지</b>를 누르세요
+                      (최초 1회 브라우저 권한 허용 필요).
+                      {monitorSel.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          현재 저장된 선택: <b style={{ color: "var(--text-primary)" }}>
+                            모니터 {monitorSel.map((i) => i + 1).join(", ")}</b>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>② 뷰어를 표시할 모니터 선택:</div>
+                      {monitors.map((m, i) => (
+                        <label key={i} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                          <input type="checkbox" checked={monitorSel.includes(i)}
+                                 onChange={(e) => setMonitorSel((p) =>
+                                   e.target.checked ? [...p, i].sort() : p.filter((x) => x !== i))} />
+                          🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border)", paddingTop: 6 }}>
+                    <b>사용 방법:</b> ① 모니터 감지 → ② 모니터 체크 → ③ 하단 <b>OK(저장)</b> →
+                    ④ 워크리스트에서 검사를 열면 다음 오픈부터 적용됩니다.<br />
+                    · <b>1대 선택</b>: 뷰어 창이 그 모니터의 위치·크기로 열림<br />
+                    · <b>2대 이상 선택</b>: 뷰어 창 하나가 모니터들을 <b>스팬</b>하고
+                    Series Layout(예: 1×2)으로 영상 페인만 모니터별로 분할 표시<br />
+                    · 선택 해제(0대) = 기본 크기(1500×920)로 오픈
+                  </div>
+                </Group>
+                <Group title="뷰어 창 정보 (별도 포트)">
+                  <div style={{ fontSize: 12.5 }}>
+                    현재 뷰어 창 출처: <code>{VIEWER_BASE || "워크리스트와 동일 (같은 포트)"}</code>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    뷰어를 별도 포트로 분리하려면 <code>frontend/.env</code>에
+                    <code> VITE_VIEWER_BASE=http://localhost:5174</code> 추가 후
+                    <code> npm run dev:viewer</code>를 함께 실행하세요 (재기동 필요).
                   </div>
                 </Group>
               </>

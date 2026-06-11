@@ -1183,7 +1183,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setSettingsOpen(true)} title="설정 — 뷰어에서 바로 Setting 진입">설정</button>
-        <button onClick={() => setPrefs((p) => ({ ...p, reportDock: !p.reportDock }))}>판독창</button>
+        <button title="Reading — 전용 판독 창(새 페이지) 열기 · 우측 도크는 Setting>뷰어>판독창 도크"
+                onClick={() => {
+                  const w = window.open(
+                    `${window.location.origin}${window.location.pathname}?report=1&study=${detail.id}`,
+                    "sv_report", "width=440,height=1020");
+                  w?.focus();
+                }}>
+          Reading
+        </button>
         <button onClick={() => setOverlayOn((o) => !o)}>{overlayOn ? "INFO ●" : "INFO ○"}</button>
         <button onClick={closeAllTabs} className="primary"
                 title={`All Close — 모든 Exam 탭을 닫고 뷰어 종료. 저장 동작: ${

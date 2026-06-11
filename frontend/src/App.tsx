@@ -5,9 +5,12 @@ import { hasToken, setToken, api } from "./api";
 import { Worklist } from "./pages/Worklist";
 import { SettingsModal } from "./pages/SettingsModal";
 import { ViewerWindow } from "./pages/ViewerWindow";
+import { ReportWindow } from "./pages/ReportWindow";
 
-// 뷰어 새 창 모드 (?viewer=2d&study=ID) — 워크리스트 없이 뷰어 전용 페이지
-const IS_VIEWER_WINDOW = new URLSearchParams(window.location.search).get("viewer") === "2d";
+// 뷰어/판독 새 창 모드 — 워크리스트 없이 전용 페이지
+const _params = new URLSearchParams(window.location.search);
+const IS_VIEWER_WINDOW = _params.get("viewer") === "2d";
+const IS_REPORT_WINDOW = _params.get("report") === "1";
 
 function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
   const [username, setUsername] = useState("admin");
@@ -79,9 +82,12 @@ export default function App() {
     );
   }
 
-  // 뷰어 새 창: 헤더 없이 뷰어만 (창 제목·닫기는 ViewerWindow가 처리)
+  // 뷰어/판독 새 창: 헤더 없이 전용 페이지만
   if (IS_VIEWER_WINDOW) {
     return <ViewerWindow />;
+  }
+  if (IS_REPORT_WINDOW) {
+    return <ReportWindow />;
   }
 
   return (
