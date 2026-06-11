@@ -927,19 +927,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               </div>
             );
           })}
-          <button onClick={closeAllTabs} title="전체 닫기 — 모든 Exam 탭을 닫고 뷰어 종료"
-                  style={{ padding: "2px 9px", fontSize: 10.5, whiteSpace: "nowrap", alignSelf: "center" }}>
-            전체 닫기
-          </button>
         </div>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setPrefs((p) => ({ ...p, reportDock: !p.reportDock }))}>판독창</button>
         <button onClick={() => setOverlayOn((o) => !o)}>{overlayOn ? "INFO ●" : "INFO ○"}</button>
-        <button onClick={requestClose}
-                title={`닫기 — 현재 동작: ${prefs.close_mode === "ask" ? "항상 묻기"
-                     : prefs.close_mode === "save_current" ? "현재 화면 저장"
-                     : prefs.close_mode === "save_all" ? "전체 저장" : "저장 안 함"} (Setting>뷰어)`}>닫기</button>
+        <button onClick={closeAllTabs} className="primary"
+                title={`All Close — 모든 Exam 탭을 닫고 뷰어 종료. 저장 동작: ${
+                  prefs.close_mode === "ask" ? "항상 묻기"
+                  : prefs.close_mode === "save_current" ? "현재 화면 저장"
+                  : prefs.close_mode === "save_all" ? "전체 저장" : "저장 안 함"} (Setting>뷰어)`}
+                style={{ fontWeight: 700 }}>
+          All Close ✕
+        </button>
       </div>
 
       {/* Study/Series Titlebar (UBPACS p.14·p.16 — Opened/Related/Series/HP 드롭다운) */}
