@@ -48,7 +48,6 @@ import { GridPicker } from "../lib/GridPicker";
 import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
-const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 
 /* ── F-18 행잉 매핑 ─────────────────────────────── */
 let hangingMap: Record<string, string> = {};
@@ -1557,11 +1556,7 @@ export function Worklist() {
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
-  // UBPACS-Z Study Open 5종 + Study With Open(Related 함께 오픈)
-  const [viewer2d, setViewer2d] = useState<{
-    detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
-    withOpen?: { mode: "add" | "stack"; ids: number[] };
-  } | null>(null);
+  // UBPACS-Z Study Open 5종 + Study With Open — 뷰어는 새 창(별도 웹페이지)으로 연다
   const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
   const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
@@ -1669,7 +1664,7 @@ export function Worklist() {
       }
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (viewer2d || viewer3dUid || batchOpen) return; // 모달/뷰어 우선
+      if (viewer3dUid || batchOpen) return; // 모달/뷰어 우선
       if (e.key === "Enter" && selected) { e.preventDefault(); void doAction("viewdraft"); }
       else if (e.key.toLowerCase() === "b") setBatchOpen(true);
       else if (e.key.toLowerCase() === "e" && selected) void doAction("emergency");
@@ -1677,7 +1672,7 @@ export function Worklist() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, viewer2d, viewer3dUid, batchOpen]);
+  }, [selected, viewer3dUid, batchOpen]);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
@@ -1710,13 +1705,24 @@ export function Worklist() {
     openViewer(row.study_uid, hpFor(row.modality));
   }, []);
 
-  // 자체 뷰어 오픈 헬퍼 — lastViewerRef가 UBPACS "기존 영상" 역할
+  // 자체 뷰어 오픈 — 새 창(별도 웹페이지, ?viewer=2d)으로 연다. lastViewerRef = UBPACS "기존 영상"
   const openV2 = useCallback((cfg: {
     detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
     withOpen?: { mode: "add" | "stack"; ids: number[] };
   }) => {
     lastViewerRef.current = cfg.addDetail ?? cfg.stackDetail ?? cfg.detail;
-    setViewer2d(cfg);
+    const p = new URLSearchParams({ viewer: "2d", study: String(cfg.detail.id) });
+    if (cfg.addDetail) p.set("add", String(cfg.addDetail.id));
+    if (cfg.stackDetail) p.set("stack", String(cfg.stackDetail.id));
+    if (cfg.keySops?.length) p.set("keysops", cfg.keySops.join(","));
+    if (cfg.withOpen) {
+      p.set("wo_mode", cfg.withOpen.mode);
+      p.set("wo_ids", cfg.withOpen.ids.join(","));
+    }
+    // 같은 이름 창 재사용 — 뷰어 창 1개에 검사가 탭으로 누적(localStorage 영속)
+    const w = window.open(`${window.location.origin}${window.location.pathname}?${p}`,
+                          "sv_viewer", "width=1500,height=920");
+    w?.focus();
   }, []);
 
   const doAction = useCallback(async (a: string, row?: StudyRow) => {
@@ -2074,19 +2080,7 @@ export function Worklist() {
       </footer>
 
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
-      {viewer2d && (
-        <Suspense fallback={
-          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
-            뷰어 로딩…
-          </div>
-        }>
-          <Viewer2D key={`${viewer2d.detail.id}-${viewer2d.addDetail?.id ?? ""}-${viewer2d.stackDetail?.id ?? ""}-${viewer2d.keySops?.length ?? 0}-${viewer2d.withOpen?.ids.join(".") ?? ""}`}
-                    detail={viewer2d.detail} addDetail={viewer2d.addDetail}
-                    stackDetail={viewer2d.stackDetail} keySops={viewer2d.keySops}
-                    withOpen={viewer2d.withOpen}
-                    onClose={() => setViewer2d(null)} />
-        </Suspense>
-      )}
+      {/* 자체 뷰어(Viewer2D)는 새 창(?viewer=2d)으로 열린다 — openV2 참조 */}
       {viewer3dUid && (
         <Suspense fallback={
           <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>

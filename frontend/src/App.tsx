@@ -4,6 +4,10 @@ import "./theme.css";
 import { hasToken, setToken, api } from "./api";
 import { Worklist } from "./pages/Worklist";
 import { SettingsModal } from "./pages/SettingsModal";
+import { ViewerWindow } from "./pages/ViewerWindow";
+
+// 뷰어 새 창 모드 (?viewer=2d&study=ID) — 워크리스트 없이 뷰어 전용 페이지
+const IS_VIEWER_WINDOW = new URLSearchParams(window.location.search).get("viewer") === "2d";
 
 function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
   const [username, setUsername] = useState("admin");
@@ -73,6 +77,11 @@ export default function App() {
         }}
       />
     );
+  }
+
+  // 뷰어 새 창: 헤더 없이 뷰어만 (창 제목·닫기는 ViewerWindow가 처리)
+  if (IS_VIEWER_WINDOW) {
+    return <ViewerWindow />;
   }
 
   return (

@@ -86,8 +86,14 @@ const DEFAULT_PREFS: ViewerPrefs = {
   close_mode: "ask",
 };
 
-// Exam 탭 영속 — 뷰어를 닫았다 다시 열어도 ✕/전체닫기 전까지 우측에 계속 쌓인다 (UBPACS)
-let persistedTabs: { id: number; uid: string; label: string }[] = [];
+// Exam 탭 영속 — 새 창 뷰어가 재사용/재오픈돼도 ✕/전체닫기 전까지 우측에 계속 쌓인다 (UBPACS)
+const TABS_KEY = "sv_viewer_tabs";
+function loadPersistedTabs(): { id: number; uid: string; label: string }[] {
+  try { return JSON.parse(localStorage.getItem(TABS_KEY) ?? "[]"); } catch { return []; }
+}
+function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
+  try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* quota */ }
+}
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
@@ -130,7 +136,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [priorTrees, setPriorTrees] = useState<Record<number, { uid: string; series: SeriesNode[] }>>({});
   // 오픈 검사 탭 — 여러 검사가 열리면 좌→우로 탭이 쌓인다(브라우저 창 메타포, UBPACS Opened Study List)
   const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
-  useEffect(() => { persistedTabs = openTabs; }, [openTabs]);  // ✕/전체닫기 전까지 세션 유지
+  useEffect(() => { if (openTabs.length) savePersistedTabs(openTabs); }, [openTabs]);  // ✕/전체닫기 전까지 유지
   const [closeDlg, setCloseDlg] = useState(false);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);
@@ -207,7 +213,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       id: detail.id, uid: detail.study_uid,
       label: `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date}`,
     };
-    setOpenTabs([...persistedTabs.filter((t) => t.id !== detail.id), main]);
+    setOpenTabs([...loadPersistedTabs().filter((t) => t.id !== detail.id), main]);
     api.seriesTree(detail.id).then((r) => {
       let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
       // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
@@ -221,10 +227,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setSeries(imgSeries);
       if (imgSeries[0]) {
         setSelSeries(imgSeries[0].series_uid);
-        // ② AI 추천 W/L 자동 적용(수동 변경 가능). modality 누락 시 시리즈에서 폴백
+        // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
+        //    HU 윈도우가 화면을 날리므로 적용하지 않는다(서버 VOI 기본 유지)
         const mod = detail.modality || imgSeries[0].modality;
         const bp = detail.body_part || detail.study_desc;
-        const ai = autoWL(mod, bp);
+        const realData = !!imgSeries[0].instances[0]?.pixel_spacing?.length;
+        const ai = realData ? autoWL(mod, bp) : null;
         setPanes((prev) => {
           const next = { ...prev };
           PANE_IDS.forEach((pid, i) => {
@@ -603,7 +611,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
   const closeAllTabs = () => {
-    persistedTabs = [];
+    try { localStorage.removeItem(TABS_KEY); } catch { /* 무시 */ }
     setOpenTabs([]);
     requestClose();
   };

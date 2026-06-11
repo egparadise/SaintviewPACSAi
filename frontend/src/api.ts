@@ -17,8 +17,22 @@ export function openViewer(studyUid: string, hangingProtocolId?: string) {
 // 자동 로그인(UBPACS-Z §1): remember=localStorage, 아니면 sessionStorage
 let token: string | null = localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
 
+// 새 창 뷰어(window.open) 토큰 인계 — sessionStorage는 탭 간 공유되지 않으므로
+// opener의 전역에서 가져온다(동일 출처만 접근 가능).
+declare global {
+  interface Window { __svToken?: string | null }
+}
+if (!token && window.opener) {
+  try {
+    token = (window.opener as Window).__svToken ?? null;
+    if (token) sessionStorage.setItem("sv_token", token);
+  } catch { /* cross-origin opener 무시 */ }
+}
+window.__svToken = token;
+
 export function setToken(t: string | null, remember = false) {
   token = t;
+  window.__svToken = t;
   sessionStorage.removeItem("sv_token");
   localStorage.removeItem("sv_token");
   if (t) (remember ? localStorage : sessionStorage).setItem("sv_token", t);
