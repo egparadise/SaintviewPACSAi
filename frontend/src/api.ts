@@ -378,6 +378,22 @@ export interface BatchCandidate {
   confidence: string;
 }
 
+/** 음성 판독 서버 STT (Whisper 로컬/OpenAI API) — FormData라 req() 미사용 */
+export async function sttTranscribe(blob: Blob): Promise<{ text: string; engine: string }> {
+  const fd = new FormData();
+  fd.append("audio", blob, "dictation.webm");
+  const res = await fetch(`${BASE}/api/stt`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: fd,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 /** PDF 다운로드 — 인증 헤더가 필요하므로 fetch→blob 방식 */
 export async function downloadReportPdf(reportId: number) {
   const res = await fetch(`${BASE}/api/reports/${reportId}/export?format=pdf`, {

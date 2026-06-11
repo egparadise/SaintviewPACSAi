@@ -65,6 +65,12 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [footer, setFooter] = useState("");
   const [autoGenerate, setAutoGenerate] = useState(true);
   const [vision, setVision] = useState(false);
+  // STT 엔진 (음성판독 — 브라우저/Whisper 오픈소스/상용 API)
+  const [sttEngine, setSttEngine] = useState("browser");
+  const [sttModel, setSttModel] = useState("");
+  // 리포트 구성 (Report Composition)
+  const [rptAiPanel, setRptAiPanel] = useState(true);
+  const [rptAutoApply, setRptAutoApply] = useState(true);
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
@@ -132,6 +138,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
     }).catch(() => {});
+    api.getSetting("report.prefs").then((r) => {
+      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean };
+      if (v.ai_panel !== undefined) setRptAiPanel(v.ai_panel);
+      if (v.auto_apply !== undefined) setRptAutoApply(v.auto_apply);
+    }).catch(() => {});
     api.getSetting("mode.profiles").then((r) => {
       const v = r.value as { profiles?: Record<string, ModeProfile> };
       setModeProfiles(v.profiles ?? {});
@@ -150,8 +161,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
         setHospital(v.hospital ?? ""); setDepartment(v.department ?? ""); setFooter(v.footer ?? "");
       });
       api.getSetting("ai.policy").then((r) => {
-        const v = r.value as Record<string, boolean>;
-        setAutoGenerate(v.auto_generate ?? true); setVision(v.vision ?? false);
+        const v = r.value as Record<string, boolean | string>;
+        setAutoGenerate((v.auto_generate as boolean) ?? true);
+        setVision((v.vision as boolean) ?? false);
+        setSttEngine((v.stt_engine as string) ?? "browser");
+        setSttModel((v.stt_model as string) ?? "");
       });
       api.aiQuality().then(setQuality).catch(() => {});
     }
@@ -177,9 +191,12 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets,
     }, "user");
+    await api.putSetting("report.prefs", { ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
-      await api.putSetting("ai.policy", { auto_generate: autoGenerate, vision }, "global");
+      await api.putSetting("ai.policy", {
+        auto_generate: autoGenerate, vision, stt_engine: sttEngine, stt_model: sttModel,
+      }, "global");
     }
     setSaved("저장됨 — 워크리스트 새로고침 시 적용");
     setTimeout(() => setSaved(""), 2500);
@@ -598,6 +615,19 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     더블클릭 또는 Alt+단축키로 Conclusion에 삽입됩니다.
                   </div>
                 </Group>
+                <Group title="리포트 구성 (Report Composition — UBPACS p.22)">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={rptAiPanel} onChange={(e) => setRptAiPanel(e.target.checked)} />
+                    AI Structured Report 패널 표시 (해제 시 Report 단독 — AI는 ↗ 별도 창으로만)
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={rptAutoApply} onChange={(e) => setRptAutoApply(e.target.checked)} />
+                    AI 초안을 Report에 자동 적용 (해제 시 빈 양식에서 시작 — [적용 ▶]로만 가져옴)
+                  </label>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    리포트 패널: ◀▶ 이전/다음 환자 이동 · 이력 콤보(과거 버전 보기) · ↗ AI 별도 창(모니터) — 계정 로밍.
+                  </div>
+                </Group>
                 <Group title="출력 형식">
                   <div style={{ fontSize: 12.5 }}>PDF · DICOM SR(확정 후 전송) · FHIR DiagnosticReport</div>
                 </Group>
@@ -786,6 +816,25 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />
                     키이미지 vision 분석 (F-11) — <span style={{ color: "var(--ai)" }}>[영상 참고 관찰]로만 표기</span>
                   </label>
+                </Group>
+                <Group title="음성 판독 STT 엔진 (Whisper 오픈소스 / 상용 API)">
+                  <Row label="엔진">
+                    <select value={sttEngine} onChange={(e) => setSttEngine(e.target.value)}>
+                      <option value="browser">브라우저 내장 (Web Speech — 기본)</option>
+                      <option value="whisper_local">Whisper 로컬 (오픈소스 — 온프레미스, PHI 안전)</option>
+                      <option value="openai_api">OpenAI API (상용 — whisper-1)</option>
+                    </select>
+                  </Row>
+                  <Row label="모델">
+                    <input value={sttModel} onChange={(e) => setSttModel(e.target.value)}
+                           placeholder={sttEngine === "openai_api" ? "whisper-1" : "base / small / medium…"}
+                           style={{ width: 220 }} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    Whisper 로컬: <code>pip install faster-whisper</code> 필요(미설치 시 안내 응답).
+                    <b style={{ color: "var(--stat-emergency)" }}> OpenAI API는 음성이 외부로 전송됩니다</b> —
+                    API 키는 서버 환경변수 <code>OPENAI_API_KEY</code>로만 설정(코드/설정 저장 금지).
+                  </div>
                 </Group>
                 {quality && quality.with_ai_draft > 0 && (
                   <Group title="AI 품질 지표 (F-20)">

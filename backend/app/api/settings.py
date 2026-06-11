@@ -22,6 +22,7 @@ ALLOWED_KEYS = {
     "worklist.tree",         # 검색 폴더 트리 (탐색기형 — 조건 누적 병합)
     "dicom.nodes",           # SCP/SCU 장비 노드 목록 (AE Title/IP/Port — 전역/관리자)
     "viewer.hp",             # 행잉 프로토콜 규칙 (장비×부위×Projection → Series/Image layout)
+    "report.prefs",          # 리포트 구성 (AI 패널 표시·자동 적용 — UBPACS Report Composition)
 }
 
 

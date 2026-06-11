@@ -89,7 +89,11 @@ async function buildImageIds(studyUid: string): Promise<string[]> {
   return withIds.map((x) => x.imageId);
 }
 
-export function Viewer3D({ studyUid, onClose }: { studyUid: string; onClose: () => void }) {
+export function Viewer3D({ studyUid, onClose, embedded }: {
+  studyUid: string;
+  onClose: () => void;
+  embedded?: boolean;  // Viewer2D 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 표시
+}) {
   const containerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const gridRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<RenderingEngine | null>(null);
@@ -203,7 +207,10 @@ export function Viewer3D({ studyUid, onClose }: { studyUid: string; onClose: () 
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200,
+      ...(embedded
+        ? { position: "relative" as const, width: "100%", height: "100%", minHeight: 0 }
+        : { position: "fixed" as const, inset: 0, zIndex: 200 }),
+      background: "var(--bg-canvas)",
       display: "flex", flexDirection: "column",
     }}>
       {/* 헤더 */}

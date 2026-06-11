@@ -339,6 +339,29 @@ def test_order_form_fields_and_mwl_tags(client, auth_headers, tmp_path):
         raise AssertionError("오더 .wl 미발견")
 
 
+def test_stt_engine_guards(client, auth_headers):
+    # 기본(browser) — 서버 STT 비활성 안내
+    r = client.post("/api/stt", headers=auth_headers,
+                    files={"audio": ("a.webm", b"x" * 10, "audio/webm")})
+    assert r.status_code == 400
+    # whisper_local 선택 + 라이브러리 미설치 → 501 설치 안내 (폴백 무중단)
+    client.put("/api/settings/ai.policy", headers=auth_headers,
+               json={"value": {"auto_generate": True, "stt_engine": "whisper_local"}, "scope": "global"})
+    r2 = client.post("/api/stt", headers=auth_headers,
+                     files={"audio": ("a.webm", b"x" * 10, "audio/webm")})
+    assert r2.status_code in (200, 501)  # 설치돼 있으면 200, 아니면 설치 안내
+    # 원복
+    client.put("/api/settings/ai.policy", headers=auth_headers,
+               json={"value": {"auto_generate": True, "stt_engine": "browser"}, "scope": "global"})
+
+
+def test_report_prefs_setting(client, auth_headers):
+    assert client.put("/api/settings/report.prefs", headers=auth_headers,
+                      json={"value": {"ai_panel": True, "auto_apply": False}, "scope": "user"}).status_code == 200
+    got = client.get("/api/settings/report.prefs", headers=auth_headers).json()["value"]
+    assert got["auto_apply"] is False
+
+
 def test_viewer_hp_setting(client, auth_headers):
     rules = {"rules": [{"id": "hp1", "name": "흉부 CR 정면", "modality": "CR",
                         "body_part": "CHEST", "projection": "PA",

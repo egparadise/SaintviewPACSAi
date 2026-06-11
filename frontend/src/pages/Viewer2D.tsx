@@ -1,12 +1,15 @@
 // Saintview 2D 뷰어 — WADO-RS /rendered 기반(픽셀 보장) + Zetta/INFINITT 레이아웃
 // 설정 연동: 팔레트/썸네일 방향·크기, 썸네일 모드(시리즈/전체), 행잉(모달리티→분할), 판독 도크
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openViewer, type Anno, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
 import { GridPicker } from "../lib/GridPicker";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
+
+// 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
+const Viewer3DEmbed = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 
 type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
 const TOOL_DEFS: [ToolKind, string, string][] = [
@@ -102,6 +105,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [hpName, setHpName] = useState("기본");
   const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
+  const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -713,8 +717,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   <button style={{ padding: "5px 4px", fontSize: 10.5 }} onClick={() => openViewer(detail.study_uid)}>OHIF</button>
                 )}
                 {tbOn("3d") && (
-                  <button style={{ padding: "5px 4px", fontSize: 10.5 }}
-                          onClick={() => window.dispatchEvent(new CustomEvent("sv-open-3d", { detail: detail.study_uid }))}>3D</button>
+                  <button title="내장 MPR/MIP — 현재 검사를 Axial/Sagittal/Coronal+MIP로 (새 창 없음)"
+                          onClick={() => setMprOn((m) => !m)}
+                          style={{ padding: "5px 4px", fontSize: 10.5, fontWeight: 700,
+                                   background: mprOn ? "var(--accent)" : undefined }}>
+                    3D/MPR{mprOn ? "●" : ""}
+                  </button>
                 )}
               </>)}
             </div>
@@ -905,7 +913,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     onDrag={(dx) => setPrefs((p) => ({ ...p, thumbSize: clampSz(p.thumbSize + dx, 48, 200) }))} />
         )}
 
-        {/* 뷰포트 그리드 */}
+        {/* 뷰포트 영역 — MPR 모드면 내장 3D(Axial/Sagittal/Coronal+MIP)로 전환 */}
+        {mprOn ? (
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
+            <Suspense fallback={
+              <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
+                MPR/MIP 로딩…
+              </div>
+            }>
+              <Viewer3DEmbed studyUid={panes[activePane].studyUid || detail.study_uid}
+                             embedded onClose={() => setMprOn(false)} />
+            </Suspense>
+          </div>
+        ) : (
         <div style={{ flex: 1, display: "grid", minWidth: 0, minHeight: 0,
                       gridTemplateColumns: `repeat(${L.cols}, 1fr)`, gridTemplateRows: `repeat(${L.rows}, 1fr)`,
                       gap: 2, padding: 2 }}>
@@ -978,6 +998,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             );
           })}
         </div>
+        )}
 
         {thumbRight && thumbOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}

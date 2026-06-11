@@ -14,6 +14,7 @@ import {
   downloadReportPdf,
   openViewer,
   openViewerCompare,
+  sttTranscribe,
   type BatchCandidate,
   type InstanceThumb,
   type KeyImage,
@@ -707,21 +708,77 @@ function KeyImageStrip({ studyId }: { studyId: number }) {
 }
 
 /* ── [E-중] 리포트 패널 (레퍼런스 메타테이블 + 3단) ── */
-function ReportPanel({ detail, onChanged, insertRef }: {
+/** auto_apply=false일 때 Report 편집 영역 초기 템플릿 (AI 내용은 [적용▶]로만) */
+function emptySr(base: SrJson): SrJson {
+  return {
+    exam: base.exam,
+    comparison: { prior_study_refs: [], summary: "" },
+    findings: [],
+    impression: [{ rank: 1, statement: "", confidence: "low", codes: [] }],
+    recommendations: [],
+    ai_meta: { caveats: [] },
+  };
+}
+const escHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function ReportPanel({ detail, onChanged, insertRef, onNav }: {
   detail: StudyDetail | null;
   onChanged: () => void;
   insertRef: React.MutableRefObject<((t: string) => void) | null>;
+  onNav?: (dir: 1 | -1) => void;
 }) {
   const [reports, setReports] = useState<Report[]>([]);
   const [draft, setDraft] = useState<SrJson | null>(null);
   const [busy, setBusy] = useState(false);
+  const [histId, setHistId] = useState<number | null>(null);  // 판독 이력 보기(버전)
   const current = reports[0] ?? null;
 
-  // 음성 판독(STT, P3) — 브라우저 Web Speech API(ko-KR), 인식 결과를 Conclusion에 덧붙임
+  // 리포트 구성(Setting>리포트 — Report Composition) + STT 엔진(Setting>AI 정책)
+  const [aiPanelOn, setAiPanelOn] = useState(true);
+  const [autoApply, setAutoApply] = useState(true);
+  const [sttEngine, setSttEngine] = useState("browser");
+  useEffect(() => {
+    api.getSetting("report.prefs").then((r) => {
+      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean };
+      if (v.ai_panel !== undefined) setAiPanelOn(v.ai_panel);
+      if (v.auto_apply !== undefined) setAutoApply(v.auto_apply);
+    }).catch(() => {});
+    api.getSetting("ai.policy").then((r) => {
+      setSttEngine(((r.value as { stt_engine?: string }).stt_engine) ?? "browser");
+    }).catch(() => {});
+  }, []);
+
+  const insertText = (text: string) => setDraft((d) => {
+    if (!d) return d;
+    const n = structuredClone(d);
+    if (n.impression[0]) n.impression[0].statement += (n.impression[0].statement ? " " : "") + text;
+    return n;
+  });
+
+  // 음성 판독(STT) — browser: Web Speech / whisper_local·openai_api: 서버 전사(MediaRecorder)
   const [stt, setStt] = useState(false);
   const recRef = useRef<{ stop: () => void } | null>(null);
   const toggleStt = () => {
     if (stt) { recRef.current?.stop(); setStt(false); return; }
+    if (sttEngine !== "browser") {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        const rec = new MediaRecorder(stream);
+        const chunks: Blob[] = [];
+        rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        rec.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          try {
+            const r = await sttTranscribe(new Blob(chunks, { type: "audio/webm" }));
+            if (r.text) insertText(r.text);
+          } catch (e) { alert(e instanceof Error ? e.message : "STT 실패"); }
+        };
+        recRef.current = rec;
+        rec.start();
+        setStt(true);
+      }).catch(() => alert("마이크 권한이 필요합니다"));
+      return;
+    }
     const w = window as unknown as Record<string, unknown>;
     const SR = (w.webkitSpeechRecognition ?? w.SpeechRecognition) as
       (new () => {
@@ -729,7 +786,7 @@ function ReportPanel({ detail, onChanged, insertRef }: {
         onresult: (ev: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
         onend: () => void; onerror: () => void; start: () => void; stop: () => void;
       }) | undefined;
-    if (!SR) { alert("이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장)"); return; }
+    if (!SR) { alert("이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장 — 또는 설정>AI 정책에서 Whisper 선택)"); return; }
     const rec = new SR();
     rec.lang = "ko-KR";
     rec.continuous = true;
@@ -738,13 +795,7 @@ function ReportPanel({ detail, onChanged, insertRef }: {
       const texts: string[] = [];
       for (let i = ev.resultIndex; i < ev.results.length; i++) texts.push(ev.results[i][0].transcript);
       const text = texts.join(" ").trim();
-      if (!text) return;
-      setDraft((d) => {
-        if (!d) return d;
-        const n = structuredClone(d);
-        if (n.impression[0]) n.impression[0].statement += (n.impression[0].statement ? " " : "") + text;
-        return n;
-      });
+      if (text) insertText(text);
     };
     rec.onend = () => setStt(false);
     rec.onerror = () => setStt(false);
@@ -755,12 +806,20 @@ function ReportPanel({ detail, onChanged, insertRef }: {
   useEffect(() => () => recRef.current?.stop(), []);
 
   useEffect(() => {
+    setHistId(null);
     if (!detail) { setReports([]); setDraft(null); return; }
     api.reports(detail.id).then((r) => {
       setReports(r.items);
-      setDraft(r.items[0] ? structuredClone(r.items[0].sr_json) : null);
+      const latest = r.items[0];
+      if (!latest) { setDraft(null); return; }
+      // AI 적용 선택(Setting>리포트): 자동 적용 꺼짐이면 빈 템플릿으로 시작 — [적용 ▶]로만 가져옴
+      if (!autoApply && latest.created_by === "ai" && latest.status === "draft") {
+        setDraft(emptySr(latest.sr_json));
+      } else {
+        setDraft(structuredClone(latest.sr_json));
+      }
     });
-  }, [detail]);
+  }, [detail, autoApply]);
 
   // 상용구 삽입 훅 (E-좌 → E-중)
   useEffect(() => {
@@ -801,14 +860,50 @@ function ReportPanel({ detail, onChanged, insertRef }: {
     } finally { setBusy(false); }
   };
 
+  // AI Structured Report를 별도 웹페이지(모니터)로 — UBPACS Report Composition
+  const openAiPopup = () => {
+    if (!aiDraft) return;
+    const w = window.open("", "sv_ai_report", "width=620,height=780");
+    if (!w) { alert("팝업이 차단되었습니다"); return; }
+    const sr = aiDraft.sr_json;
+    const rows = [
+      ...(sr.comparison.summary ? [`<div class="sec">COMPARISON</div><div>${escHtml(sr.comparison.summary)}</div>`] : []),
+      `<div class="sec">FINDINGS</div>`,
+      ...sr.findings.map((f) =>
+        `<div><b>${escHtml(f.organ)}</b>: ${escHtml(f.observation)} ${f.severity === "critical" ? '<span class="crit">[CRITICAL]</span>' : ""}</div>`),
+      `<div class="sec">IMPRESSION</div>`,
+      ...sr.impression.map((i) => `<div>${i.rank}. ${escHtml(i.statement)} <i>(${i.confidence})</i></div>`),
+      ...(sr.recommendations.length ? [`<div class="sec">RECOMMEND</div>`,
+        ...sr.recommendations.map((r) => `<div>- ${escHtml(r.action)} (${escHtml(r.timeframe)})</div>`)] : []),
+    ].join("");
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+<title>AI Report — ${escHtml(detail.patient_key)}</title>
+<style>body{background:#15181c;color:#e6e9ed;font-family:system-ui,sans-serif;padding:20px;font-size:14px;line-height:1.6}
+h2{color:#a78bfa;font-size:16px;margin:0 0 4px}.meta{color:#9aa3ad;font-size:12px;border-bottom:1px solid #333;padding-bottom:8px}
+.sec{color:#9aa3ad;font-weight:700;margin-top:14px;border-bottom:1px solid #333;font-size:11px}
+.crit{color:#ff5b5b;font-weight:700}.foot{margin-top:18px;color:#a78bfa;font-size:11px}</style></head><body>
+<h2>AI STRUCTURED REPORT</h2>
+<div class="meta">${escHtml(detail.patient_name)} (${escHtml(detail.patient_key)}) · ${detail.modality} · ${detail.study_date} · ${escHtml(detail.study_desc)} · v${aiDraft.version} ${escHtml(aiDraft.ai_model)}</div>
+${rows}
+<div class="foot">⚠ AI 생성 초안 — 확정 아님. 최종 판독은 의료인이 합니다.</div>
+</body></html>`);
+    w.document.close();
+  };
+
+  const histReport = histId !== null ? reports.find((r) => r.id === histId) ?? null : null;
+
   return (
     <PanelBox title="REPORT" right={
-      current && (
-        <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        {onNav && (<>
+          <MiniBtn title="이전 환자(검사)로 이동" onClick={() => onNav(-1)}>◀</MiniBtn>
+          <MiniBtn title="다음 환자(검사)로 이동" onClick={() => onNav(1)}>▶</MiniBtn>
+        </>)}
+        {current && (<>
           {current.created_by === "ai" && <span className="badge ai">AI 초안 — 검토 필수</span>}
           <StatusBadge status={current.status === "draft" ? "draft_ready" : current.status} />
-        </span>
-      )
+        </>)}
+      </span>
     }>
       <div style={{ display: "flex", flexDirection: "column", gap: 5, overflow: "auto", height: "100%", padding: "0 2px" }}>
         {/* 메타 테이블 — 레퍼런스 [E-중] 형식 */}
@@ -851,12 +946,15 @@ function ReportPanel({ detail, onChanged, insertRef }: {
           <>
             {/* 2열 분리: AI Structured Report(읽기) → [적용 ▶] → Report(의료인 작성·서명) */}
             <div style={{ display: "flex", gap: 6, flex: 1, minHeight: 120 }}>
-              {/* 좌: AI Structured Report — 보라(AI 생성물 전용 색) */}
+              {/* 좌: AI Structured Report — 보라(AI 생성물 전용 색). Setting>리포트에서 표시 선택 */}
+              {aiPanelOn && (
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4,
                             border: "1px solid var(--ai)", borderRadius: 4, padding: 6, overflow: "auto" }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ai)", display: "flex", gap: 6, alignItems: "center" }}>
                   AI STRUCTURED REPORT {aiDraft && `(v${aiDraft.version} · ${aiDraft.ai_model})`}
                   <span style={{ flex: 1 }} />
+                  <button title="별도 창(모니터)으로 AI 리포트 보기" disabled={!aiDraft} onClick={openAiPopup}
+                          style={{ padding: "1px 7px", fontSize: 11 }}>↗</button>
                   <button className="primary" disabled={!aiDraft || finalized}
                           title="AI 초안을 우측 Report로 복사 — 검토 후 의료인이 확정(서명)"
                           onClick={() => aiDraft && setDraft(structuredClone(aiDraft.sr_json))}
@@ -886,10 +984,34 @@ function ReportPanel({ detail, onChanged, insertRef }: {
                   </div>
                 )}
               </div>
-              {/* 우: Report — 의료인 작성·확정(서명) */}
+              )}
+              {/* 우: Report — 의료인 작성·확정(서명) + 판독 이력 */}
               <div style={{ flex: 1.2, minWidth: 0, display: "flex", flexDirection: "column", gap: 4,
                             border: "1px solid var(--border)", borderRadius: 4, padding: 6, overflow: "auto" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>REPORT (판독)</div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
+                              display: "flex", gap: 6, alignItems: "center" }}>
+                  REPORT (판독)
+                  <span style={{ flex: 1 }} />
+                  <select title="판독 이력 — 과거 버전 보기" value={histId ?? "cur"}
+                          style={{ fontSize: 10.5 }}
+                          onChange={(e) => setHistId(e.target.value === "cur" ? null : Number(e.target.value))}>
+                    <option value="cur">현재 (v{current.version})</option>
+                    {reports.slice(1).map((r) => (
+                      <option key={r.id} value={r.id}>
+                        v{r.version} · {STATUS_LABEL[r.status] ?? r.status} · {r.created_by === "ai" ? "AI" : r.created_by}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {histReport ? (
+                  <div style={{ fontSize: 12, whiteSpace: "pre-wrap", color: "var(--text-secondary)", overflow: "auto" }}>
+                    <div style={{ color: "var(--accent)", fontSize: 10.5, marginBottom: 4 }}>
+                      [이력 보기 — v{histReport.version} · {histReport.created_by === "ai" ? `AI(${histReport.ai_model})` : histReport.created_by}
+                      {histReport.finalized_at && ` · 확정 ${histReport.finalized_at.slice(0, 10)}`}] 읽기 전용
+                    </div>
+                    {histReport.narrative_text || "(내용 없음)"}
+                  </div>
+                ) : (<>
                 <SectionTitle>READING</SectionTitle>
                 <div style={{ fontSize: 12 }}>
                   {draft.comparison.summary && (
@@ -931,15 +1053,18 @@ function ReportPanel({ detail, onChanged, insertRef }: {
                     {" "}{signature.signed_at?.slice(0, 16).replace("T", " ")}
                   </div>
                 )}
+                </>)}
               </div>
             </div>
             <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
               <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
               <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
               {!finalized && (
-                <MiniBtn onClick={toggleStt} title="음성 판독(STT) — 한국어 받아쓰기 → Conclusion"
+                <MiniBtn onClick={toggleStt}
+                         title={`음성 판독(STT) — 엔진: ${sttEngine === "whisper_local" ? "Whisper 로컬(오픈소스)"
+                              : sttEngine === "openai_api" ? "OpenAI API" : "브라우저 내장"} (설정>AI 정책)`}
                          style={stt ? { background: "var(--stat-emergency)", color: "#fff" } : undefined}>
-                  {stt ? "🎤 녹음중" : "🎤 음성"}
+                  {stt ? "🎤 녹음중" : `🎤 음성${sttEngine !== "browser" ? "·W" : ""}`}
                 </MiniBtn>
               )}
               {!finalized && (
@@ -1703,6 +1828,15 @@ export function Worklist() {
     openViewerCompare([selected.study_uid, ...compareSet.map((c) => c.study_uid)], hpFor(selected.modality));
   }, [selected, compareSet]);
 
+  // 리포트에서 이전/다음 환자(검사)로 이동 — UBPACS Report Composition
+  const navPatient = useCallback(async (dir: 1 | -1) => {
+    if (!selected) return;
+    const idx = items.findIndex((i) => i.id === selected.id);
+    const next = items[idx + dir];
+    if (!next) return;
+    setSelected(await api.study(next.id));
+  }, [items, selected]);
+
   // 묶음판독(report_merge): 현재 검사 + 비교세트 → 판독 1건 병합 (03b: 건수 명시 confirm)
   const doMerge = useCallback(async () => {
     if (!selected || compareSet.length === 0) return;
@@ -1915,7 +2049,7 @@ export function Worklist() {
                     : k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected}
                                                  shortcutRef={phraseShortcutRef} />
                     : k === "comment" ? <CommentMemoPanel detail={selected} onChanged={onChanged} />
-                    : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
+                    : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} onNav={navPatient} />}
                 </DraggablePanel>
               )];
               if (i < arr.length - 1) {
