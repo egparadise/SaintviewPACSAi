@@ -55,7 +55,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
   const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
-  const [thumbSize, setThumbSize] = useState(84);
+  const [thumbSize, setThumbSize] = useState(128);
   const [thumbMode, setThumbMode] = useState<"series" | "all">("series");
   const [h2dCT, setH2dCT] = useState("1x1");
   const [h2dMR, setH2dMR] = useState("1x2");
@@ -666,7 +666,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </select>
                   </Row>
                   <Row label="썸네일 크기">
-                    <input type="range" min={56} max={140} step={4} value={thumbSize}
+                    <input type="range" min={56} max={260} step={4} value={thumbSize}
                            onChange={(e) => setThumbSize(Number(e.target.value))} /> {thumbSize}px
                   </Row>
                   <Row label="썸네일 모드">
