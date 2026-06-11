@@ -75,7 +75,13 @@ const DEFAULT_PREFS: ViewerPrefs = {
   thumbMode: "series", hanging2d: {}, reportDock: true,
 };
 
-export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: () => void }) {
+export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
+  detail: StudyDetail;
+  onClose: () => void;
+  addDetail?: StudyDetail | null;    // ② Add View: 기존(detail) 유지 + 이 검사를 분할 추가
+  stackDetail?: StudyDetail | null;  // ③ Stack View: 기존 유지 + 이 검사를 같은 페인에 중첩
+  keySops?: string[] | null;         // ⑤ Key Image View: 이 SOP 목록만 표시 (F-16)
+}) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
   const [series, setSeries] = useState<SeriesNode[]>([]);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
@@ -143,7 +149,15 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
   /* 시리즈 트리 + 리포트 로드 */
   useEffect(() => {
     api.seriesTree(detail.id).then((r) => {
-      const imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
+      let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
+      // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
+      if (keySops?.length) {
+        const keep = new Set(keySops);
+        imgSeries = imgSeries
+          .map((s) => ({ ...s, instances: s.instances.filter((i) => keep.has(i.sop_uid)) }))
+          .filter((s) => s.instances.length > 0);
+        setStatus(`Key Image View — 키 이미지 ${keySops.length}장만 표시`);
+      }
       setSeries(imgSeries);
       if (imgSeries[0]) {
         setSelSeries(imgSeries[0].series_uid);
@@ -162,6 +176,9 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
         });
         if (ai) setStatus(`AI 추천 W/L 적용: ${ai.label} (2D 섹션에서 변경 가능)`);
       }
+      // ② Add View / ③ Stack View — 기본 로드 완료 후 추가 검사 로드 (UBPACS-Z Study Open)
+      if (addDetail) void loadPrior(addDetail.id);
+      if (stackDetail) void loadStack(stackDetail.id);
     }).catch(() => setStatus("시리즈 조회 실패"));
     api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => {});
     api.annotations(detail.id).then((r) => setAnnos(r.items)).catch(() => {});
@@ -169,7 +186,8 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
       if (cineRef.current) window.clearInterval(cineRef.current);
       Object.values(observers.current).forEach((o) => o.disconnect());
     };
-  }, [detail.id, detail.study_uid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, detail.study_uid, addDetail?.id, stackDetail?.id, keySops?.length]);
 
   /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
   const loadPrior = async (examId: number) => {
@@ -191,6 +209,23 @@ export function Viewer2D({ detail, onClose }: { detail: StudyDetail; onClose: ()
     }
     setSyncScroll(true);
     setStatus("비교 모드: 과거검사 로드 + 동기 스크롤 ON");
+  };
+
+  /* ③ Stack View (UBPACS-Z): 기존 시리즈는 썸네일에 유지 + 선택 검사를 활성 페인에 중첩 로드 */
+  const loadStack = async (examId: number) => {
+    try {
+      const r = await api.seriesTree(examId);
+      const imgSeries = r.series
+        .filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality))
+        .map((s) => ({ ...s, series_desc: `[중첩] ${s.series_desc || s.modality}` }));
+      if (!imgSeries.length) { setStatus("Stack View: 추가 검사에 영상 시리즈 없음"); return; }
+      setSeries((prev) => [...prev, ...imgSeries]);
+      const s = imgSeries[0];
+      patch(activePane, {
+        ...initPane(r.study_uid), series: s, index: Math.floor(s.instances.length / 2),
+      });
+      setStatus("Stack View: 선택 검사 중첩 — 기존 영상은 썸네일·다른 페인에 유지");
+    } catch { setStatus("Stack View 로드 실패"); }
   };
 
   const step = useCallback((pid: string, dir: number) => {

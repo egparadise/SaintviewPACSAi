@@ -124,8 +124,14 @@ function ActionToolbar({
       background: "var(--bg-panel)", borderBottom: "1px solid var(--border)",
     }}>
       <Btn a="viewdraft" label="View&Draft" primary title="뷰어 + 초안 패널 동시 오픈 (더블클릭과 동일)" />
-      <Btn a="viewer" label="뷰어" title="OHIF 뷰어 열기" />
       <Btn a="3d" label="3D" title="내장 Cornerstone3D MPR/MIP" />
+      <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
+      {/* UBPACS-Z Study Open 5종 */}
+      <Btn a="ub_view" label="🖵 View" title="① View — 기존 영상을 닫고 선택 검사를 그 자리에 표시 (UBPACS-Z)" />
+      <Btn a="ub_add" label="🖵+ Add" title="② Add View — 기존 영상은 닫지 않고 선택 검사를 분할 추가" />
+      <Btn a="ub_stack" label="⧉ Stack" title="③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩" />
+      <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />
+      <Btn a="ub_key" label="🔑 Key" title="⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)" />
       <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
       <Btn a="pdf" label="PDF" title="판독서 PDF" />
       <Btn a="emergency" label="⚠ Emergency" title="응급 우선순위 토글 (F-15)" />
@@ -912,7 +918,10 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: "4px 0",
     }}>
       <Item a="viewdraft" label="View&Draft (자체 뷰어)" />
-      <Item a="viewer" label="OHIF 뷰어 (보조)" />
+      <Item a="ub_add" label="Add View — 기존 유지+추가" />
+      <Item a="ub_stack" label="Stack View — 기존 유지+중첩" />
+      <Item a="ub_adv" label="Advance View (OHIF)" />
+      <Item a="ub_key" label="Key Image View — 키 이미지만" />
       <Item a="3d" label="3D 뷰어 (MPR/MIP)" />
       <Item a="compare" label="비교세트에 추가" />
       <Sep />
@@ -1062,7 +1071,11 @@ export function Worklist() {
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
-  const [viewer2dDetail, setViewer2dDetail] = useState<StudyDetail | null>(null);
+  // UBPACS-Z Study Open 5종: View(교체)/Add View(추가)/Stack View(중첩)/Advance(OHIF)/Key Image
+  const [viewer2d, setViewer2d] = useState<{
+    detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
+  } | null>(null);
+  const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
   const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
   const [nlBusy, setNlBusy] = useState(false);
@@ -1131,7 +1144,7 @@ export function Worklist() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (viewer2dDetail || viewer3dUid || batchOpen) return; // 모달/뷰어 우선
+      if (viewer2d || viewer3dUid || batchOpen) return; // 모달/뷰어 우선
       if (e.key === "Enter" && selected) { e.preventDefault(); void doAction("viewdraft"); }
       else if (e.key.toLowerCase() === "b") setBatchOpen(true);
       else if (e.key.toLowerCase() === "e" && selected) void doAction("emergency");
@@ -1139,7 +1152,7 @@ export function Worklist() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, viewer2dDetail, viewer3dUid, batchOpen]);
+  }, [selected, viewer2d, viewer3dUid, batchOpen]);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
@@ -1172,6 +1185,14 @@ export function Worklist() {
     openViewer(row.study_uid, hpFor(row.modality));
   }, []);
 
+  // 자체 뷰어 오픈 헬퍼 — lastViewerRef가 UBPACS "기존 영상" 역할
+  const openV2 = useCallback((cfg: {
+    detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
+  }) => {
+    lastViewerRef.current = cfg.addDetail ?? cfg.stackDetail ?? cfg.detail;
+    setViewer2d(cfg);
+  }, []);
+
   const doAction = useCallback(async (a: string, row?: StudyRow) => {
     const target = row ?? selected;
     switch (a) {
@@ -1183,12 +1204,50 @@ export function Worklist() {
           const d = await api.study(target.id);
           setSelected(d);
           if (dblAction === "ohif") openStudy(d);
-          else setViewer2dDetail(d);
+          else openV2({ detail: d });
         }
         break;
-      case "viewer2d":
-        if (target) { const d = await api.study(target.id); setSelected(d); setViewer2dDetail(d); }
+      case "viewer2d": case "ub_view":
+        // ① View: 기존 영상을 닫고 선택 검사를 그 자리에 표시
+        if (target) { const d = await api.study(target.id); setSelected(d); openV2({ detail: d }); }
         break;
+      case "ub_add": {
+        // ② Add View: 기존 영상(마지막 오픈)은 닫지 않고 선택 검사를 분할 추가
+        if (!target) break;
+        const d = await api.study(target.id);
+        setSelected(d);
+        const prev = lastViewerRef.current;
+        if (prev && prev.id !== d.id) openV2({ detail: prev, addDetail: d });
+        else openV2({ detail: d });
+        break;
+      }
+      case "ub_stack": {
+        // ③ Stack View: 기존 영상 유지 + 선택 검사를 같은 페인에 중첩
+        if (!target) break;
+        const d = await api.study(target.id);
+        setSelected(d);
+        const prev = lastViewerRef.current;
+        if (prev && prev.id !== d.id) openV2({ detail: prev, stackDetail: d });
+        else openV2({ detail: d });
+        break;
+      }
+      case "ub_adv":
+        // ④ Advance View: 고급 뷰어(OHIF)로 교체 오픈
+        if (target) openStudy(target);
+        break;
+      case "ub_key": {
+        // ⑤ Key Image View: 키 이미지만 표시 (F-16)
+        if (!target) break;
+        const d = await api.study(target.id);
+        setSelected(d);
+        const inst = await api.instances(target.id);
+        if (!inst.key_images.length) {
+          alert("이 검사에 선택된 키 이미지가 없습니다.\nREPORT 패널의 KEY IMG에서 먼저 선택·저장하세요.");
+          break;
+        }
+        openV2({ detail: d, keySops: inst.key_images.map((k) => k.sop_uid) });
+        break;
+      }
       case "viewer": if (target) openStudy(target); break;
       case "3d": if (target) setViewer3dUid(target.study_uid); break;
       case "compare":
@@ -1443,13 +1502,16 @@ export function Worklist() {
       </footer>
 
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
-      {viewer2dDetail && (
+      {viewer2d && (
         <Suspense fallback={
           <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
             뷰어 로딩…
           </div>
         }>
-          <Viewer2D detail={viewer2dDetail} onClose={() => setViewer2dDetail(null)} />
+          <Viewer2D key={`${viewer2d.detail.id}-${viewer2d.addDetail?.id ?? ""}-${viewer2d.stackDetail?.id ?? ""}-${viewer2d.keySops?.length ?? 0}`}
+                    detail={viewer2d.detail} addDetail={viewer2d.addDetail}
+                    stackDetail={viewer2d.stackDetail} keySops={viewer2d.keySops}
+                    onClose={() => setViewer2d(null)} />
         </Suspense>
       )}
       {viewer3dUid && (
