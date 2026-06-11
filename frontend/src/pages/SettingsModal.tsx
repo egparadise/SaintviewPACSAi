@@ -84,7 +84,9 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [closeMode, setCloseMode] = useState<"ask" | "save_current" | "save_all" | "discard">("ask");
   // 모니터 설정 — 하드웨어 모니터 감지 후 뷰어 표시 모니터 선택(다중=스팬)
   const [monitors, setMonitors] = useState<{ label: string; w: number; h: number; primary: boolean }[]>([]);
-  const [monitorSel, setMonitorSel] = useState<number[]>([]);
+  const [monitorSel, setMonitorSel] = useState<number[]>([]);   // 뷰어 (다중=스팬)
+  const [wlMon, setWlMon] = useState<number | null>(null);      // 워크리스트 창
+  const [rptMon, setRptMon] = useState<number | null>(null);    // 판독(Reading) 창
   const [monitorMsg, setMonitorMsg] = useState("");
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
@@ -151,8 +153,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (wp?.length) setWlPresets(wp);
       const cm = (v as { close_mode?: "ask" | "save_current" | "save_all" | "discard" }).close_mode;
       if (cm) setCloseMode(cm);
-      const mon = (v as { monitor?: { screens?: number[] } }).monitor;
+      const mon = (v as { monitor?: { screens?: number[]; worklist?: number | null; report?: number | null } }).monitor;
       if (mon?.screens) setMonitorSel(mon.screens);
+      if (mon?.worklist !== undefined) setWlMon(mon.worklist);
+      if (mon?.report !== undefined) setRptMon(mon.report);
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -210,7 +214,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       hanging2d: { CT: h2dCT, MR: h2dMR },
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
-      monitor: { screens: monitorSel },
+      monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
     }, "user");
     await api.putSetting("report.prefs",
       { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
@@ -885,33 +889,69 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
                       아직 감지된 모니터가 없습니다 — 우측 상단 <b>① 모니터 감지</b>를 누르세요
                       (최초 1회 브라우저 권한 허용 필요).
-                      {monitorSel.length > 0 && (
+                      {(monitorSel.length > 0 || wlMon != null || rptMon != null) && (
                         <div style={{ marginTop: 4 }}>
-                          현재 저장된 선택: <b style={{ color: "var(--text-primary)" }}>
-                            모니터 {monitorSel.map((i) => i + 1).join(", ")}</b>
+                          현재 저장된 배치 —
+                          뷰어: <b style={{ color: "var(--text-primary)" }}>{monitorSel.length ? monitorSel.map((i) => i + 1).join(", ") : "기본"}</b> ·
+                          워크리스트: <b style={{ color: "var(--text-primary)" }}>{wlMon != null ? wlMon + 1 : "기본"}</b> ·
+                          판독: <b style={{ color: "var(--text-primary)" }}>{rptMon != null ? rptMon + 1 : "기본"}</b>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>② 뷰어를 표시할 모니터 선택:</div>
-                      {monitors.map((m, i) => (
-                        <label key={i} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                          <input type="checkbox" checked={monitorSel.includes(i)}
-                                 onChange={(e) => setMonitorSel((p) =>
-                                   e.target.checked ? [...p, i].sort() : p.filter((x) => x !== i))} />
-                          🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}
-                        </label>
-                      ))}
-                    </div>
+                    <table className="grid-table">
+                      <thead>
+                        <tr>
+                          <th>② 모니터</th>
+                          <th style={{ width: 96 }} title="다중 선택=스팬">뷰어 ☑</th>
+                          <th style={{ width: 96 }} title="다시 클릭=해제">워크리스트 ◉</th>
+                          <th style={{ width: 96 }} title="다시 클릭=해제">판독 ◉</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitors.map((m, i) => (
+                          <tr key={i}>
+                            <td>🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}</td>
+                            <td style={{ textAlign: "center" }}>
+                              <input type="checkbox" checked={monitorSel.includes(i)}
+                                     onChange={(e) => setMonitorSel((p) =>
+                                       e.target.checked ? [...p, i].sort() : p.filter((x) => x !== i))} />
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <input type="radio" name="wlmon" checked={wlMon === i}
+                                     onClick={() => setWlMon((p) => (p === i ? null : i))}
+                                     onChange={() => {}} />
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <input type="radio" name="rptmon" checked={rptMon === i}
+                                     onClick={() => setRptMon((p) => (p === i ? null : i))}
+                                     onChange={() => {}} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button disabled={wlMon == null}
+                            title="워크리스트를 선택한 모니터의 새 창으로 열기 (기존 탭은 닫아도 됨)"
+                            onClick={async () => {
+                              const { screenFeatures } = await import("../lib/screens");
+                              const features = await screenFeatures(wlMon != null ? [wlMon] : null);
+                              window.open(`${window.location.origin}${window.location.pathname}`, "sv_worklist", features)?.focus();
+                            }}>
+                      워크리스트를 해당 모니터로 열기
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      (브라우저 보안상 현재 창은 이동 불가 — 새 창으로 엽니다)
+                    </span>
+                  </div>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-                    <b>사용 방법:</b> ① 모니터 감지 → ② 모니터 체크 → ③ 하단 <b>OK(저장)</b> →
-                    ④ 워크리스트에서 검사를 열면 다음 오픈부터 적용됩니다.<br />
-                    · <b>1대 선택</b>: 뷰어 창이 그 모니터의 위치·크기로 열림<br />
-                    · <b>2대 이상 선택</b>: 뷰어 창 하나가 모니터들을 <b>스팬</b>하고
-                    Series Layout(예: 1×2)으로 영상 페인만 모니터별로 분할 표시<br />
-                    · 선택 해제(0대) = 기본 크기(1500×920)로 오픈
+                    <b>사용 방법:</b> ① 모니터 감지 → ② 창별 모니터 지정 → ③ 하단 <b>OK(저장)</b> →
+                    ④ 다음 오픈부터 적용.<br />
+                    · <b>뷰어 ☑</b>: 1대=해당 모니터 / 2대 이상=스팬+Series Layout 영상 분할 / 0대=기본 크기<br />
+                    · <b>워크리스트 ◉</b>: 위 버튼으로 해당 모니터에 새 창 오픈 (라디오 재클릭=해제)<br />
+                    · <b>판독 ◉</b>: 뷰어의 [Reading] 버튼이 해당 모니터에 판독 창을 띄움
                   </div>
                 </Group>
                 <Group title="뷰어 창 정보 (별도 포트)">

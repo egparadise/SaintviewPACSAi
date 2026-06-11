@@ -46,6 +46,7 @@ import {
 } from "./WorklistTree";
 
 import { GridPicker } from "../lib/GridPicker";
+import { screenFeatures } from "../lib/screens";
 import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
@@ -62,20 +63,7 @@ export function loadHangingPrefs() {
 
 /** 모니터 설정 기반 창 위치/크기 — Window Management API(Chrome) 가용 시 */
 async function viewerWindowFeatures(): Promise<string> {
-  const fallback = "width=1500,height=920";
-  if (!monitorScreens.length || !("getScreenDetails" in window)) return fallback;
-  try {
-    const det = await (window as unknown as {
-      getScreenDetails: () => Promise<{ screens: { availLeft: number; availTop: number; availWidth: number; availHeight: number }[] }>;
-    }).getScreenDetails();
-    const scr = monitorScreens.map((i) => det.screens[i]).filter(Boolean);
-    if (!scr.length) return fallback;
-    const left = Math.min(...scr.map((s) => s.availLeft));
-    const top = Math.min(...scr.map((s) => s.availTop));
-    const right = Math.max(...scr.map((s) => s.availLeft + s.availWidth));
-    const bottom = Math.max(...scr.map((s) => s.availTop + s.availHeight));
-    return `left=${left},top=${top},width=${right - left},height=${bottom - top}`;
-  } catch { return fallback; }
+  return screenFeatures(monitorScreens);
 }
 function hpFor(modality: string): string | undefined {
   return hangingMap[modality] ?? hangingMap.default;

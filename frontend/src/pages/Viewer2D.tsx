@@ -4,6 +4,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api, openViewer, type Anno, type InstanceNode, type PhraseRow, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
 import { GridPicker } from "../lib/GridPicker";
+import { screenFeatures } from "../lib/screens";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { ToolBtnInner } from "../lib/toolIcons";
@@ -81,6 +82,7 @@ interface ViewerPrefs {
   toolbar: Record<string, boolean>;  // 툴바 버튼 표시 여부 (기본 모두 표시)
   wl_presets: { key: string; label: string; q: string }[];  // W/L Presetting
   close_mode: "ask" | "save_current" | "save_all" | "discard";  // 닫기 동작 (Setting>Viewer)
+  monitor?: { screens?: number[]; worklist?: number | null; report?: number | null };  // 창별 모니터 배치
 }
 const DEFAULT_PREFS: ViewerPrefs = {
   paletteSide: "left", thumbSide: "left", thumbSize: 128,
@@ -1183,12 +1185,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setSettingsOpen(true)} title="설정 — 뷰어에서 바로 Setting 진입">설정</button>
-        <button title="Reading — 전용 판독 창(새 페이지) 열기 · 우측 도크는 Setting>뷰어>판독창 도크"
+        <button title="Reading — 전용 판독 창(새 페이지) 열기 · 모니터 배치는 Setting>모니터"
                 onClick={() => {
-                  const w = window.open(
-                    `${window.location.origin}${window.location.pathname}?report=1&study=${detail.id}`,
-                    "sv_report", "width=440,height=1020");
-                  w?.focus();
+                  const rm = prefs.monitor?.report;
+                  void screenFeatures(rm != null ? [rm] : null, "width=440,height=1020").then((features) => {
+                    const w = window.open(
+                      `${window.location.origin}${window.location.pathname}?report=1&study=${detail.id}`,
+                      "sv_report", features);
+                    w?.focus();
+                  });
                 }}>
           Reading
         </button>
