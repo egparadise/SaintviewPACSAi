@@ -1859,6 +1859,12 @@ export function Worklist() {
     });
   }, []);
 
+  // 선택 + 3창 동기(Viewer·Reading이 같은 환자를 따라감)
+  const selectAndSync = useCallback((d: StudyDetail) => {
+    setSelected(d);
+    postStudySync(d.id, "worklist");
+  }, []);
+
   const doAction = useCallback(async (a: string, row?: StudyRow) => {
     const target = row ?? selected;
     switch (a) {
@@ -1869,7 +1875,7 @@ export function Worklist() {
         // Study With Open(p.13): 체크 시 Related Study List 검사를 ADD/STACK 모드로 함께 오픈
         if (target) {
           const d = await api.study(target.id);
-          setSelected(d);
+          selectAndSync(d);
           if (dblAction === "ohif") openStudy(d);
           else if (withOpen && d.related_exams.length) {
             openV2({ detail: d, withOpen: { mode: withOpenMode, ids: d.related_exams.slice(0, 3).map((e) => e.id) } });
@@ -1878,13 +1884,13 @@ export function Worklist() {
         break;
       case "viewer2d": case "ub_view":
         // ① View: 기존 영상을 닫고 선택 검사를 그 자리에 표시
-        if (target) { const d = await api.study(target.id); setSelected(d); openV2({ detail: d }); }
+        if (target) { const d = await api.study(target.id); selectAndSync(d); openV2({ detail: d }); }
         break;
       case "ub_add": {
         // ② Add View: 기존 영상(마지막 오픈)은 닫지 않고 선택 검사를 분할 추가
         if (!target) break;
         const d = await api.study(target.id);
-        setSelected(d);
+        selectAndSync(d);
         const prev = lastViewerRef.current;
         if (prev && prev.id !== d.id) openV2({ detail: prev, addDetail: d });
         else openV2({ detail: d });
@@ -1894,7 +1900,7 @@ export function Worklist() {
         // ③ Stack View: 기존 영상 유지 + 선택 검사를 같은 페인에 중첩
         if (!target) break;
         const d = await api.study(target.id);
-        setSelected(d);
+        selectAndSync(d);
         const prev = lastViewerRef.current;
         if (prev && prev.id !== d.id) openV2({ detail: prev, stackDetail: d });
         else openV2({ detail: d });
@@ -1908,7 +1914,7 @@ export function Worklist() {
         // ⑤ Key Image View: 키 이미지만 표시 (F-16)
         if (!target) break;
         const d = await api.study(target.id);
-        setSelected(d);
+        selectAndSync(d);
         const inst = await api.instances(target.id);
         if (!inst.key_images.length) {
           alert("이 검사에 선택된 키 이미지가 없습니다.\nREPORT 패널의 KEY IMG에서 먼저 선택·저장하세요.");
@@ -1974,8 +1980,8 @@ export function Worklist() {
     const idx = items.findIndex((i) => i.id === selected.id);
     const next = items[idx + dir];
     if (!next) return;
-    setSelected(await api.study(next.id));
-  }, [items, selected]);
+    selectAndSync(await api.study(next.id));
+  }, [items, selected, selectAndSync]);
 
   // 묶음판독(report_merge): 현재 검사 + 비교세트 → 판독 1건 병합 (03b: 건수 명시 confirm)
   const doMerge = useCallback(async () => {

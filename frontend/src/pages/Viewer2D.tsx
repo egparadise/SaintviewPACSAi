@@ -1222,7 +1222,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           {openTabs.map((t) => {
             const isActive = panes[activePane].studyUid === t.uid;
             return (
-              <div key={t.id} onClick={() => void loadIntoActive(t.id)}
+              <div key={t.id}
+                   onClick={() => {
+                     void loadIntoActive(t.id);
+                     postStudySync(t.id, "viewer");  // Worklist·Reading 선택 동기
+                   }}
                    title={t.id === detail.id ? "주 검사" : "클릭=활성 페인에 표시"}
                    style={{
                      display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
