@@ -49,9 +49,9 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [hangingCT, setHangingCT] = useState("default");
   const [hangingMR, setHangingMR] = useState("default");
-  // Viewer2D 레이아웃(요청 2·4·5)
-  const [paletteSide, setPaletteSide] = useState<"left" | "top">("left");
-  const [thumbSide, setThumbSide] = useState<"left" | "bottom">("left");
+  // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
+  const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
+  const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
   const [thumbSize, setThumbSize] = useState(84);
   const [thumbMode, setThumbMode] = useState<"series" | "all">("series");
   const [h2dCT, setH2dCT] = useState("1x1");
@@ -103,7 +103,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     api.getSetting("viewer.prefs").then((r) => {
       const v = r.value as {
         hanging?: Record<string, string>; hanging2d?: Record<string, string>;
-        paletteSide?: "left" | "top"; thumbSide?: "left" | "bottom";
+        paletteSide?: "left" | "top" | "right"; thumbSide?: "left" | "bottom" | "right";
         thumbSize?: number; thumbMode?: "series" | "all"; reportDock?: boolean;
       };
       const h = v.hanging ?? {};
@@ -602,13 +602,15 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
               <>
                 <Group title="자체 2D 뷰어 레이아웃 (요청: 방향·크기 전환)">
                   <Row label="툴 팔레트 위치">
-                    <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top")}>
+                    <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top" | "right")}>
                       <option value="left">세로 (좌측)</option><option value="top">가로 (상단)</option>
+                      <option value="right">세로 (우측)</option>
                     </select>
                   </Row>
                   <Row label="썸네일 위치">
-                    <select value={thumbSide} onChange={(e) => setThumbSide(e.target.value as "left" | "bottom")}>
+                    <select value={thumbSide} onChange={(e) => setThumbSide(e.target.value as "left" | "bottom" | "right")}>
                       <option value="left">세로 (좌측)</option><option value="bottom">가로 (하단)</option>
+                      <option value="right">세로 (우측)</option>
                     </select>
                   </Row>
                   <Row label="썸네일 크기">

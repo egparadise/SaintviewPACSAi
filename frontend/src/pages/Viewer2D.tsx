@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openViewer, type Anno, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
+import { GridPicker } from "../lib/GridPicker";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 
 type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
@@ -15,12 +16,14 @@ const TOOL_DEFS: [ToolKind, string, string][] = [
   ["text", "Text", "텍스트 주석"],
 ];
 
-const PANE_IDS = ["p0", "p1", "p2", "p3"];
-const LAYOUTS: Record<string, { cols: number; rows: number; count: number }> = {
-  "1x1": { cols: 1, rows: 1, count: 1 },
-  "1x2": { cols: 2, rows: 1, count: 2 },
-  "2x2": { cols: 2, rows: 2, count: 4 },
-};
+const PANE_IDS = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
+// Series Layout — 뷰포트 분할(최대 3×3, UBPACS View Screen Composition)
+const LAYOUTS: Record<string, { cols: number; rows: number; count: number }> = {};
+for (let r = 1; r <= 3; r++) {
+  for (let c = 1; c <= 3; c++) {
+    LAYOUTS[`${r}x${c}`] = { rows: r, cols: c, count: r * c };
+  }
+}
 /** ② 자동 최적 W/L (03c Image-Manipulation 의도, v1=결정적 규칙. 추후 AI 추론 교체 지점) */
 function autoWL(modality: string, bodyPart: string): { q: string; label: string } | null {
   const bp = (bodyPart || "").toUpperCase();
@@ -55,16 +58,19 @@ const initPane = (studyUid: string): PaneState => ({
   flipH: false, flipV: false, invert: false, wl: "",
 });
 
-function renderedUrl(p: PaneState): string | null {
-  const inst = p.series?.instances[p.index];
+function renderedUrlAt(p: PaneState, idx: number): string | null {
+  const inst = p.series?.instances[idx];
   if (!p.series || !inst) return null;
   const wl = p.wl ? `?window=${p.wl},linear` : "";
   return `${DICOMWEB_ROOT}/studies/${p.studyUid}/series/${p.series.series_uid}/instances/${inst.sop_uid}/rendered${wl}`;
 }
+function renderedUrl(p: PaneState): string | null {
+  return renderedUrlAt(p, p.index);
+}
 
 interface ViewerPrefs {
-  paletteSide: "left" | "top";
-  thumbSide: "left" | "bottom";
+  paletteSide: "left" | "top" | "right";   // Toolbar 위치 (Setting>Viewer)
+  thumbSide: "left" | "bottom" | "right";  // Thumbnail 위치
   thumbSize: number;        // px
   thumbMode: "series" | "all";
   hanging2d: Record<string, string>;  // modality → layout key
@@ -86,6 +92,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
   const [series, setSeries] = useState<SeriesNode[]>([]);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
+  // Image Layout — 페인 내부 이미지 분할(연속 이미지 N×M 타일, UBPACS)
+  const [imgLay, setImgLay] = useState({ r: 1, c: 1 });
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -313,16 +321,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const step = useCallback((pid: string, dir: number) => {
     setPanes((prev) => {
       const next = { ...prev };
+      const stride = Math.max(1, imgLay.r * imgLay.c);  // Image Layout 분할 시 페이지 단위 이동
       const apply = (id: string) => {
         const p = next[id];
         if (!p.series) return;
-        next[id] = { ...p, index: Math.min(Math.max(p.index + dir, 0), p.series.instances.length - 1) };
+        next[id] = { ...p, index: Math.min(Math.max(p.index + dir * stride, 0), p.series.instances.length - 1) };
       };
       if (syncScroll) PANE_IDS.slice(0, LAYOUTS[layout].count).forEach(apply);  // 화면 연동
       else apply(pid);
       return next;
     });
-  }, [syncScroll, layout]);
+  }, [syncScroll, layout, imgLay]);
 
   /* 뷰어 단축키: ←→=이미지, I=반전, R=회전, F=Fit, L=Link, 1/2/4=분할, Space=Cine, Esc=닫기 */
   useEffect(() => {
@@ -526,8 +535,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   const L = LAYOUTS[layout];
   const paletteHoriz = prefs.paletteSide === "top";
+  const paletteRight = prefs.paletteSide === "right";
   const thumbHoriz = prefs.thumbSide === "bottom";
+  const thumbRight = prefs.thumbSide === "right";
   const ts = prefs.thumbSize;
+  const tileCount = imgLay.r * imgLay.c;
 
   const ModeBtn = ({ k, label, title }: { k: "wl" | "zoom" | "pan"; label: string; title: string }) => (
     <button onClick={() => setMouseMode(k)} title={title}
@@ -545,7 +557,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     <div style={{
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
       background: "var(--bg-panel)", flexShrink: 0, overflow: "auto", alignItems: paletteHoriz ? "center" : undefined,
-      ...(paletteHoriz ? { borderBottom: "1px solid var(--border)" } : { width: 100, borderRight: "1px solid var(--border)" }),
+      ...(paletteHoriz ? { borderBottom: "1px solid var(--border)" }
+        : { width: 100, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
+                                         : { borderRight: "1px solid var(--border)" }) }),
     }}>
       <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}
               style={{ fontSize: 11, width: paletteHoriz ? 70 : "100%" }}>
@@ -644,7 +658,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 4, padding: 4,
       background: "var(--bg-panel)", overflow: "auto", flexShrink: 0,
       ...(thumbHoriz ? { borderTop: "1px solid var(--border)", height: ts + 34 }
-                     : { borderRight: "1px solid var(--border)", width: ts + 34 }),
+        : { width: ts + 34, ...(thumbRight ? { borderLeft: "1px solid var(--border)" }
+                                           : { borderRight: "1px solid var(--border)" }) }),
     }}>
       {prefs.thumbMode === "series" ? series.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
@@ -719,6 +734,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
                     background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
         <button onClick={onClose} style={{ fontWeight: 700 }}>WORKLIST</button>
+        {/* 좌상단: Series Layout(뷰포트 분할) · Image Layout(페인 내 이미지 타일) — UBPACS p.14 */}
+        <GridPicker label="Srs" max={3}
+                    value={{ r: LAYOUTS[layout].rows, c: LAYOUTS[layout].cols }}
+                    onPick={(v) => setLayout(`${v.r}x${v.c}`)} />
+        <GridPicker label="Img" max={3} value={imgLay} onPick={setImgLay} />
         {/* 오픈 검사 탭 — 좌→우로 쌓임. 클릭=활성 페인에 표시, ✕=닫기(주 검사로 복귀) */}
         <div style={{ display: "flex", gap: 2, alignSelf: "flex-end", overflowX: "auto", maxWidth: "55%" }}>
           {openTabs.map((t) => {
@@ -742,10 +762,6 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             );
           })}
         </div>
-        <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-          [{panes[activePane].index + 1}/{panes[activePane].series?.instances.length ?? 0}]
-          {detail.status},,{detail.modality},{detail.study_date},{detail.study_desc}
-        </span>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setPrefs((p) => ({ ...p, reportDock: !p.reportDock }))}>판독창</button>
@@ -753,13 +769,33 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <button onClick={onClose}>닫기</button>
       </div>
 
+      {/* Study/Series Titlebar (UBPACS p.14 — 검사·시리즈 정보 전용 띠) */}
+      <div style={{
+        display: "flex", gap: 10, alignItems: "center", padding: "2px 10px",
+        background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)",
+        fontSize: 11, color: "var(--text-secondary)", flexShrink: 0,
+      }}>
+        <b style={{ color: "var(--accent)" }}>HP</b>
+        <span>[{panes[activePane].index + 1}/{panes[activePane].series?.instances.length ?? 0}]</span>
+        <span style={{ color: "var(--text-primary)" }}>
+          {detail.status.toUpperCase()}, {detail.patient_name}, {detail.modality}, {detail.study_date}, {detail.study_desc}
+        </span>
+        {panes[activePane].series && (
+          <span>
+            │ Srs:{panes[activePane].series!.series_number} {panes[activePane].series!.series_desc || panes[activePane].series!.modality}
+          </span>
+        )}
+        <div style={{ flex: 1 }} />
+        <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
+      </div>
+
       {paletteHoriz && palette}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: thumbHoriz ? "column" : "row" }}>
-        {!paletteHoriz && palette}
-        {!paletteOpen && !paletteHoriz && (
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {prefs.paletteSide === "left" && palette}
+        {!paletteOpen && prefs.paletteSide === "left" && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
         )}
-        {!thumbHoriz && thumbs}
+        {prefs.thumbSide === "left" && thumbs}
 
         {/* 뷰포트 그리드 */}
         <div style={{ flex: 1, display: "grid", minWidth: 0, minHeight: 0,
@@ -783,12 +819,35 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     position: "absolute", inset: 0,
                     transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
                   }}>
-                    <img src={url} alt="" draggable={false}
-                         style={{
-                           width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
-                           filter: p.invert ? "invert(1)" : undefined,
-                         }} />
-                    {inst && annoSvg(pid, p, inst)}
+                    {tileCount <= 1 ? (
+                      <>
+                        <img src={url} alt="" draggable={false}
+                             style={{
+                               width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
+                               filter: p.invert ? "invert(1)" : undefined,
+                             }} />
+                        {inst && annoSvg(pid, p, inst)}
+                      </>
+                    ) : (
+                      /* Image Layout — 연속 이미지 N×M 타일 (UBPACS p.14) */
+                      <div style={{
+                        width: "100%", height: "100%", display: "grid", gap: 1,
+                        gridTemplateColumns: `repeat(${imgLay.c}, 1fr)`,
+                        gridTemplateRows: `repeat(${imgLay.r}, 1fr)`,
+                      }}>
+                        {Array.from({ length: tileCount }, (_, k) => {
+                          const u = renderedUrlAt(p, p.index + k);
+                          return u ? (
+                            <img key={k} src={u} alt="" draggable={false}
+                                 style={{
+                                   width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
+                                   minWidth: 0, minHeight: 0,
+                                   filter: p.invert ? "invert(1)" : undefined,
+                                 }} />
+                          ) : <div key={k} />;
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
                 {overlayOn && p.series && (
@@ -799,7 +858,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     </div>
                     <div style={ov("tr")}>
                       S{p.series.series_number} {p.series.series_desc || p.series.modality}<br />
-                      Img: {p.index + 1}/{p.series.instances.length}
+                      Img: {p.index + 1}{tileCount > 1 && `~${Math.min(p.index + tileCount, p.series.instances.length)}`}/{p.series.instances.length}
                     </div>
                     <div style={ov("bl")}>{detail.modality} · {detail.patient_key}</div>
                     <div style={ov("br")}>
@@ -812,6 +871,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           })}
         </div>
 
+        {thumbRight && thumbs}
+        {paletteRight && palette}
+        {!paletteOpen && paletteRight && (
+          <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
+        )}
         {dock}
       </div>
       {thumbHoriz && thumbs}

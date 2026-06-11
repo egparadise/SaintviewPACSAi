@@ -43,6 +43,8 @@ import {
   type WorklistTab,
 } from "./WorklistTree";
 
+import { GridPicker } from "../lib/GridPicker";
+
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 
@@ -1123,49 +1125,6 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
                         onSave={async (body) => { await api.createOrder(body); load(); }} />
       )}
     </PanelBox>
-  );
-}
-
-/* ── 그리드 픽커 (UBPACS 레이아웃 선택 — 호버로 N×M 지정) ── */
-function GridPicker({ label, value, onPick }: {
-  label: string; value: { r: number; c: number }; onPick: (v: { r: number; c: number }) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hover, setHover] = useState({ r: 1, c: 1 });
-  const MAX = 4;
-  return (
-    <span style={{ position: "relative" }}>
-      <MiniBtn title={`${label} Layout — 그리드에서 선택`} onClick={() => setOpen((o) => !o)}>
-        {label} {value.r}×{value.c}
-      </MiniBtn>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", right: 0, zIndex: 50, padding: 6,
-          background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
-          boxShadow: "0 5px 16px rgba(0,0,0,0.5)",
-        }} onMouseLeave={() => setOpen(false)}>
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${MAX}, 16px)`, gap: 2 }}>
-            {Array.from({ length: MAX * MAX }, (_, i) => {
-              const r = Math.floor(i / MAX) + 1, c = (i % MAX) + 1;
-              const lit = r <= hover.r && c <= hover.c;
-              return (
-                <div key={i}
-                     onMouseEnter={() => setHover({ r, c })}
-                     onClick={() => { onPick({ r, c }); setOpen(false); }}
-                     style={{
-                       width: 16, height: 14, borderRadius: 2, cursor: "pointer",
-                       background: lit ? "var(--accent)" : "var(--bg-canvas)",
-                       border: "1px solid var(--border)",
-                     }} />
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 10.5, textAlign: "center", marginTop: 3, color: "var(--text-secondary)" }}>
-            {hover.r} × {hover.c}
-          </div>
-        </div>
-      )}
-    </span>
   );
 }
 
