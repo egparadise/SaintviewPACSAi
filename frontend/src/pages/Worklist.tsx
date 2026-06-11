@@ -21,6 +21,7 @@ import {
   type OrderRow,
   type PhraseRow,
   type Report,
+  type SeriesNode,
   type SrJson,
   type StudyDetail,
   type StudyRow,
@@ -109,6 +110,13 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
     label: "메모 (MEMO)",
     render: (r) => <span title={r.memo}>{r.memo ? `📝 ${r.memo.slice(0, 24)}` : ""}</span>,
   },
+  department: { label: "부서 (DEPT)", render: (r) => r.department },
+  source_aet: { label: "AE TITLE", render: (r) => r.source_aet },
+  bookmark: {
+    label: "★",
+    render: (r) => (r.bookmark ? <span style={{ color: "#f6c244" }}>★</span> : ""),
+  },
+  order_name: { label: "오더명 (ORDER NAME)", render: (r) => r.order_name },
 };
 export const DEFAULT_COLUMNS = [
   "status", "ai", "patient_key", "patient_name", "sex", "study_date",
@@ -1118,24 +1126,127 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   );
 }
 
-/* ── Thumbnail Window (UBPACS-Z Worklist 구성) — 선택 검사 미리보기 ── */
-function ThumbnailPanel({ detail, onOpen }: { detail: StudyDetail | null; onOpen: () => void }) {
-  const [items, setItems] = useState<InstanceThumb[]>([]);
-  useEffect(() => {
-    if (!detail) { setItems([]); return; }
-    api.instances(detail.id).then((r) => setItems(r.items)).catch(() => setItems([]));
-  }, [detail]);
+/* ── 그리드 픽커 (UBPACS 레이아웃 선택 — 호버로 N×M 지정) ── */
+function GridPicker({ label, value, onPick }: {
+  label: string; value: { r: number; c: number }; onPick: (v: { r: number; c: number }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hover, setHover] = useState({ r: 1, c: 1 });
+  const MAX = 4;
   return (
-    <PanelBox title="Thumbnail (더블클릭=뷰어)">
-      {!detail ? <Empty>검사를 선택하세요</Empty> : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6, alignContent: "flex-start" }}
+    <span style={{ position: "relative" }}>
+      <MiniBtn title={`${label} Layout — 그리드에서 선택`} onClick={() => setOpen((o) => !o)}>
+        {label} {value.r}×{value.c}
+      </MiniBtn>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: 0, zIndex: 50, padding: 6,
+          background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
+          boxShadow: "0 5px 16px rgba(0,0,0,0.5)",
+        }} onMouseLeave={() => setOpen(false)}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${MAX}, 16px)`, gap: 2 }}>
+            {Array.from({ length: MAX * MAX }, (_, i) => {
+              const r = Math.floor(i / MAX) + 1, c = (i % MAX) + 1;
+              const lit = r <= hover.r && c <= hover.c;
+              return (
+                <div key={i}
+                     onMouseEnter={() => setHover({ r, c })}
+                     onClick={() => { onPick({ r, c }); setOpen(false); }}
+                     style={{
+                       width: 16, height: 14, borderRadius: 2, cursor: "pointer",
+                       background: lit ? "var(--accent)" : "var(--bg-canvas)",
+                       border: "1px solid var(--border)",
+                     }} />
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 10.5, textAlign: "center", marginTop: 3, color: "var(--text-secondary)" }}>
+            {hover.r} × {hover.c}
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/* ── Thumbnail Window — Series Layout / Image Layout 분할 선택 (UBPACS) ── */
+function ThumbnailPanel({ detail, onOpen }: { detail: StudyDetail | null; onOpen: () => void }) {
+  const [tree, setTree] = useState<SeriesNode[]>([]);
+  const [selSeries, setSelSeries] = useState<string | null>(null);
+  const [sLay, setSLay] = useState({ r: 1, c: 2 });   // Series layout
+  const [iLay, setILay] = useState({ r: 2, c: 2 });   // Image layout
+
+  useEffect(() => {
+    api.getSetting("worklist.prefs").then((r) => {
+      const t = (r.value as { thumb_layout?: { s?: { r: number; c: number }; i?: { r: number; c: number } } }).thumb_layout;
+      if (t?.s) setSLay(t.s);
+      if (t?.i) setILay(t.i);
+    }).catch(() => {});
+  }, []);
+  const persist = (s: { r: number; c: number }, i: { r: number; c: number }) => {
+    api.getSetting("worklist.prefs").then((r) =>
+      api.putSetting("worklist.prefs", { ...r.value, thumb_layout: { s, i } }, "user")).catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!detail) { setTree([]); setSelSeries(null); return; }
+    api.seriesTree(detail.id).then((r) => {
+      const img = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
+      setTree(img);
+      setSelSeries(img[0]?.series_uid ?? null);
+    }).catch(() => setTree([]));
+  }, [detail]);
+
+  const sel = tree.find((s) => s.series_uid === selSeries) ?? null;
+
+  return (
+    <PanelBox title="Thumbnail (더블클릭=뷰어)" right={
+      <span style={{ display: "flex", gap: 3 }}>
+        <GridPicker label="Srs" value={sLay} onPick={(v) => { setSLay(v); persist(v, iLay); }} />
+        <GridPicker label="Img" value={iLay} onPick={(v) => { setILay(v); persist(sLay, v); }} />
+      </span>
+    }>
+      {!detail ? <Empty>검사를 선택하세요</Empty> : tree.length === 0 ? (
+        <Empty>영상 없음 (Orthanc 미연결?)</Empty>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 5, height: "100%", minHeight: 0 }}
              onDoubleClick={onOpen}>
-          {items.slice(0, 24).map((it) => (
-            <img key={it.sop_uid} src={it.preview_url} alt="" title={`Img ${it.instance_number}`}
-                 style={{ width: 62, height: 62, objectFit: "cover", borderRadius: 3,
-                          border: "1px solid var(--border)", background: "#000", cursor: "pointer" }} />
-          ))}
-          {items.length === 0 && <Empty>영상 없음 (Orthanc 미연결?)</Empty>}
+          {/* Series Layout — N×M 그리드로 시리즈 카드 배열 */}
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${sLay.c}, 1fr)`, gap: 3, flexShrink: 0 }}>
+            {tree.slice(0, sLay.r * sLay.c).map((s) => (
+              <div key={s.series_uid} onClick={() => setSelSeries(s.series_uid)}
+                   title={s.series_desc || s.modality}
+                   style={{
+                     position: "relative", borderRadius: 3, overflow: "hidden", cursor: "pointer",
+                     border: selSeries === s.series_uid ? "2px solid var(--accent)" : "1px solid var(--border)",
+                   }}>
+                {s.instances[Math.floor(s.instances.length / 2)] && (
+                  <img src={s.instances[Math.floor(s.instances.length / 2)].preview_url} alt=""
+                       style={{ width: "100%", height: 46, objectFit: "cover", display: "block", background: "#000" }} />
+                )}
+                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 9,
+                              background: "rgba(0,0,0,0.65)", padding: "0 3px" }}>
+                  S{s.series_number}·{s.instances.length}
+                </div>
+              </div>
+            ))}
+          </div>
+          {tree.length > sLay.r * sLay.c && (
+            <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>
+              +{tree.length - sLay.r * sLay.c} 시리즈 — Srs 레이아웃 확장
+            </div>
+          )}
+          {/* Image Layout — 선택 시리즈의 이미지 N×M 그리드 */}
+          <div style={{
+            flex: 1, minHeight: 0, overflow: "auto",
+            display: "grid", gridTemplateColumns: `repeat(${iLay.c}, 1fr)`, gap: 3, alignContent: "flex-start",
+          }}>
+            {(sel?.instances ?? []).slice(0, Math.max(iLay.r * iLay.c, 4) * 4).map((it) => (
+              <img key={it.sop_uid} src={it.preview_url} alt="" title={`Img ${it.instance_number}`}
+                   style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 2,
+                            border: "1px solid var(--border)", background: "#000", cursor: "pointer" }} />
+            ))}
+          </div>
         </div>
       )}
     </PanelBox>
@@ -1215,6 +1326,7 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       <Item a="copyreport" label="과거 판독 복사 (Copy Report)" />
       <Item a="regen" label="AI 초안 재생성" />
       <Sep />
+      <Item a="bookmark" label={row.bookmark ? "★ 북마크 해제" : "☆ 북마크"} />
       <Item a="emergency" label={row.emergency ? "Emergency 해제" : "⚠ Emergency 지정"} danger={!row.emergency} />
     </div>
   );
@@ -1648,6 +1760,9 @@ export function Worklist() {
       }
       case "emergency":
         if (target) { await api.setPriority(target.id, !target.emergency); onChanged(); }
+        break;
+      case "bookmark":
+        if (target) { await api.setBookmark(target.id, !target.bookmark); onChanged(); }
         break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

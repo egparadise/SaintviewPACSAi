@@ -74,6 +74,10 @@ export interface StudyRow {
   referring_physician: string;
   memo: string;
   finalized_at: string;
+  department: string;
+  source_aet: string;
+  bookmark: boolean;
+  order_name: string;
 }
 
 export interface RelatedExam {
@@ -198,6 +202,10 @@ export const api = {
     req<OrderRow>(`/api/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
   exportMwl: () =>
     req<{ ok: boolean; count: number; dir: string }>("/api/orders/export-mwl", { method: "POST" }),
+  setBookmark: (studyId: number, bookmark: boolean) =>
+    req<{ ok: boolean; bookmark: boolean }>(`/api/studies/${studyId}/bookmark`, {
+      method: "PUT", body: JSON.stringify({ bookmark }),
+    }),
   setMemo: (studyId: number, memo: string) =>
     req<{ ok: boolean }>(`/api/studies/${studyId}/memo`, {
       method: "PUT", body: JSON.stringify({ memo }),

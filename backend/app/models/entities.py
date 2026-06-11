@@ -68,6 +68,9 @@ class Study(Base):
     institution: Mapped[str] = mapped_column(String(128), default="")
     referring_physician: Mapped[str] = mapped_column(String(128), default="")
     memo: Mapped[str] = mapped_column(Text, default="")  # MEMO window (사용자 메모)
+    department: Mapped[str] = mapped_column(String(64), default="")   # DEPT (InstitutionalDepartmentName)
+    source_aet: Mapped[str] = mapped_column(String(32), default="")   # AETITLE (수신 RemoteAET)
+    bookmark: Mapped[bool] = mapped_column(Boolean, default=False)    # BOOKMARK (★)
     orthanc_id: Mapped[str] = mapped_column(String(64), default="")
     # 워크플로 상태 (디자인 §1.1 상태 토큰과 1:1)
     status: Mapped[str] = mapped_column(

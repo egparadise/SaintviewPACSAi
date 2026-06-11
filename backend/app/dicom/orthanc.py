@@ -37,14 +37,28 @@ class OrthancClient:
         return r.json()
 
     def study_metadata(self, orthanc_study_id: str) -> dict:
-        # ModalitiesInStudy는 requestedTags로 요청해야 채워짐
+        # ModalitiesInStudy·부서는 requestedTags로 요청해야 채워짐
         r = self._client.get(
-            f"/studies/{orthanc_study_id}", params={"requestedTags": "ModalitiesInStudy"}
+            f"/studies/{orthanc_study_id}",
+            params={"requestedTags": "ModalitiesInStudy;InstitutionalDepartmentName"},
         )
         r.raise_for_status()
         data = r.json()
         data.setdefault("MainDicomTags", {}).update(data.get("RequestedTags", {}))
         return data
+
+    def study_source_aet(self, orthanc_study_id: str) -> str:
+        """수신 RemoteAET (AETITLE 컬럼) — 첫 인스턴스 메타데이터에서 조회."""
+        try:
+            r = self._client.get(f"/studies/{orthanc_study_id}/instances")
+            r.raise_for_status()
+            instances = r.json()
+            if not instances:
+                return ""
+            m = self._client.get(f"/instances/{instances[0]['ID']}/metadata/RemoteAET")
+            return m.text.strip() if m.status_code == 200 else ""
+        except httpx.HTTPError:
+            return ""
 
     def list_changes(self, since: int = 0, limit: int = 100) -> dict:
         """Orthanc 변경 피드 — 신규 검사 동기화(폴링)."""
@@ -183,6 +197,8 @@ def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, in
             study_desc=tags.get("StudyDescription", ""),
             institution=tags.get("InstitutionName", ""),
             referring_physician=str(tags.get("ReferringPhysicianName", "")),
+            department=tags.get("InstitutionalDepartmentName", ""),
+            source_aet=client.study_source_aet(ch["ID"]),
             orthanc_id=ch["ID"],
         )
         if study.status == "received" and get_settings().ai_auto_generate:

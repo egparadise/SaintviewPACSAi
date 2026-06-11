@@ -349,6 +349,34 @@ def test_dicom_nodes_global_only(client, auth_headers):
     assert got["items"][0]["ae_title"] == "CR01"
 
 
+# ── 17차: 북마크·부서/AET·ORDER NAME 컬럼 ───────────────────
+
+
+def test_bookmark_and_order_name_columns(client, auth_headers):
+    with SessionLocal() as db:
+        study = register_study(
+            db, study_uid="1.2.840.999.17.1", patient_key="P1700", patient_name="컬럼2",
+            study_date="20260611", modality="CR", body_part="CHEST", study_desc="Chest PA",
+            accession_no="ACC1700", department="영상의학과", source_aet="CR01",
+        )
+        sid = study.id
+    # 같은 accession의 오더 → ORDER NAME 매칭
+    client.post("/api/orders", headers=auth_headers, json={
+        "patient_key": "P1700", "accession_no": "ACC1700", "modality": "CR",
+        "procedure_desc": "흉부 정면 촬영",
+    })
+    row = client.get("/api/worklist?pid=P1700", headers=auth_headers).json()["items"][0]
+    assert row["department"] == "영상의학과"
+    assert row["source_aet"] == "CR01"
+    assert row["order_name"] == "흉부 정면 촬영"
+    assert row["bookmark"] is False
+
+    assert client.put(f"/api/studies/{sid}/bookmark", headers=auth_headers,
+                      json={"bookmark": True}).status_code == 200
+    row2 = client.get("/api/worklist?pid=P1700", headers=auth_headers).json()["items"][0]
+    assert row2["bookmark"] is True
+
+
 # ── 번인 OCR 가드 — 폴백 무중단 ─────────────────────────────
 
 

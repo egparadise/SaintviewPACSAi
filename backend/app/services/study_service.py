@@ -66,6 +66,8 @@ def register_study(
     clinical_info: str = "",
     institution: str = "",
     referring_physician: str = "",
+    department: str = "",
+    source_aet: str = "",
     orthanc_id: str = "",
     series: list[dict] | None = None,
 ) -> Study:
@@ -86,6 +88,8 @@ def register_study(
         clinical_info=clinical_info,
         institution=institution,
         referring_physician=referring_physician,
+        department=department,
+        source_aet=source_aet,
         orthanc_id=orthanc_id,
         status="received",
     )
@@ -149,11 +153,25 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
     q = q.order_by(Study.emergency.desc(), Study.study_date.desc(), Study.id.desc())
     rows = db.execute(q.limit(f.limit).offset(f.offset)).all()
 
+    order_names = _order_names(db, [s.accession_no for s, _ in rows if s.accession_no])
     items = []
     for study, patient in rows:
         latest = _latest_report(db, study.id)
-        items.append(_study_row(study, patient, latest))
+        items.append(_study_row(study, patient, latest,
+                                order_name=order_names.get(study.accession_no, "")))
     return items, total
+
+
+def _order_names(db: Session, accessions: list[str]) -> dict[str, str]:
+    """ORDER NAME 컬럼 — accession으로 RIS 오더명 일괄 매칭."""
+    if not accessions:
+        return {}
+    from app.models import Order
+
+    rows = db.execute(
+        select(Order.accession_no, Order.procedure_desc).where(Order.accession_no.in_(accessions))
+    ).all()
+    return {acc: desc for acc, desc in rows if desc}
 
 
 def _latest_report(db: Session, study_id: int) -> Report | None:
@@ -162,7 +180,7 @@ def _latest_report(db: Session, study_id: int) -> Report | None:
     ).scalar_one_or_none()
 
 
-def _study_row(study: Study, patient: Patient, latest: Report | None) -> dict:
+def _study_row(study: Study, patient: Patient, latest: Report | None, *, order_name: str = "") -> dict:
     impression_preview = ""
     has_critical_flag = False
     if latest:
@@ -199,6 +217,10 @@ def _study_row(study: Study, patient: Patient, latest: Report | None) -> dict:
         "finalized_at": (
             latest.finalized_at.isoformat() if latest and latest.finalized_at else ""
         ),
+        "department": study.department,
+        "source_aet": study.source_aet,
+        "bookmark": study.bookmark,
+        "order_name": order_name,
     }
 
 
@@ -208,7 +230,8 @@ def study_detail(db: Session, study_id: int) -> dict | None:
         return None
     patient = db.get(Patient, study.patient_id)
     latest = _latest_report(db, study.id)
-    row = _study_row(study, patient, latest)
+    names = _order_names(db, [study.accession_no] if study.accession_no else [])
+    row = _study_row(study, patient, latest, order_name=names.get(study.accession_no, ""))
     row["clinical_info"] = study.clinical_info
     row["orthanc_id"] = study.orthanc_id
     row["series"] = [

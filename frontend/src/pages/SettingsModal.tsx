@@ -396,13 +396,16 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
 
             {page === "worklist" && (
               <>
-                <Group title="그리드 컬럼 구성 (Header Columns — F-8)">
-                  <DualList
+                <Group title="그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)">
+                  <FilterSettingList
                     all={Object.keys(COLUMN_DEFS)}
                     selected={columns}
                     labelOf={(k) => COLUMN_DEFS[k].label}
                     onChange={setColumns}
                   />
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    USE/NO USE 클릭으로 토글, ▲▼로 표시 순서 변경 — OK(저장) 시 적용.
+                  </div>
                 </Group>
                 <Group title="검색 필드 구성 (Find criteria)">
                   <DualList
@@ -683,6 +686,64 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <button onClick={onClose}>Cancel</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Filter Setting 리스트 (UBPACS형 — ITEM | USE/NO USE 토글 + ▲▼ 순서) ── */
+function FilterSettingList({ all, selected, labelOf, onChange }: {
+  all: string[];
+  selected: string[];
+  labelOf: (k: string) => string;
+  onChange: (next: string[]) => void;
+}) {
+  const rows = [...selected, ...all.filter((k) => !selected.includes(k))];
+  const move = (k: string, dir: -1 | 1) => {
+    const i = selected.indexOf(k);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= selected.length) return;
+    const next = [...selected];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  return (
+    <div style={{ maxHeight: 250, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
+      <table className="grid-table">
+        <thead><tr><th>ITEM</th><th style={{ width: 78 }}>사용</th><th style={{ width: 64 }}>순서</th></tr></thead>
+        <tbody>
+          {rows.map((k) => {
+            const used = selected.includes(k);
+            const i = selected.indexOf(k);
+            return (
+              <tr key={k}>
+                <td style={{ color: used ? "var(--text-primary)" : "var(--text-secondary)" }}>{labelOf(k)}</td>
+                <td>
+                  <span onClick={() => onChange(used ? selected.filter((x) => x !== k) : [...selected, k])}
+                        title="클릭=토글"
+                        style={{
+                          cursor: "pointer", fontWeight: 700, fontSize: 10.5, padding: "1px 7px",
+                          border: "1px solid var(--border)", borderRadius: 3,
+                          color: used ? "var(--stat-final)" : "var(--text-secondary)",
+                          background: used ? "rgba(80,200,120,0.12)" : undefined,
+                        }}>
+                    {used ? "USE" : "NO USE"}
+                  </span>
+                </td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {used && (
+                    <>
+                      <button style={{ padding: "0 5px", fontSize: 10.5 }} disabled={i === 0}
+                              onClick={() => move(k, -1)}>▲</button>
+                      <button style={{ padding: "0 5px", fontSize: 10.5 }} disabled={i === selected.length - 1}
+                              onClick={() => move(k, 1)}>▼</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

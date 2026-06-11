@@ -90,6 +90,27 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
     return {"job_id": job.id, "status": job.status}
 
 
+class BookmarkBody(BaseModel):
+    bookmark: bool
+
+
+@router.put("/studies/{study_id}/bookmark")
+def set_bookmark(
+    study_id: int, body: BookmarkBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """BOOKMARK 컬럼(★) 토글 — UBPACS Filter Setting 항목."""
+    from app.models import AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    study.bookmark = body.bookmark
+    db.add(AuditLog(action="bookmark_set", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "bookmark": body.bookmark}))
+    db.commit()
+    return {"ok": True, "bookmark": study.bookmark}
+
+
 class MemoBody(BaseModel):
     memo: str
 
