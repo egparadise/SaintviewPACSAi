@@ -20,6 +20,7 @@ ALLOWED_KEYS = {
     "mode.profiles",         # 05 제품 모드 프로파일 JSON (S7 — 전역/관리자 전용)
     "worklist.tabs",         # 워크리스트 페이지 탭 (UBPACS-Z 최대 10페이지 패턴)
     "worklist.tree",         # 검색 폴더 트리 (탐색기형 — 조건 누적 병합)
+    "dicom.nodes",           # SCP/SCU 장비 노드 목록 (AE Title/IP/Port — 전역/관리자)
 }
 
 
@@ -46,8 +47,8 @@ def write_setting(
 ):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
-    if key == "mode.profiles" and body.scope != "global":
-        raise HTTPException(status_code=400, detail="mode.profiles는 전역(global) 설정만 허용")
+    if key in ("mode.profiles", "dicom.nodes") and body.scope != "global":
+        raise HTTPException(status_code=400, detail=f"{key}는 전역(global) 설정만 허용")
     if key == "worklist.tabs" and len(body.value.get("items", [])) > 10:
         raise HTTPException(status_code=400, detail="워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)")
     if body.scope == "global":

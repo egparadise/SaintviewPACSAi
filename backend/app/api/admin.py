@@ -38,6 +38,43 @@ def ai_jobs(
     }
 
 
+@router.post("/dicom-nodes/apply")
+def apply_dicom_nodes(db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """dicom.nodes 설정의 SCU 노드를 Orthanc DicomModalities로 반영 — C-STORE/C-FIND 대상 등록."""
+    from app.dicom.orthanc import OrthancClient
+    from app.services.settings_service import get_setting
+
+    nodes = (get_setting(db, "dicom.nodes", default={}) or {}).get("items", [])
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            return {"ok": False, "detail": "Orthanc에 연결할 수 없습니다", "applied": 0}
+        applied = 0
+        errors: list[str] = []
+        for n in nodes:
+            name = str(n.get("name", "")).strip()
+            aet = str(n.get("ae_title", "")).strip()
+            ip = str(n.get("ip", "")).strip()
+            try:
+                port = int(n.get("port", 0))
+            except (TypeError, ValueError):
+                port = 0
+            if not (name and aet and ip and 0 < port < 65536):
+                errors.append(f"{name or '(이름없음)'}: AET/IP/Port 불완전")
+                continue
+            r = client._client.put(f"/modalities/{name}", json=[aet, ip, port])
+            if r.status_code in (200, 204):
+                applied += 1
+            else:
+                errors.append(f"{name}: HTTP {r.status_code}")
+        db.add(AuditLog(action="dicom_nodes_apply", target_type="setting", target_id="dicom.nodes",
+                        detail={"by": user["sub"], "applied": applied, "errors": errors}))
+        db.commit()
+        return {"ok": True, "applied": applied, "errors": errors}
+    finally:
+        client.close()
+
+
 @router.get("/audit")
 def audit(limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(admin_user)):
     rows = db.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)).scalars().all()

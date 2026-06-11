@@ -135,10 +135,14 @@ def render_report_pdf(db: Session, report: Report) -> bytes:
             story.append(Paragraph(f"• {r.get('action', '')}{tf}", _style(10)))
         story.append(Spacer(1, 4 * mm))
 
-    # 서명 블록
+    # 서명 블록 — 판독의 이름·면허번호 (diff_metrics.signature, 16차)
     story.append(Spacer(1, 6 * mm))
+    sig = (report.diff_metrics or {}).get("signature", {})
+    signer = sig.get("name") or report.reviewed_by or "-"
+    if sig.get("license_no"):
+        signer += f" (면허 제{sig['license_no']}호)"
     sign = [
-        ["판독", report.reviewed_by or "-",
+        ["판독", signer,
          "확정일시", report.finalized_at.strftime("%Y-%m-%d %H:%M") if report.finalized_at else "-"],
     ]
     st = Table(sign, colWidths=[18 * mm, 60 * mm, 20 * mm, 60 * mm])

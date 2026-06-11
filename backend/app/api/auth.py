@@ -30,6 +30,46 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     return LoginResponse(token=create_token(account), username=account.username, role=account.role)
 
 
+class ProfileBody(BaseModel):
+    display_name: str = ""
+    license_no: str = ""
+
+
+@router.get("/profile")
+def get_profile(db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """판독의(Reading) 정보 — 확정 서명에 이름·면허번호가 기록된다."""
+    from sqlalchemy import select
+
+    from app.models import Account
+
+    account = db.execute(select(Account).where(Account.username == user["sub"])).scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다")
+    return {
+        "username": account.username, "role": account.role,
+        "display_name": account.display_name, "license_no": account.license_no,
+    }
+
+
+@router.put("/profile")
+def put_profile(
+    body: ProfileBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    from sqlalchemy import select
+
+    from app.models import Account, AuditLog
+
+    account = db.execute(select(Account).where(Account.username == user["sub"])).scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다")
+    account.display_name = body.display_name.strip()[:64]
+    account.license_no = body.license_no.strip()[:32]
+    db.add(AuditLog(account_id=account.id, action="profile_update", target_type="account",
+                    target_id=account.username))
+    db.commit()
+    return {"ok": True}
+
+
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str

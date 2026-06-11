@@ -29,6 +29,7 @@ def _order_out(o: Order) -> dict:
         "modality": o.modality, "scheduled_date": o.scheduled_date,
         "scheduled_time": o.scheduled_time, "procedure_desc": o.procedure_desc,
         "station_aet": o.station_aet, "status": o.status,
+        "body_part": o.body_part, "projection": o.projection, "dicom_study_id": o.dicom_study_id,
     }
 
 
@@ -49,15 +50,18 @@ def list_orders(
 
 class OrderBody(BaseModel):
     patient_key: str
-    patient_name: str = ""
+    patient_name: str = ""     # DICOM PN: Last^First (프론트 폼에서 조합)
     birth_date: str = ""
     sex: str = ""
-    accession_no: str = ""
+    accession_no: str = ""     # 빈값 = 자동 채번
     modality: str = "CR"
     scheduled_date: str = ""   # YYYYMMDD
     scheduled_time: str = ""   # HHMMSS
     procedure_desc: str = ""
     station_aet: str = ""
+    body_part: str = ""
+    projection: str = ""       # PA/AP/LAT…
+    dicom_study_id: str = ""   # 빈값 = 자동 채번
 
 
 @router.post("")
@@ -77,11 +81,16 @@ def create_order(body: OrderBody, db: Session = Depends(get_db), user: dict = De
         scheduled_time=body.scheduled_time[:6],
         procedure_desc=body.procedure_desc[:256],
         station_aet=body.station_aet[:32],
+        body_part=body.body_part.strip().upper()[:64],
+        projection=body.projection.strip().upper()[:32],
+        dicom_study_id=body.dicom_study_id[:16],
     )
     db.add(order)
     db.flush()
     if not order.accession_no:
-        order.accession_no = f"SV{order.id:08d}"  # 자동 채번
+        order.accession_no = f"SV{order.id:08d}"   # Accession 자동 채번
+    if not order.dicom_study_id:
+        order.dicom_study_id = f"S{order.id:06d}"  # StudyID 자동 채번
     db.add(AuditLog(action="order_create", target_type="order", target_id=str(order.id),
                     detail={"by": user["sub"], "patient": order.patient_key}))
     db.commit()

@@ -19,6 +19,7 @@ import {
   type KeyImage,
   type NlQueryResult,
   type OrderRow,
+  type PhraseRow,
   type Report,
   type SrJson,
   type StudyDetail,
@@ -302,8 +303,8 @@ const DATE_PRESETS = [
   { key: "1m", label: "최근 1개월", days: 30 },
   { key: "all", label: "전체", days: -1 },
 ];
-function SearchRail({ active, onPick, tree }: {
-  active: string; onPick: (key: string, from: string) => void; tree: React.ReactNode;
+function SearchRail({ active, onPick, tree, width }: {
+  active: string; onPick: (key: string, from: string) => void; tree: React.ReactNode; width: number;
 }) {
   const pick = (p: { key: string; days: number }) => {
     if (p.days < 0) return onPick(p.key, "");
@@ -313,7 +314,7 @@ function SearchRail({ active, onPick, tree }: {
   };
   return (
     <div style={{
-      width: 152, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+      width, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
       padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, minHeight: 0,
     }}>
       <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px" }}>
@@ -487,46 +488,101 @@ function ComparisonSetGrid({ items, current, onRemove, onOpenCompare, onMerge }:
   );
 }
 
-/* ── [E-좌] 상용구 패널 (F-18 — Modality×BodyPart 축, 화면분석 §5.6) ─────── */
-interface Phrase { id: number; group: string; name: string; text: string; modality?: string; body_part?: string }
-function PhrasePanel({ onInsert, current }: { onInsert: (text: string) => void; current: StudyDetail | null }) {
-  const [items, setItems] = useState<Phrase[]>([]);
-  const [sel, setSel] = useState<Phrase | null>(null);
+/* ── 상용구 편집 모달 (화면분석 §5.6 — Worklist·Settings 공용) ─────── */
+export function PhraseEditModal({ init, defaults, onSave, onClose }: {
+  init?: PhraseRow | null;
+  defaults?: { modality?: string; body_part?: string };
+  onSave: (body: Partial<PhraseRow>) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(init?.name ?? "");
+  const [text, setText] = useState(init?.text ?? "");
+  const [modality, setModality] = useState(init?.modality ?? defaults?.modality ?? "");
+  const [bodyPart, setBodyPart] = useState(init?.body_part ?? defaults?.body_part ?? "");
+  const [shortcut, setShortcut] = useState(init?.shortcut ?? "");
+  const [err, setErr] = useState("");
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+      <span style={{ width: 84, color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
+      {children}
+    </label>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
+         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: 460, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>{init ? `상용구 수정 — ${init.name}` : "새 상용구 등록"}</b>
+        <Row label="이름 *"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1 }} /></Row>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Row label="장비(MOD)">
+            <select value={modality} onChange={(e) => setModality(e.target.value)} style={{ flex: 1 }}>
+              <option value="">공통</option>
+              {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM", "ES", "RF"].map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </Row>
+          <Row label="부위">
+            <input value={bodyPart} onChange={(e) => setBodyPart(e.target.value)} placeholder="CHEST… (빈칸=공통)"
+                   style={{ flex: 1, minWidth: 0 }} />
+          </Row>
+        </div>
+        <Row label="단축키">
+          <input value={shortcut} maxLength={1} onChange={(e) => setShortcut(e.target.value.toUpperCase())}
+                 placeholder="영문/숫자 1글자" style={{ width: 90 }} />
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>리포트에서 Alt+키로 즉시 삽입</span>
+        </Row>
+        <Row label="본문 *">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
+                    style={{ flex: 1, background: "var(--bg-canvas)", color: "var(--text-primary)",
+                             border: "1px solid var(--border)", borderRadius: 3, padding: 5,
+                             fontFamily: "inherit", fontSize: 12.5, resize: "vertical" }} />
+        </Row>
+        {err && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <button className="primary" disabled={!name.trim() || !text.trim()}
+                  onClick={async () => {
+                    try {
+                      await onSave({ name, text, modality, body_part: bodyPart, shortcut });
+                      onClose();
+                    } catch (e) { setErr(e instanceof Error ? e.message : "저장 실패"); }
+                  }}>저장</button>
+          <button onClick={onClose}>취소</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── [E] 상용구 패널 (DB 테이블 + Alt+단축키, 화면분석 §5.6) ─────── */
+function PhrasePanel({ onInsert, current, shortcutRef }: {
+  onInsert: (text: string) => void;
+  current: StudyDetail | null;
+  shortcutRef: React.MutableRefObject<Record<string, string>>;
+}) {
+  const [items, setItems] = useState<PhraseRow[]>([]);
+  const [sel, setSel] = useState<PhraseRow | null>(null);
   const [fitOnly, setFitOnly] = useState(true); // 현재 검사 맞춤(모달리티 일치 or 공통)
+  const [modal, setModal] = useState<"new" | "edit" | null>(null);
   const visible = items.filter((p) =>
     !fitOnly || !current || !p.modality || p.modality === current.modality);
 
   const load = useCallback(() => {
-    api.getSetting("report.phrases").then((r) => {
-      setItems(((r.value as { items?: Phrase[] }).items) ?? []);
+    api.phrases().then((r) => {
+      setItems(r.items);
+      // Alt+단축키 매핑을 루트 키보드 핸들러에 공급
+      shortcutRef.current = Object.fromEntries(
+        r.items.filter((p) => p.shortcut).map((p) => [p.shortcut, p.text]));
     }).catch(() => {});
-  }, []);
+  }, [shortcutRef]);
   useEffect(load, [load]);
 
-  const save = async (next: Phrase[]) => {
-    await api.putSetting("report.phrases", { items: next }, "global");
-    setItems(next);
-  };
-  const add = async () => {
-    const modality = prompt("Modality (빈칸=공통)", current?.modality ?? "") ?? "";
-    const body_part = prompt("부위 (빈칸=공통)", current?.body_part ?? "") ?? "";
-    const name = prompt("상용구 이름") ?? "";
-    const text = prompt("본문") ?? "";
-    if (!name || !text) return;
-    await save([...items, {
-      id: Date.now(), group: [modality, body_part].filter(Boolean).join("-") || "공통",
-      name, text, modality, body_part,
-    }]);
-  };
-  const edit = async () => {
-    if (!sel) return;
-    const text = prompt("본문 수정", sel.text) ?? sel.text;
-    await save(items.map((p) => (p.id === sel.id ? { ...p, text } : p)));
-  };
   const del = async () => {
-    if (!sel) return;
-    await save(items.filter((p) => p.id !== sel.id));
+    if (!sel || !window.confirm(`상용구 '${sel.name}'을 삭제할까요?`)) return;
+    await api.deletePhrase(sel.id);
     setSel(null);
+    load();
   };
 
   return (
@@ -535,39 +591,26 @@ function PhrasePanel({ onInsert, current }: { onInsert: (text: string) => void; 
         <label style={{ fontSize: 10, display: "flex", gap: 2, alignItems: "center", textTransform: "none" }}>
           <input type="checkbox" checked={fitOnly} onChange={(e) => setFitOnly(e.target.checked)} />맞춤
         </label>
-        {phraseButtons()}
-      </span>
-    }>
-      {phraseBody()}
-    </PanelBox>
-  );
-
-  function phraseButtons() {
-    return (
-      <span style={{ display: "flex", gap: 3 }}>
         <MiniBtn onClick={() => sel && onInsert(sel.text)} disabled={!sel}>삽입</MiniBtn>
-        <MiniBtn onClick={add}>New</MiniBtn>
-        <MiniBtn onClick={edit} disabled={!sel}>Edit</MiniBtn>
+        <MiniBtn onClick={() => setModal("new")}>New</MiniBtn>
+        <MiniBtn onClick={() => setModal("edit")} disabled={!sel}>Edit</MiniBtn>
         <MiniBtn onClick={del} disabled={!sel}>Del</MiniBtn>
       </span>
-    );
-  }
-
-  function phraseBody() {
-    return (
+    }>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
           <table className="grid-table">
-            <thead><tr><th>분류</th><th>NAME</th></tr></thead>
+            <thead><tr><th>분류</th><th>NAME</th><th style={{ width: 34 }}>키</th></tr></thead>
             <tbody>
               {visible.map((p) => (
                 <tr key={p.id} className={sel?.id === p.id ? "selected" : ""}
                     onClick={() => setSel(p)} onDoubleClick={() => onInsert(p.text)}>
-                  <td>{p.group}</td><td title={p.text}>{p.name}</td>
+                  <td>{p.category}</td><td title={p.text}>{p.name}</td>
+                  <td style={{ color: "var(--accent)" }}>{p.shortcut && `Alt+${p.shortcut}`}</td>
                 </tr>
               ))}
               {visible.length === 0 && (
-                <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>
+                <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>
                   {items.length ? "맞춤 해제 시 전체 표시" : "New로 상용구 등록"}
                 </td></tr>
               )}
@@ -583,8 +626,20 @@ function PhrasePanel({ onInsert, current }: { onInsert: (text: string) => void; 
           </div>
         )}
       </div>
-    );
-  }
+      {modal && (
+        <PhraseEditModal
+          init={modal === "edit" ? sel : null}
+          defaults={{ modality: current?.modality, body_part: current?.body_part }}
+          onSave={async (body) => {
+            if (modal === "edit" && sel) await api.updatePhrase(sel.id, body);
+            else await api.createPhrase(body);
+            load();
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </PanelBox>
+  );
 }
 
 /* ── 키이미지 스트립 (F-16) ───────────────────── */
@@ -713,6 +768,11 @@ function ReportPanel({ detail, onChanged, insertRef }: {
   }
 
   const finalized = current?.status === "finalized";
+  // 16차: AI Structured Report(최신 AI 버전)와 의료인 Report 분리 + 전자서명
+  const aiDraft = reports.find((r) => r.created_by === "ai") ?? null;
+  const signature = (current?.diff_metrics as {
+    signature?: { name: string; license_no: string; signed_at: string };
+  })?.signature;
   const age = detail.birth_date ? `${new Date().getFullYear() - parseInt(detail.birth_date.slice(0, 4), 10)}세` : "-";
 
   const save = async () => {
@@ -778,38 +838,90 @@ function ReportPanel({ detail, onChanged, insertRef }: {
           </Empty>
         ) : (
           <>
-            <SectionTitle>READING</SectionTitle>
-            <div style={{ fontSize: 12 }}>
-              {draft.comparison.summary && (
-                <div style={{ color: "var(--text-secondary)", marginBottom: 3 }}>[비교] {draft.comparison.summary}</div>
-              )}
-              {draft.findings.map((f, i) => (
-                <div key={i}>
-                  <b>{f.organ}</b>: {f.observation}{" "}
-                  {f.severity === "critical" && <span className="badge critical">CRITICAL</span>}
+            {/* 2열 분리: AI Structured Report(읽기) → [적용 ▶] → Report(의료인 작성·서명) */}
+            <div style={{ display: "flex", gap: 6, flex: 1, minHeight: 120 }}>
+              {/* 좌: AI Structured Report — 보라(AI 생성물 전용 색) */}
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4,
+                            border: "1px solid var(--ai)", borderRadius: 4, padding: 6, overflow: "auto" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ai)", display: "flex", gap: 6, alignItems: "center" }}>
+                  AI STRUCTURED REPORT {aiDraft && `(v${aiDraft.version} · ${aiDraft.ai_model})`}
+                  <span style={{ flex: 1 }} />
+                  <button className="primary" disabled={!aiDraft || finalized}
+                          title="AI 초안을 우측 Report로 복사 — 검토 후 의료인이 확정(서명)"
+                          onClick={() => aiDraft && setDraft(structuredClone(aiDraft.sr_json))}
+                          style={{ padding: "1px 10px", fontSize: 11 }}>적용 ▶</button>
                 </div>
-              ))}
-            </div>
-            <SectionTitle>CONCLUSION</SectionTitle>
-            {draft.impression.map((imp, i) => (
-              <textarea key={i} value={imp.statement} disabled={finalized}
-                        onChange={(e) => setDraft((d) => {
-                          const n = structuredClone(d!); n.impression[i].statement = e.target.value; return n;
-                        })}
-                        style={{
-                          width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
-                          border: "1px solid var(--border)", borderRadius: 3, padding: 5,
-                          fontFamily: "inherit", fontSize: 12.5, resize: "vertical", minHeight: 44,
-                        }} />
-            ))}
-            {draft.recommendations.length > 0 && (
-              <>
-                <SectionTitle>RECOMMEND</SectionTitle>
-                {draft.recommendations.map((r, i) => (
-                  <div key={i} style={{ fontSize: 12 }}>- {r.action} ({r.timeframe})</div>
+                {!aiDraft ? (
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>AI 초안 없음 — 초안 재생성으로 생성</div>
+                ) : (
+                  <div style={{ fontSize: 11.5 }}>
+                    {aiDraft.sr_json.comparison.summary && (
+                      <div style={{ color: "var(--text-secondary)", marginBottom: 3 }}>[비교] {aiDraft.sr_json.comparison.summary}</div>
+                    )}
+                    {aiDraft.sr_json.findings.map((f, i) => (
+                      <div key={i}>
+                        <b>{f.organ}</b>: {f.observation}{" "}
+                        {f.severity === "critical" && <span className="badge critical">CRITICAL</span>}
+                      </div>
+                    ))}
+                    <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0", paddingTop: 3 }}>
+                      {aiDraft.sr_json.impression.map((imp, i) => (
+                        <div key={i}>{imp.rank}. {imp.statement} <i style={{ color: "var(--text-secondary)" }}>({imp.confidence})</i></div>
+                      ))}
+                    </div>
+                    {aiDraft.sr_json.recommendations.map((r, i) => (
+                      <div key={i} style={{ color: "var(--text-secondary)" }}>- {r.action} ({r.timeframe})</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* 우: Report — 의료인 작성·확정(서명) */}
+              <div style={{ flex: 1.2, minWidth: 0, display: "flex", flexDirection: "column", gap: 4,
+                            border: "1px solid var(--border)", borderRadius: 4, padding: 6, overflow: "auto" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>REPORT (판독)</div>
+                <SectionTitle>READING</SectionTitle>
+                <div style={{ fontSize: 12 }}>
+                  {draft.comparison.summary && (
+                    <div style={{ color: "var(--text-secondary)", marginBottom: 3 }}>[비교] {draft.comparison.summary}</div>
+                  )}
+                  {draft.findings.map((f, i) => (
+                    <div key={i}>
+                      <b>{f.organ}</b>: {f.observation}{" "}
+                      {f.severity === "critical" && <span className="badge critical">CRITICAL</span>}
+                    </div>
+                  ))}
+                </div>
+                <SectionTitle>CONCLUSION</SectionTitle>
+                {draft.impression.map((imp, i) => (
+                  <textarea key={i} value={imp.statement} disabled={finalized}
+                            onChange={(e) => setDraft((d) => {
+                              const n = structuredClone(d!); n.impression[i].statement = e.target.value; return n;
+                            })}
+                            style={{
+                              width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
+                              border: "1px solid var(--border)", borderRadius: 3, padding: 5,
+                              fontFamily: "inherit", fontSize: 12.5, resize: "vertical", minHeight: 44,
+                            }} />
                 ))}
-              </>
-            )}
+                {draft.recommendations.length > 0 && (
+                  <>
+                    <SectionTitle>RECOMMEND</SectionTitle>
+                    {draft.recommendations.map((r, i) => (
+                      <div key={i} style={{ fontSize: 12 }}>- {r.action} ({r.timeframe})</div>
+                    ))}
+                  </>
+                )}
+                {signature && (
+                  <div style={{
+                    marginTop: "auto", borderTop: "1px solid var(--border)", paddingTop: 4,
+                    fontSize: 11.5, color: "var(--stat-final)",
+                  }}>
+                    ✍ 서명: {signature.name}{signature.license_no && ` (면허 제${signature.license_no}호)`} ·
+                    {" "}{signature.signed_at?.slice(0, 16).replace("T", " ")}
+                  </div>
+                )}
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
               <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
               <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
@@ -848,6 +960,96 @@ function ReportPanel({ detail, onChanged, insertRef }: {
   );
 }
 
+/* ── 오더 등록 모달 (UBPACS 오더 폼 — Study ID/Accession 자동 생성) ─────── */
+function OrderEditModal({ onSave, onClose }: {
+  onSave: (body: Partial<OrderRow>) => Promise<void>;
+  onClose: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const [f, setF] = useState({
+    patient_key: "", last_name: "", first_name: "", birth_date: "", sex: "",
+    dicom_study_id: "", accession_no: "", modality: "CR", body_part: "",
+    projection: "", procedure_desc: "", scheduled_date: today, scheduled_time: "",
+    station_aet: "",
+  });
+  const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const [err, setErr] = useState("");
+  const gen = (kind: "sid" | "acc") => {
+    const seq = Date.now().toString().slice(-8);
+    if (kind === "sid") set("dicom_study_id", `S${seq.slice(-6)}`);
+    else set("accession_no", `SV${seq}`);
+  };
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+      <span style={{ width: 92, color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
+      {children}
+    </label>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
+         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: 520, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>새 오더 등록 — MWL로 장비에 전달됩니다</b>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Row label="환자 ID *"><input autoFocus value={f.patient_key} onChange={(e) => set("patient_key", e.target.value)} style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="성별">
+            <select value={f.sex} onChange={(e) => set("sex", e.target.value)} style={{ flex: 1 }}>
+              <option value="">-</option><option value="M">M</option><option value="F">F</option><option value="O">O</option>
+            </select>
+          </Row>
+          <Row label="Last name"><input value={f.last_name} onChange={(e) => set("last_name", e.target.value)} placeholder="HONG" style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="First name"><input value={f.first_name} onChange={(e) => set("first_name", e.target.value)} placeholder="GILDONG" style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="생년월일"><input value={f.birth_date} onChange={(e) => set("birth_date", e.target.value)} placeholder="YYYYMMDD" maxLength={8} style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="Modality">
+            <select value={f.modality} onChange={(e) => set("modality", e.target.value)} style={{ flex: 1 }}>
+              {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM", "ES", "RF", "OT"].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Row>
+          <Row label="Study ID">
+            <input value={f.dicom_study_id} onChange={(e) => set("dicom_study_id", e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+            <button title="번호 자동 생성" onClick={() => gen("sid")} style={{ padding: "1px 7px" }}>자동</button>
+          </Row>
+          <Row label="Accession">
+            <input value={f.accession_no} onChange={(e) => set("accession_no", e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+            <button title="번호 자동 생성" onClick={() => gen("acc")} style={{ padding: "1px 7px" }}>자동</button>
+          </Row>
+          <Row label="Body part"><input value={f.body_part} onChange={(e) => set("body_part", e.target.value)} placeholder="CHEST" style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="Projection">
+            <select value={f.projection} onChange={(e) => set("projection", e.target.value)} style={{ flex: 1 }}>
+              <option value="">-</option>
+              {["PA", "AP", "LAT", "OBL", "AXIAL", "BOTH"].map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Row>
+          <Row label="예약일"><input value={f.scheduled_date} onChange={(e) => set("scheduled_date", e.target.value)} placeholder="YYYYMMDD" maxLength={8} style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="예약시각"><input value={f.scheduled_time} onChange={(e) => set("scheduled_time", e.target.value)} placeholder="HHMM" maxLength={6} style={{ flex: 1, minWidth: 0 }} /></Row>
+          <Row label="장비 AET"><input value={f.station_aet} onChange={(e) => set("station_aet", e.target.value)} placeholder="CR01 (빈칸=ANY)" style={{ flex: 1, minWidth: 0 }} /></Row>
+        </div>
+        <Row label="Description"><input value={f.procedure_desc} onChange={(e) => set("procedure_desc", e.target.value)} placeholder="Chest PA" style={{ flex: 1 }} /></Row>
+        {err && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <button className="primary" disabled={!f.patient_key.trim()}
+                  onClick={async () => {
+                    try {
+                      const patient_name = [f.last_name.trim().toUpperCase(), f.first_name.trim().toUpperCase()]
+                        .filter(Boolean).join("^");  // DICOM PN
+                      await onSave({
+                        patient_key: f.patient_key, patient_name, birth_date: f.birth_date, sex: f.sex,
+                        accession_no: f.accession_no, modality: f.modality,
+                        scheduled_date: f.scheduled_date, scheduled_time: f.scheduled_time,
+                        procedure_desc: f.procedure_desc, station_aet: f.station_aet,
+                        body_part: f.body_part, projection: f.projection, dicom_study_id: f.dicom_study_id,
+                      });
+                      onClose();
+                    } catch (e) { setErr(e instanceof Error ? e.message : "등록 실패"); }
+                  }}>등록</button>
+          <button onClick={onClose}>취소</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── [E-우] 오더/예약 (RIS — P2): MWL 내보내기 + MPPS 상태 매핑 ─────── */
 const ORDER_STATUS: Record<string, string> = {
   scheduled: "예약", in_progress: "진행중", completed: "완료", cancelled: "취소",
@@ -855,24 +1057,12 @@ const ORDER_STATUS: Record<string, string> = {
 function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   const [items, setItems] = useState<OrderRow[]>([]);
   const [msg, setMsg] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
   const load = useCallback(() => {
     api.orders().then((r) => setItems(r.items)).catch(() => {});
   }, []);
   useEffect(load, [load, refreshKey]);
 
-  const add = async () => {
-    const patient_key = prompt("환자 ID");
-    if (!patient_key) return;
-    const patient_name = prompt("환자 이름") ?? "";
-    const modality = (prompt("Modality (CR/CT/MR/US…)", "CR") ?? "CR").toUpperCase();
-    const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-    const scheduled_date = prompt("예약일 (YYYYMMDD)", today) ?? "";
-    const procedure_desc = prompt("오더명 (예: Chest PA)") ?? "";
-    try {
-      await api.createOrder({ patient_key, patient_name, modality, scheduled_date, procedure_desc });
-      load();
-    } catch (e) { alert(e instanceof Error ? e.message : "오더 등록 실패"); }
-  };
   const setSt = async (id: number, status: string) => {
     try { await api.setOrderStatus(id, status); load(); }
     catch (e) { alert(e instanceof Error ? e.message : "상태 변경 실패"); }
@@ -887,7 +1077,7 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   return (
     <PanelBox title="오더/예약 (RIS·MWL)" right={
       <span style={{ display: "flex", gap: 3 }}>
-        <MiniBtn onClick={add}>New</MiniBtn>
+        <MiniBtn onClick={() => setModalOpen(true)}>New</MiniBtn>
         <MiniBtn onClick={exportMwl} title="scheduled 오더를 MWL(.wl)로 내보내기 — Orthanc worklists">MWL</MiniBtn>
       </span>
     }>
@@ -920,6 +1110,10 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
         </tbody>
       </table>
       {msg && <div style={{ padding: "3px 8px", fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</div>}
+      {modalOpen && (
+        <OrderEditModal onClose={() => setModalOpen(false)}
+                        onSave={async (body) => { await api.createOrder(body); load(); }} />
+      )}
     </PanelBox>
   );
 }
@@ -1025,6 +1219,39 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
     </div>
   );
 }
+
+/* ── 스플리터 — 패널 경계를 드래그해 크기 조절 (계정별 서버 저장) ── */
+function Splitter({ dir, onDrag, onEnd }: {
+  dir: "v" | "h"; onDrag: (delta: number) => void; onEnd: () => void;
+}) {
+  const start = (e: React.MouseEvent) => {
+    e.preventDefault();
+    let last = dir === "v" ? e.clientX : e.clientY;
+    const move = (ev: MouseEvent) => {
+      const cur = dir === "v" ? ev.clientX : ev.clientY;
+      onDrag(cur - last);
+      last = cur;
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      onEnd();
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+  return (
+    <div onMouseDown={start} title="드래그=크기 조절 (계정에 저장)"
+         style={{
+           flexShrink: 0, zIndex: 5, background: "var(--border)", opacity: 0.6,
+           ...(dir === "v" ? { width: 4, cursor: "col-resize" } : { height: 4, cursor: "row-resize" }),
+         }} />
+  );
+}
+
+interface LayoutSizes { railW: number; dH: number; eH: number; thumbW: number; stdW: number; commentW: number }
+const DEFAULT_SIZES: LayoutSizes = { railW: 152, dH: 140, eH: 300, thumbW: 230, stdW: 210, commentW: 250 };
+const clampSz = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /* ── 패널 드래그 래퍼 — 좌측 그립을 끌어 같은 행 안에서 자리 교환 ── */
 function DraggablePanel({ zone, k, onDrop, style, children }: {
@@ -1191,6 +1418,26 @@ export function Worklist() {
   const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
   const [selNodeId, setSelNodeId] = useState<string | null>(null);
   const insertRef = useRef<((t: string) => void) | null>(null);
+  const phraseShortcutRef = useRef<Record<string, string>>({});  // Alt+키 → 상용구 본문
+  // 레이아웃 크기 — 스플리터 드래그로 조절, 로그인 계정에 저장(로밍)
+  const [sizes, setSizes] = useState<LayoutSizes>(DEFAULT_SIZES);
+  const sizesRef = useRef(sizes);
+  useEffect(() => { sizesRef.current = sizes; }, [sizes]);
+  const persistSizes = useCallback(() => {
+    api.getSetting("worklist.prefs").then((r) =>
+      api.putSetting("worklist.prefs", { ...r.value, layout_sizes: sizesRef.current }, "user")).catch(() => {});
+  }, []);
+  // E행 패널 사이 스플리터: 좌측 패널 폭 조절(좌측이 가변 report면 우측을 역방향 조절)
+  const resizeE = useCallback((left: string, right: string, dx: number) => {
+    const keyOf = (k: string): keyof LayoutSizes | null =>
+      k === "thumb" ? "thumbW" : k === "std" ? "stdW" : k === "comment" ? "commentW" : null;
+    const lk = keyOf(left), rk = keyOf(right);
+    setSizes((s) => {
+      if (lk) return { ...s, [lk]: clampSz(s[lk] + dx, 120, 600) };
+      if (rk) return { ...s, [rk]: clampSz(s[rk] - dx, 120, 600) };
+      return s;
+    });
+  }, []);
 
   // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
   useEffect(() => {
@@ -1209,6 +1456,8 @@ export function Worklist() {
       if (po?.d?.length === 3 && po?.e?.length === 4) setPanelOrder({ d: po.d, e: po.e });
       const pn = (v as { panels?: Record<string, boolean> }).panels;
       if (pn) setPanelsOn((prev) => ({ ...prev, ...pn }));
+      const ls = (v as { layout_sizes?: Partial<LayoutSizes> }).layout_sizes;
+      if (ls) setSizes((prev) => ({ ...prev, ...ls }));
     }).catch(() => {});
     loadTabs().then(setTabs).catch(() => {});
     loadTree().then(setTreeNodes).catch(() => {});
@@ -1246,6 +1495,11 @@ export function Worklist() {
   // 판독 단축키(UBPACS-Z §5): Enter=View&Draft, B=일괄검토, E=Emergency, F5=새로고침
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 상용구 단축키(Alt+키) — 입력 필드 포커스 중에도 동작 (Conclusion에 삽입)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && selected) {
+        const text = phraseShortcutRef.current[e.key.toUpperCase()];
+        if (text) { e.preventDefault(); insertRef.current?.(text); return; }
+      }
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (viewer2d || viewer3dUid || batchOpen) return; // 모달/뷰어 우선
@@ -1556,23 +1810,29 @@ export function Worklist() {
         </div>
       )}
 
-      {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 */}
+      {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 — 좌우 스플리터 */}
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
-        <SearchRail active={datePreset} onPick={(key, from) => {
+        <SearchRail width={sizes.railW} active={datePreset} onPick={(key, from) => {
           setDatePreset(key);
           setFilters((f) => ({ ...f, tree_from: from, date_from_iso: "", date_to_iso: "" }));
         }} tree={
           <FolderTreeEditor nodes={treeNodes} onChange={onTreeChange}
                             selectedId={selNodeId} onSelect={applyFolder} applyHint />
         } />
+        <Splitter dir="v" onEnd={persistSizes}
+                  onDrag={(dx) => setSizes((s) => ({ ...s, railW: clampSz(s.railW + dx, 100, 420) }))} />
         <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
                    onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                    onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
       </div>
 
-      {/* 하단1 (UBPACS p.8): Order | Related Study List-1 | Related Study List-2 — 드래그 재배치 */}
+      {/* 하단1 (UBPACS p.8): Order | Related Study List-1 | Related Study List-2 — 드래그 재배치 + 상하 스플리터 */}
       {panelOrder.d.some((k) => panelsOn[k]) && (
-        <div style={{ display: "flex", gap: 3, height: 140, padding: "3px 3px 0", flexShrink: 0 }}>
+        <Splitter dir="h" onEnd={persistSizes}
+                  onDrag={(dy) => setSizes((s) => ({ ...s, dH: clampSz(s.dH - dy, 80, 420) }))} />
+      )}
+      {panelOrder.d.some((k) => panelsOn[k]) && (
+        <div style={{ display: "flex", gap: 3, height: sizes.dH, padding: "3px 3px 0", flexShrink: 0 }}>
           {panelOrder.d.filter((k) => panelsOn[k]).map((k) => (
             <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
               {k === "orders" ? <OrdersPanel refreshKey={refreshKey} />
@@ -1590,21 +1850,36 @@ export function Worklist() {
         </div>
       )}
 
-      {/* 하단2 (UBPACS p.8): Thumbnail | Reference(상용구) | Comment+MEMO | Report — 드래그 재배치 */}
+      {/* 하단2 (UBPACS p.8): Thumbnail | Reference(상용구) | Comment+MEMO | Report — 드래그 재배치 + 스플리터 */}
       {panelOrder.e.some((k) => panelsOn[k]) && (
-        <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
-          {panelOrder.e.filter((k) => panelsOn[k]).map((k) => (
-            <DraggablePanel key={k} zone="e" k={k} onDrop={onPanelDrop}
-                            style={k === "thumb" ? { width: 230, flexShrink: 0 }
-                                 : k === "std" ? { width: 210, flexShrink: 0 }
-                                 : k === "comment" ? { width: 250, flexShrink: 0 }
-                                 : { flex: 1.6 }}>
-              {k === "thumb" ? <ThumbnailPanel detail={selected} onOpen={() => void doAction("viewdraft")} />
-                : k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
-                : k === "comment" ? <CommentMemoPanel detail={selected} onChanged={onChanged} />
-                : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
-            </DraggablePanel>
-          ))}
+        <Splitter dir="h" onEnd={persistSizes}
+                  onDrag={(dy) => setSizes((s) => ({ ...s, eH: clampSz(s.eH - dy, 140, 640) }))} />
+      )}
+      {panelOrder.e.some((k) => panelsOn[k]) && (
+        <div style={{ display: "flex", gap: 3, height: sizes.eH, flexShrink: 0, padding: 3 }}>
+          {(() => {
+            const arr = panelOrder.e.filter((k) => panelsOn[k]);
+            return arr.flatMap((k, i) => {
+              const out = [(
+                <DraggablePanel key={k} zone="e" k={k} onDrop={onPanelDrop}
+                                style={k === "thumb" ? { width: sizes.thumbW, flexShrink: 0 }
+                                     : k === "std" ? { width: sizes.stdW, flexShrink: 0 }
+                                     : k === "comment" ? { width: sizes.commentW, flexShrink: 0 }
+                                     : { flex: 1.6 }}>
+                  {k === "thumb" ? <ThumbnailPanel detail={selected} onOpen={() => void doAction("viewdraft")} />
+                    : k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected}
+                                                 shortcutRef={phraseShortcutRef} />
+                    : k === "comment" ? <CommentMemoPanel detail={selected} onChanged={onChanged} />
+                    : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
+                </DraggablePanel>
+              )];
+              if (i < arr.length - 1) {
+                out.push(<Splitter key={`sp-${k}`} dir="v" onEnd={persistSizes}
+                                   onDrag={(dx) => resizeE(k, arr[i + 1], dx)} />);
+              }
+              return out;
+            });
+          })()}
         </div>
       )}
 

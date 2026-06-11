@@ -32,6 +32,7 @@ def build_mwl_dataset(order) -> Dataset:
     ds.PatientSex = order.sex or ""
     ds.AccessionNumber = order.accession_no or f"SV{order.id:08d}"
     ds.StudyInstanceUID = generate_uid()
+    ds.StudyID = order.dicom_study_id or f"S{order.id:06d}"  # (0020,0010)
     ds.RequestedProcedureID = f"RP{order.id}"
     ds.RequestedProcedureDescription = order.procedure_desc or ""
     ds.ReferringPhysicianName = ""
@@ -42,7 +43,11 @@ def build_mwl_dataset(order) -> Dataset:
     sps.ScheduledProcedureStepStartDate = order.scheduled_date or ""
     sps.ScheduledProcedureStepStartTime = order.scheduled_time or ""
     sps.ScheduledPerformingPhysicianName = ""
-    sps.ScheduledProcedureStepDescription = order.procedure_desc or ""
+    # 부위·촬영방향 — 장비 프로토콜 매칭용
+    desc_parts = [order.procedure_desc or "", order.projection or ""]
+    sps.ScheduledProcedureStepDescription = " ".join(p for p in desc_parts if p).strip()
+    if order.body_part:
+        sps.BodyPartExamined = order.body_part  # (0018,0015)
     sps.ScheduledProcedureStepID = f"SPS{order.id}"
     ds.ScheduledProcedureStepSequence = [sps]
     return ds

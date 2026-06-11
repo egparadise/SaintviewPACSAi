@@ -150,8 +150,27 @@ class Account(Base):
     password_hash: Mapped[str] = mapped_column(String(256))
     algo: Mapped[str] = mapped_column(String(16), default="argon2")
     role: Mapped[str] = mapped_column(String(16), default="radiologist")  # radiologist | admin
+    # 판독 서명(Reading) — 확정 시 리포트에 이름·면허번호가 함께 기록된다
+    display_name: Mapped[str] = mapped_column(String(64), default="")
+    license_no: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Phrase(Base):
+    """상용구(Predefined Readings) — Modality×BodyPart 축 + 단축키 (화면분석 §5.6, DB 정식 테이블)."""
+
+    __tablename__ = "phrases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    text: Mapped[str] = mapped_column(Text, default="")
+    modality: Mapped[str] = mapped_column(String(16), default="", index=True)   # 빈값=공통
+    body_part: Mapped[str] = mapped_column(String(64), default="", index=True)  # 빈값=공통
+    category: Mapped[str] = mapped_column(String(64), default="")               # 분류(자동: MOD-부위)
+    shortcut: Mapped[str] = mapped_column(String(8), default="")                # Alt+키 (한 글자/숫자)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class AuditLog(Base):
@@ -220,6 +239,10 @@ class Order(Base):
     scheduled_time: Mapped[str] = mapped_column(String(6), default="")  # HHMMSS
     procedure_desc: Mapped[str] = mapped_column(String(256), default="")
     station_aet: Mapped[str] = mapped_column(String(32), default="")
+    # 장비 MWL 질의에 필요한 추가 속성 (UBPACS 오더 등록 폼)
+    body_part: Mapped[str] = mapped_column(String(64), default="")
+    projection: Mapped[str] = mapped_column(String(32), default="")  # PA/AP/LAT 등
+    dicom_study_id: Mapped[str] = mapped_column(String(16), default="")  # DICOM StudyID (0020,0010)
     # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
     status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

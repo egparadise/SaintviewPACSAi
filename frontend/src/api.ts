@@ -202,6 +202,22 @@ export const api = {
     req<{ ok: boolean }>(`/api/studies/${studyId}/memo`, {
       method: "PUT", body: JSON.stringify({ memo }),
     }),
+  phrases: () => req<{ items: PhraseRow[] }>("/api/phrases"),
+  createPhrase: (body: Partial<PhraseRow>) =>
+    req<PhraseRow>("/api/phrases", { method: "POST", body: JSON.stringify(body) }),
+  updatePhrase: (id: number, body: Partial<PhraseRow>) =>
+    req<PhraseRow>(`/api/phrases/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deletePhrase: (id: number) =>
+    req<{ ok: boolean }>(`/api/phrases/${id}`, { method: "DELETE" }),
+  profile: () => req<Profile>("/api/auth/profile"),
+  putProfile: (display_name: string, license_no: string) =>
+    req<{ ok: boolean }>("/api/auth/profile", {
+      method: "PUT", body: JSON.stringify({ display_name, license_no }),
+    }),
+  applyDicomNodes: () =>
+    req<{ ok: boolean; applied: number; errors: string[] }>("/api/admin/dicom-nodes/apply", {
+      method: "POST",
+    }),
 };
 
 /** S1 자연어 검색 — 적용 전 미리보기(explanation) 필수 */
@@ -264,7 +280,9 @@ export interface CtrResult {
 export interface OrderRow {
   id: number;
   patient_key: string;
-  patient_name: string;
+  patient_name: string;      // DICOM PN: Last^First
+  birth_date?: string;
+  sex?: string;
   accession_no: string;
   modality: string;
   scheduled_date: string;
@@ -272,6 +290,28 @@ export interface OrderRow {
   procedure_desc: string;
   station_aet: string;
   status: string;            // scheduled|in_progress|completed|cancelled (MPPS 매핑)
+  body_part: string;
+  projection: string;        // PA/AP/LAT…
+  dicom_study_id: string;    // DICOM StudyID (0020,0010)
+}
+
+/** 상용구 — DB 테이블(phrases), Modality×BodyPart 축 + Alt+단축키 */
+export interface PhraseRow {
+  id: number;
+  name: string;
+  text: string;
+  modality: string;
+  body_part: string;
+  category: string;
+  shortcut: string;
+  created_by: string;
+}
+
+export interface Profile {
+  username: string;
+  role: string;
+  display_name: string;
+  license_no: string;
 }
 
 export interface OrthancStatus {

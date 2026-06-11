@@ -1,7 +1,7 @@
 // 설정 — INFINITT Setting options 패턴(좌측 트리 + 우측 페이지, 화면분석 §5)
 import { useEffect, useState } from "react";
-import { api, type AiQuality, type OrthancStatus } from "../api";
-import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS } from "./Worklist";
+import { api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
+import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import {
   FolderEditModal,
   FolderTreeEditor,
@@ -27,10 +27,14 @@ const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "network", label: "네트워크 (DICOM)" },
   { key: "worklist", label: "워크리스트" },
   { key: "report", label: "리포트" },
+  { key: "reading", label: "판독 (Reading)" },
   { key: "viewer", label: "뷰어" },
   { key: "pdf", label: "판독서 PDF", admin: true },
   { key: "ai", label: "AI 정책", admin: true },
 ];
+
+/** SCP/SCU 장비 노드 (dicom.nodes — AE Title/IP/Port, 추가·삭제·확장 가능) */
+interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: string; ip: string; port: number }
 
 export function SettingsModal({ role, onClose }: { role: string; onClose: () => void }) {
   const isAdmin = role === "admin";
@@ -60,7 +64,6 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [vision, setVision] = useState(false);
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
-  const [phraseCount, setPhraseCount] = useState(0);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
   const [modeProfiles, setModeProfiles] = useState<Record<string, ModeProfile>>({});
   const [modeJson, setModeJson] = useState("");
@@ -68,6 +71,15 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [wlPanels, setWlPanels] = useState<Record<string, boolean>>({
     orders: true, prior: true, compare: true, thumb: true, std: true, comment: true, report: true,
   });
+  // 판독(Reading) — 내 서명 정보(확정 시 리포트에 기록)
+  const [profName, setProfName] = useState("");
+  const [profLicense, setProfLicense] = useState("");
+  // DICOM 노드 (SCP/SCU) — 전역/관리자
+  const [nodes, setNodes] = useState<DicomNode[]>([]);
+  const [nodeMsg, setNodeMsg] = useState("");
+  // 상용구 관리 (DB 테이블)
+  const [phrases, setPhrases] = useState<PhraseRow[]>([]);
+  const [phraseModal, setPhraseModal] = useState<PhraseRow | "new" | null>(null);
   // UBPACS-Z: 워크리스트 페이지 탭 + 검색 폴더 트리 (워크리스트 화면과 동일 데이터)
   const [wlTabs, setWlTabs] = useState<WorklistTab[]>([]);
   const [wlTree, setWlTree] = useState<TreeNode[]>([]);
@@ -105,9 +117,6 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (v.hanging2d?.MR) setH2dMR(v.hanging2d.MR);
       if (v.reportDock !== undefined) setReportDock(v.reportDock);
     }).catch(() => {});
-    api.getSetting("report.phrases").then((r) => {
-      setPhraseCount(((r.value as { items?: unknown[] }).items ?? []).length);
-    }).catch(() => {});
     api.getSetting("mode.profiles").then((r) => {
       const v = r.value as { profiles?: Record<string, ModeProfile> };
       setModeProfiles(v.profiles ?? {});
@@ -115,6 +124,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     }).catch(() => {});
     loadTabs().then(setWlTabs).catch(() => {});
     loadTree().then(setWlTree).catch(() => {});
+    api.profile().then((p) => { setProfName(p.display_name); setProfLicense(p.license_no); }).catch(() => {});
+    api.phrases().then((r) => setPhrases(r.items)).catch(() => {});
+    api.getSetting("dicom.nodes").then((r) => {
+      setNodes(((r.value as { items?: DicomNode[] }).items) ?? []);
+    }).catch(() => {});
     if (isAdmin) {
       api.getSetting("pdf.template").then((r) => {
         const v = r.value as Record<string, string>;
@@ -287,7 +301,97 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </div>
                   )}
                 </Group>
+                <Group title="SCP/SCU 장비 노드 (AE Title · IP · Port)" right={
+                  isAdmin && (
+                    <span style={{ display: "flex", gap: 4 }}>
+                      <button style={{ padding: "1px 8px", fontSize: 11 }}
+                              onClick={() => setNodes((p) => [...p, { name: `NODE${p.length + 1}`, role: "scu", ae_title: "", ip: "", port: 104 }])}>
+                        ＋ 추가
+                      </button>
+                      <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={async () => {
+                        try {
+                          await api.putSetting("dicom.nodes", { items: nodes }, "global");
+                          setNodeMsg("저장됨");
+                        } catch (e) { setNodeMsg(e instanceof Error ? e.message : "저장 실패"); }
+                      }}>저장</button>
+                      <button style={{ padding: "1px 8px", fontSize: 11 }}
+                              title="저장된 노드를 Orthanc DicomModalities로 등록 — C-STORE/C-FIND 대상"
+                              onClick={async () => {
+                                try {
+                                  const r = await api.applyDicomNodes();
+                                  setNodeMsg(`Orthanc 반영 ${r.applied}건${r.errors.length ? ` · 오류: ${r.errors.join(", ")}` : ""}`);
+                                } catch (e) { setNodeMsg(e instanceof Error ? e.message : "반영 실패"); }
+                              }}>Orthanc 반영</button>
+                    </span>
+                  )
+                }>
+                  <table className="grid-table">
+                    <thead><tr><th>이름</th><th style={{ width: 80 }}>역할</th><th>AE Title</th><th>IP</th><th style={{ width: 70 }}>Port</th><th style={{ width: 30 }}></th></tr></thead>
+                    <tbody>
+                      {nodes.map((n, i) => (
+                        <tr key={i}>
+                          {isAdmin ? (
+                            <>
+                              <td><input value={n.name} style={{ width: "95%" }}
+                                         onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} /></td>
+                              <td>
+                                <select value={n.role}
+                                        onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as DicomNode["role"] } : x))}>
+                                  <option value="scu">SCU</option><option value="scp">SCP</option><option value="both">양방향</option>
+                                </select>
+                              </td>
+                              <td><input value={n.ae_title} style={{ width: "95%" }}
+                                         onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, ae_title: e.target.value.toUpperCase() } : x))} /></td>
+                              <td><input value={n.ip} style={{ width: "95%" }}
+                                         onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, ip: e.target.value } : x))} /></td>
+                              <td><input value={n.port} type="number" style={{ width: 60 }}
+                                         onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, port: Number(e.target.value) } : x))} /></td>
+                              <td><button style={{ padding: "0 6px", fontSize: 11 }}
+                                          onClick={() => setNodes((p) => p.filter((_, j) => j !== i))}>✕</button></td>
+                            </>
+                          ) : (
+                            <>
+                              <td>{n.name}</td><td>{n.role.toUpperCase()}</td><td>{n.ae_title}</td>
+                              <td>{n.ip}</td><td>{n.port}</td><td></td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                      {nodes.length === 0 && (
+                        <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>
+                          등록된 장비 없음 {isAdmin && "— ＋추가로 등록 후 저장 → Orthanc 반영"}
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", gap: 8 }}>
+                    SCU=우리가 전송(C-STORE 대상), SCP=수신 노드. MWL 응답은 Orthanc(SAINTVIEW:4242)가 담당.
+                    {nodeMsg && <b style={{ color: "var(--stat-final)" }}>{nodeMsg}</b>}
+                  </div>
+                </Group>
               </>
+            )}
+
+            {page === "reading" && (
+              <Group title="판독의 등록 (Reading) — 확정 서명에 기록">
+                <Row label="이름(표시명)">
+                  <input value={profName} onChange={(e) => setProfName(e.target.value)}
+                         placeholder="홍길동" style={{ width: 220 }} />
+                </Row>
+                <Row label="면허번호">
+                  <input value={profLicense} onChange={(e) => setProfLicense(e.target.value)}
+                         placeholder="12345" style={{ width: 220 }} />
+                </Row>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="primary" onClick={async () => {
+                    await api.putProfile(profName, profLicense);
+                    setSaved("판독의 정보 저장됨 — 이후 확정(서명)부터 적용");
+                  }}>판독의 정보 저장</button>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    리포트 확정 시 "✍ {profName || "이름"} (면허 제{profLicense || "번호"}호)"로 서명이 기록됩니다 (PDF 포함).
+                  </span>
+                </div>
+              </Group>
             )}
 
             {page === "worklist" && (
@@ -311,6 +415,47 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.
                   </div>
                 </Group>
+                <Group title="상용구 관리 (DB — Modality×부위 분류 + Alt+단축키)" right={
+                  <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setPhraseModal("new")}>＋ 추가</button>
+                }>
+                  <table className="grid-table">
+                    <thead><tr><th style={{ width: 90 }}>분류</th><th>NAME</th><th style={{ width: 56 }}>단축키</th><th style={{ width: 76 }}></th></tr></thead>
+                    <tbody>
+                      {phrases.map((p) => (
+                        <tr key={p.id}>
+                          <td>{p.category}</td>
+                          <td title={p.text}>{p.name}</td>
+                          <td style={{ color: "var(--accent)" }}>{p.shortcut && `Alt+${p.shortcut}`}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setPhraseModal(p)}>✏</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} onClick={async () => {
+                              if (!window.confirm(`상용구 '${p.name}'을 삭제할까요?`)) return;
+                              await api.deletePhrase(p.id);
+                              api.phrases().then((r) => setPhrases(r.items));
+                            }}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                      {phrases.length === 0 && (
+                        <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>등록된 상용구 없음 — ＋추가</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    워크리스트 상용구(Std) 패널과 동일 DB — 리포트에서 Alt+단축키로 즉시 삽입.
+                  </div>
+                </Group>
+                {phraseModal !== null && (
+                  <PhraseEditModal
+                    init={phraseModal === "new" ? null : phraseModal}
+                    onSave={async (body) => {
+                      if (phraseModal === "new") await api.createPhrase(body);
+                      else await api.updatePhrase(phraseModal.id, body);
+                      api.phrases().then((r) => setPhrases(r.items));
+                    }}
+                    onClose={() => setPhraseModal(null)}
+                  />
+                )}
                 <Group title="워크리스트 구성요소 (UBPACS-Z p.8 — Study List 제외 추가/삭제)">
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     {([
@@ -425,11 +570,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
               <>
                 <Group title="상용구 (Predefined Readings)">
                   <div style={{ fontSize: 12.5 }}>
-                    등록된 상용구: <b>{phraseCount}건</b>
+                    등록된 상용구: <b>{phrases.length}건</b> (DB 테이블)
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    상용구 등록·수정·삭제는 워크리스트 하단 <b>상용구(Std) 패널</b>에서 합니다.
-                    더블클릭하면 현재 리포트 Conclusion에 삽입됩니다.
+                    등록·수정·삭제는 <b>워크리스트 탭의 상용구 관리</b> 또는 워크리스트 하단 상용구(Std) 패널에서.
+                    더블클릭 또는 Alt+단축키로 Conclusion에 삽입됩니다.
                   </div>
                 </Group>
                 <Group title="출력 형식">

@@ -6,6 +6,7 @@ from app.models.entities import (  # noqa: F401
     AuditLog,
     Order,
     Patient,
+    Phrase,
     Report,
     ReportEmbedding,
     Series,

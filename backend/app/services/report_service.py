@@ -76,7 +76,18 @@ def finalize_report(db: Session, report: Report, *, username: str) -> Report:
     report.status = "finalized"
     report.reviewed_by = username
     report.finalized_at = datetime.now(timezone.utc)
-    report.diff_metrics = _diff_against_ai_draft(db, report)
+    dm = _diff_against_ai_draft(db, report)
+    # 전자 서명 — 판독의 이름·면허번호를 확정본에 함께 기록 (설정>판독에서 등록)
+    from app.models import Account
+
+    acct = db.execute(select(Account).where(Account.username == username)).scalar_one_or_none()
+    dm["signature"] = {
+        "by": username,
+        "name": (acct.display_name if acct else "") or username,
+        "license_no": acct.license_no if acct else "",
+        "signed_at": report.finalized_at.isoformat(),
+    }
+    report.diff_metrics = dm
     report.study.status = "finalized"
     chunks = ingest_report(db, report)  # 환류: 확정본 → RAG 인덱스
     db.add(

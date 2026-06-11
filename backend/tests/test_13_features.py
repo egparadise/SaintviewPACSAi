@@ -261,6 +261,94 @@ def test_memo_and_dicom_columns(client, auth_headers):
     assert row2["memo"] == "추적검사 필요"
 
 
+# ── 16차: 상용구 DB·판독 서명·오더 폼·DICOM 노드 ────────────
+
+
+def test_phrases_crud_and_shortcut(client, auth_headers):
+    r = client.post("/api/phrases", headers=auth_headers, json={
+        "name": "정상 흉부", "text": "No active lung lesion.", "modality": "CR",
+        "body_part": "CHEST", "shortcut": "1",
+    })
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+    assert r.json()["category"] == "CR-CHEST"
+
+    # 단축키 중복 거부
+    assert client.post("/api/phrases", headers=auth_headers, json={
+        "name": "x", "text": "y", "shortcut": "1",
+    }).status_code == 409
+    # 단축키 2글자 거부
+    assert client.post("/api/phrases", headers=auth_headers, json={
+        "name": "x", "text": "y", "shortcut": "AB",
+    }).status_code == 400
+
+    items = client.get("/api/phrases", headers=auth_headers).json()["items"]
+    assert any(p["id"] == pid for p in items)
+    assert client.put(f"/api/phrases/{pid}", headers=auth_headers, json={
+        "name": "정상 흉부", "text": "Unremarkable.", "shortcut": "1",
+    }).status_code == 200
+    assert client.delete(f"/api/phrases/{pid}", headers=auth_headers).status_code == 200
+
+
+def test_profile_and_finalize_signature(client, auth_headers):
+    # 판독의 등록 (설정 > Reading)
+    assert client.put("/api/auth/profile", headers=auth_headers,
+                      json={"display_name": "홍길동", "license_no": "12345"}).status_code == 200
+    prof = client.get("/api/auth/profile", headers=auth_headers).json()
+    assert prof["display_name"] == "홍길동" and prof["license_no"] == "12345"
+
+    # 확정 시 서명(이름·면허번호) 기록
+    with SessionLocal() as db:
+        sid = _make_study(db, "1.2.840.999.16.1", patient="P1600", draft=True)
+    process_once()
+    rid = client.get(f"/api/studies/{sid}/reports", headers=auth_headers).json()["items"][0]["id"]
+    r = client.post(f"/api/reports/{rid}/finalize", headers=auth_headers)
+    assert r.status_code == 200
+    sig = r.json()["diff_metrics"]["signature"]
+    assert sig["name"] == "홍길동" and sig["license_no"] == "12345"
+
+
+def test_order_form_fields_and_mwl_tags(client, auth_headers, tmp_path):
+    import pydicom
+
+    from app.config import get_settings
+
+    r = client.post("/api/orders", headers=auth_headers, json={
+        "patient_key": "P1601", "patient_name": "HONG^GILDONG", "modality": "CR",
+        "scheduled_date": "20260614", "procedure_desc": "Chest PA",
+        "body_part": "CHEST", "projection": "PA",
+    })
+    assert r.status_code == 200, r.text
+    o = r.json()
+    assert o["dicom_study_id"].startswith("S")  # StudyID 자동 채번
+    assert o["body_part"] == "CHEST" and o["projection"] == "PA"
+
+    get_settings().mwl_dir = str(tmp_path)
+    client.post("/api/orders/export-mwl", headers=auth_headers)
+    found = list(tmp_path.glob("sv*.wl"))
+    assert found
+    # 본 오더의 .wl에서 PN·StudyID·BodyPart 확인 (export는 scheduled 전체를 내보냄)
+    for f in found:
+        d = pydicom.dcmread(f)
+        if d.AccessionNumber == o["accession_no"]:
+            assert str(d.PatientName) == "HONG^GILDONG"
+            assert d.StudyID == o["dicom_study_id"]
+            assert d.ScheduledProcedureStepSequence[0].BodyPartExamined == "CHEST"
+            break
+    else:
+        raise AssertionError("오더 .wl 미발견")
+
+
+def test_dicom_nodes_global_only(client, auth_headers):
+    nodes = {"items": [{"name": "CR01", "role": "scu", "ae_title": "CR01", "ip": "192.168.0.10", "port": 104}]}
+    assert client.put("/api/settings/dicom.nodes", headers=auth_headers,
+                      json={"value": nodes, "scope": "user"}).status_code == 400
+    assert client.put("/api/settings/dicom.nodes", headers=auth_headers,
+                      json={"value": nodes, "scope": "global"}).status_code == 200
+    got = client.get("/api/settings/dicom.nodes", headers=auth_headers).json()["value"]
+    assert got["items"][0]["ae_title"] == "CR01"
+
+
 # ── 번인 OCR 가드 — 폴백 무중단 ─────────────────────────────
 
 
