@@ -93,6 +93,21 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
     label: "우선순위",
     render: (r) => (r.emergency ? <span style={{ color: "var(--stat-emergency)" }}>Emergency</span> : "Normal"),
   },
+  // DICOM 헤더 기반 확장 컬럼 (UBPACS-Z Filter Setting — Setting>워크리스트에서 USE/NO USE)
+  study_time: {
+    label: "검사시각",
+    render: (r) => (r.study_time ? `${r.study_time.slice(0, 2)}:${r.study_time.slice(2, 4)}` : ""),
+  },
+  institution: { label: "기관 (Institution)", render: (r) => r.institution },
+  referring_physician: { label: "의뢰의 (Ref.Phys)", render: (r) => r.referring_physician },
+  finalized_at: {
+    label: "판독일시",
+    render: (r) => (r.finalized_at ? r.finalized_at.slice(0, 16).replace("T", " ") : ""),
+  },
+  memo: {
+    label: "메모 (MEMO)",
+    render: (r) => <span title={r.memo}>{r.memo ? `📝 ${r.memo.slice(0, 24)}` : ""}</span>,
+  },
 };
 export const DEFAULT_COLUMNS = [
   "status", "ai", "patient_key", "patient_name", "sex", "study_date",
@@ -102,6 +117,7 @@ export const DEFAULT_COLUMNS = [
 /* ── [A] 액션 툴바 ─────────────────────────────── */
 function ActionToolbar({
   selected, onAction, searchText, setSearchText, onSearch, onNlSearch,
+  withOpen, setWithOpen, withOpenMode, setWithOpenMode,
 }: {
   selected: StudyDetail | null;
   onAction: (a: string) => void;
@@ -109,6 +125,10 @@ function ActionToolbar({
   setSearchText: (s: string) => void;
   onSearch: () => void;
   onNlSearch: (text: string) => void;
+  withOpen: boolean;
+  setWithOpen: (b: boolean) => void;
+  withOpenMode: "add" | "stack";
+  setWithOpenMode: (m: "add" | "stack") => void;
 }) {
   const need = !selected;
   const [nlText, setNlText] = useState("");
@@ -132,6 +152,18 @@ function ActionToolbar({
       <Btn a="ub_stack" label="⧉ Stack" title="③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩" />
       <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />
       <Btn a="ub_key" label="🔑 Key" title="⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)" />
+      {/* Study With Open (p.13): 더블클릭 시 Related Study를 함께 오픈 */}
+      <label title="Study With Open — 더블클릭으로 열 때 Related Study List의 검사를 한번에 같이 오픈"
+             style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11.5, marginLeft: 3 }}>
+        <input type="checkbox" checked={withOpen} onChange={(e) => setWithOpen(e.target.checked)} />
+        With Open
+      </label>
+      <select value={withOpenMode} disabled={!withOpen} title="함께 오픈 모드"
+              onChange={(e) => setWithOpenMode(e.target.value as "add" | "stack")}
+              style={{ fontSize: 10.5 }}>
+        <option value="add">ADD VIEW</option>
+        <option value="stack">STACK VIEW</option>
+      </select>
       <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
       <Btn a="pdf" label="PDF" title="판독서 PDF" />
       <Btn a="emergency" label="⚠ Emergency" title="응급 우선순위 토글 (F-15)" />
@@ -892,6 +924,66 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+/* ── Thumbnail Window (UBPACS-Z Worklist 구성) — 선택 검사 미리보기 ── */
+function ThumbnailPanel({ detail, onOpen }: { detail: StudyDetail | null; onOpen: () => void }) {
+  const [items, setItems] = useState<InstanceThumb[]>([]);
+  useEffect(() => {
+    if (!detail) { setItems([]); return; }
+    api.instances(detail.id).then((r) => setItems(r.items)).catch(() => setItems([]));
+  }, [detail]);
+  return (
+    <PanelBox title="Thumbnail (더블클릭=뷰어)">
+      {!detail ? <Empty>검사를 선택하세요</Empty> : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6, alignContent: "flex-start" }}
+             onDoubleClick={onOpen}>
+          {items.slice(0, 24).map((it) => (
+            <img key={it.sop_uid} src={it.preview_url} alt="" title={`Img ${it.instance_number}`}
+                 style={{ width: 62, height: 62, objectFit: "cover", borderRadius: 3,
+                          border: "1px solid var(--border)", background: "#000", cursor: "pointer" }} />
+          ))}
+          {items.length === 0 && <Empty>영상 없음 (Orthanc 미연결?)</Empty>}
+        </div>
+      )}
+    </PanelBox>
+  );
+}
+
+/* ── Comment + MEMO Window (UBPACS-Z) — 임상정보 표시 + 검사 메모 편집 ── */
+function CommentMemoPanel({ detail, onChanged }: { detail: StudyDetail | null; onChanged: () => void }) {
+  const [memo, setMemo] = useState("");
+  const [saved, setSaved] = useState("");
+  useEffect(() => { setMemo(detail?.memo ?? ""); setSaved(""); }, [detail]);
+  return (
+    <PanelBox title="Comment / MEMO" right={
+      detail && (
+        <MiniBtn onClick={async () => {
+          await api.setMemo(detail.id, memo);
+          setSaved("저장됨");
+          onChanged();
+          setTimeout(() => setSaved(""), 2000);
+        }}>저장</MiniBtn>
+      )
+    }>
+      {!detail ? <Empty>검사를 선택하세요</Empty> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 6, height: "100%" }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>COMMENT (임상정보)</div>
+          <div style={{ fontSize: 12, color: "var(--text-primary)", maxHeight: 56, overflow: "auto" }}>
+            {detail.clinical_info || <span style={{ color: "var(--text-secondary)" }}>(없음)</span>}
+          </div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", display: "flex", gap: 6 }}>
+            MEMO {saved && <span style={{ color: "var(--stat-final)" }}>{saved}</span>}
+          </div>
+          <textarea value={memo} onChange={(e) => setMemo(e.target.value)}
+                    placeholder="검사 메모 — 워크리스트 메모 컬럼에 표시됩니다"
+                    style={{ flex: 1, minHeight: 40, background: "var(--bg-canvas)", color: "var(--text-primary)",
+                             border: "1px solid var(--border)", borderRadius: 3, padding: 5,
+                             fontFamily: "inherit", fontSize: 12, resize: "none" }} />
+        </div>
+      )}
+    </PanelBox>
+  );
+}
+
 /* ── 컨텍스트 메뉴 (디자인 §3.3) ─────────────────── */
 function ContextMenu({ x, y, row, onAction, onClose }: {
   x: number; y: number; row: StudyRow;
@@ -1071,18 +1163,28 @@ export function Worklist() {
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
-  // UBPACS-Z Study Open 5종: View(교체)/Add View(추가)/Stack View(중첩)/Advance(OHIF)/Key Image
+  // UBPACS-Z Study Open 5종 + Study With Open(Related 함께 오픈)
   const [viewer2d, setViewer2d] = useState<{
     detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
+    withOpen?: { mode: "add" | "stack"; ids: number[] };
   } | null>(null);
   const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
   const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
   const [nlBusy, setNlBusy] = useState(false);
-  // 패널 배치 사용자화(드래그) — D구역(과거검사/비교세트)·E구역(상용구/리포트/오더)
+  // 패널 배치 사용자화(드래그) — UBPACS-Z Worklist 구성(p.8):
+  // D행 = Order | Related-1(과거검사) | Related-2(비교세트)
+  // E행 = Thumbnail | Reference(상용구) | Comment+MEMO | Report
   const [panelOrder, setPanelOrder] = useState<{ d: string[]; e: string[] }>({
-    d: ["prior", "compare"], e: ["std", "report", "orders"],
+    d: ["orders", "prior", "compare"], e: ["thumb", "std", "comment", "report"],
   });
+  // 구성요소 표시/숨김 (Study List 제외 추가·삭제 가능 — UBPACS 최대 10 구성)
+  const [panelsOn, setPanelsOn] = useState<Record<string, boolean>>({
+    orders: true, prior: true, compare: true, thumb: true, std: true, comment: true, report: true,
+  });
+  // Study With Open (p.13): 더블클릭 시 Related Study를 함께 오픈 (ADD/STACK 모드)
+  const [withOpen, setWithOpen] = useState(false);
+  const [withOpenMode, setWithOpenMode] = useState<"add" | "stack">("add");
   // UBPACS-Z: 워크리스트 페이지 탭(최대 10) + 검색 폴더 트리 (서버 로밍)
   const [tabs, setTabs] = useState<WorklistTab[]>([DEFAULT_TAB]);
   const [activeTabId, setActiveTabId] = useState(DEFAULT_TAB.id);
@@ -1104,7 +1206,9 @@ export function Worklist() {
       if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
       if (v.dbl_action) setDblAction(v.dbl_action);
       const po = (v as { panel_order?: { d?: string[]; e?: string[] } }).panel_order;
-      if (po?.d?.length === 2 && po?.e?.length === 3) setPanelOrder({ d: po.d, e: po.e });
+      if (po?.d?.length === 3 && po?.e?.length === 4) setPanelOrder({ d: po.d, e: po.e });
+      const pn = (v as { panels?: Record<string, boolean> }).panels;
+      if (pn) setPanelsOn((prev) => ({ ...prev, ...pn }));
     }).catch(() => {});
     loadTabs().then(setTabs).catch(() => {});
     loadTree().then(setTreeNodes).catch(() => {});
@@ -1188,6 +1292,7 @@ export function Worklist() {
   // 자체 뷰어 오픈 헬퍼 — lastViewerRef가 UBPACS "기존 영상" 역할
   const openV2 = useCallback((cfg: {
     detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
+    withOpen?: { mode: "add" | "stack"; ids: number[] };
   }) => {
     lastViewerRef.current = cfg.addDetail ?? cfg.stackDetail ?? cfg.detail;
     setViewer2d(cfg);
@@ -1200,11 +1305,14 @@ export function Worklist() {
       case "batch": setBatchOpen(true); break;
       case "viewdraft":
         // View&Draft = 자체 뷰어(기본) — 더블클릭 동작은 환경설정에서 변경 가능
+        // Study With Open(p.13): 체크 시 Related Study List 검사를 ADD/STACK 모드로 함께 오픈
         if (target) {
           const d = await api.study(target.id);
           setSelected(d);
           if (dblAction === "ohif") openStudy(d);
-          else openV2({ detail: d });
+          else if (withOpen && d.related_exams.length) {
+            openV2({ detail: d, withOpen: { mode: withOpenMode, ids: d.related_exams.slice(0, 3).map((e) => e.id) } });
+          } else openV2({ detail: d });
         }
         break;
       case "viewer2d": case "ub_view":
@@ -1288,7 +1396,8 @@ export function Worklist() {
         if (target) { await api.setPriority(target.id, !target.emergency); onChanged(); }
         break;
     }
-  }, [selected, onSelect, openStudy, onChanged]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, onSelect, openStudy, onChanged, dblAction, withOpen, withOpenMode, openV2]);
 
   const openCompare = useCallback(() => {
     if (!selected) return;
@@ -1417,7 +1526,9 @@ export function Worklist() {
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
                      onSearch={() => setRefreshKey((k) => k + 1)}
-                     onNlSearch={onNlSearch} />
+                     onNlSearch={onNlSearch}
+                     withOpen={withOpen} setWithOpen={setWithOpen}
+                     withOpenMode={withOpenMode} setWithOpenMode={setWithOpenMode} />
       <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
                  onSearch={() => setRefreshKey((k) => k + 1)} />
 
@@ -1459,36 +1570,43 @@ export function Worklist() {
                    onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
       </div>
 
-      {/* 하단1: 과거검사 | 비교세트 (디자인 §3 [D]) — 드래그 재배치 */}
-      <div style={{ display: "flex", gap: 3, height: 140, padding: "3px 3px 0", flexShrink: 0 }}>
-        {panelOrder.d.map((k) => (
-          <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
-            {k === "prior" ? (
-              <PriorStudiesGrid detail={selected}
-                                onAddCompare={(e) => setCompareSet((prev) =>
-                                  prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
-            ) : (
-              <ComparisonSetGrid items={compareSet} current={selected}
-                                 onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
-                                 onOpenCompare={openCompare} onMerge={doMerge} />
-            )}
-          </DraggablePanel>
-        ))}
-      </div>
+      {/* 하단1 (UBPACS p.8): Order | Related Study List-1 | Related Study List-2 — 드래그 재배치 */}
+      {panelOrder.d.some((k) => panelsOn[k]) && (
+        <div style={{ display: "flex", gap: 3, height: 140, padding: "3px 3px 0", flexShrink: 0 }}>
+          {panelOrder.d.filter((k) => panelsOn[k]).map((k) => (
+            <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
+              {k === "orders" ? <OrdersPanel refreshKey={refreshKey} />
+                : k === "prior" ? (
+                  <PriorStudiesGrid detail={selected}
+                                    onAddCompare={(e) => setCompareSet((prev) =>
+                                      prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+                ) : (
+                  <ComparisonSetGrid items={compareSet} current={selected}
+                                     onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
+                                     onOpenCompare={openCompare} onMerge={doMerge} />
+                )}
+            </DraggablePanel>
+          ))}
+        </div>
+      )}
 
-      {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) — 드래그 재배치 */}
-      <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
-        {panelOrder.e.map((k) => (
-          <DraggablePanel key={k} zone="e" k={k} onDrop={onPanelDrop}
-                          style={k === "std" ? { width: 240, flexShrink: 0 }
-                               : k === "orders" ? { width: 270, flexShrink: 0 }
-                               : { flex: 1.6 }}>
-            {k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
-              : k === "orders" ? <OrdersPanel refreshKey={refreshKey} />
-              : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
-          </DraggablePanel>
-        ))}
-      </div>
+      {/* 하단2 (UBPACS p.8): Thumbnail | Reference(상용구) | Comment+MEMO | Report — 드래그 재배치 */}
+      {panelOrder.e.some((k) => panelsOn[k]) && (
+        <div style={{ display: "flex", gap: 3, flex: 1.8, minHeight: 200, padding: 3 }}>
+          {panelOrder.e.filter((k) => panelsOn[k]).map((k) => (
+            <DraggablePanel key={k} zone="e" k={k} onDrop={onPanelDrop}
+                            style={k === "thumb" ? { width: 230, flexShrink: 0 }
+                                 : k === "std" ? { width: 210, flexShrink: 0 }
+                                 : k === "comment" ? { width: 250, flexShrink: 0 }
+                                 : { flex: 1.6 }}>
+              {k === "thumb" ? <ThumbnailPanel detail={selected} onOpen={() => void doAction("viewdraft")} />
+                : k === "std" ? <PhrasePanel onInsert={(t) => insertRef.current?.(t)} current={selected} />
+                : k === "comment" ? <CommentMemoPanel detail={selected} onChanged={onChanged} />
+                : <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} />}
+            </DraggablePanel>
+          ))}
+        </div>
+      )}
 
       {/* 상태바 (§2) */}
       <footer style={{
@@ -1508,9 +1626,10 @@ export function Worklist() {
             뷰어 로딩…
           </div>
         }>
-          <Viewer2D key={`${viewer2d.detail.id}-${viewer2d.addDetail?.id ?? ""}-${viewer2d.stackDetail?.id ?? ""}-${viewer2d.keySops?.length ?? 0}`}
+          <Viewer2D key={`${viewer2d.detail.id}-${viewer2d.addDetail?.id ?? ""}-${viewer2d.stackDetail?.id ?? ""}-${viewer2d.keySops?.length ?? 0}-${viewer2d.withOpen?.ids.join(".") ?? ""}`}
                     detail={viewer2d.detail} addDetail={viewer2d.addDetail}
                     stackDetail={viewer2d.stackDetail} keySops={viewer2d.keySops}
+                    withOpen={viewer2d.withOpen}
                     onClose={() => setViewer2d(null)} />
         </Suspense>
       )}

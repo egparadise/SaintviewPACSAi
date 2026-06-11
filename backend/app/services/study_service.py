@@ -64,6 +64,8 @@ def register_study(
     body_part: str = "",
     study_desc: str = "",
     clinical_info: str = "",
+    institution: str = "",
+    referring_physician: str = "",
     orthanc_id: str = "",
     series: list[dict] | None = None,
 ) -> Study:
@@ -82,6 +84,8 @@ def register_study(
         body_part=body_part,
         study_desc=study_desc,
         clinical_info=clinical_info,
+        institution=institution,
+        referring_physician=referring_physician,
         orthanc_id=orthanc_id,
         status="received",
     )
@@ -188,6 +192,13 @@ def _study_row(study: Study, patient: Patient, latest: Report | None) -> dict:
         "instance_count": study.instance_count,
         "report_status": latest.status if latest else None,
         "impression_preview": impression_preview,
+        # DICOM 헤더 기반 확장 컬럼 (UBPACS-Z Filter Setting)
+        "institution": study.institution,
+        "referring_physician": study.referring_physician,
+        "memo": study.memo,
+        "finalized_at": (
+            latest.finalized_at.isoformat() if latest and latest.finalized_at else ""
+        ),
     }
 
 

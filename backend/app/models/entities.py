@@ -64,6 +64,10 @@ class Study(Base):
     body_part: Mapped[str] = mapped_column(String(64), default="", index=True)
     study_desc: Mapped[str] = mapped_column(String(256), default="")
     clinical_info: Mapped[str] = mapped_column(Text, default="")
+    # DICOM 헤더 기반 조회 컬럼 (UBPACS-Z Filter Setting — InstitutionName/ReferringPhysicianName)
+    institution: Mapped[str] = mapped_column(String(128), default="")
+    referring_physician: Mapped[str] = mapped_column(String(128), default="")
+    memo: Mapped[str] = mapped_column(Text, default="")  # MEMO window (사용자 메모)
     orthanc_id: Mapped[str] = mapped_column(String(64), default="")
     # 워크플로 상태 (디자인 §1.1 상태 토큰과 1:1)
     status: Mapped[str] = mapped_column(

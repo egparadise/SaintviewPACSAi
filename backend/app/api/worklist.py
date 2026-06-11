@@ -90,6 +90,27 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
     return {"job_id": job.id, "status": job.status}
 
 
+class MemoBody(BaseModel):
+    memo: str
+
+
+@router.put("/studies/{study_id}/memo")
+def set_memo(
+    study_id: int, body: MemoBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """MEMO window (UBPACS-Z Worklist 구성) — 검사 단위 사용자 메모."""
+    from app.models import AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    study.memo = body.memo[:2000]
+    db.add(AuditLog(action="memo_set", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "len": len(body.memo)}))
+    db.commit()
+    return {"ok": True}
+
+
 class PriorityBody(BaseModel):
     emergency: bool
 

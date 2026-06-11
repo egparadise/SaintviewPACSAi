@@ -181,6 +181,8 @@ def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, in
             if tags.get("ModalitiesInStudy")
             else "",
             study_desc=tags.get("StudyDescription", ""),
+            institution=tags.get("InstitutionName", ""),
+            referring_physician=str(tags.get("ReferringPhysicianName", "")),
             orthanc_id=ch["ID"],
         )
         if study.status == "received" and get_settings().ai_auto_generate:

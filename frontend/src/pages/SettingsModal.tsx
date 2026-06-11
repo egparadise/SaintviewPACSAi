@@ -64,6 +64,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
   const [modeProfiles, setModeProfiles] = useState<Record<string, ModeProfile>>({});
   const [modeJson, setModeJson] = useState("");
+  // UBPACS-Z Worklist 구성요소 표시/숨김 (Study List 제외 추가·삭제)
+  const [wlPanels, setWlPanels] = useState<Record<string, boolean>>({
+    orders: true, prior: true, compare: true, thumb: true, std: true, comment: true, report: true,
+  });
   // UBPACS-Z: 워크리스트 페이지 탭 + 검색 폴더 트리 (워크리스트 화면과 동일 데이터)
   const [wlTabs, setWlTabs] = useState<WorklistTab[]>([]);
   const [wlTree, setWlTree] = useState<TreeNode[]>([]);
@@ -81,6 +85,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
       if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
       if (v.dbl_action) setDblAction(v.dbl_action);
+      const pn = (v as { panels?: Record<string, boolean> }).panels;
+      if (pn) setWlPanels((prev) => ({ ...prev, ...pn }));
     }).catch(() => {});
     api.getSetting("viewer.prefs").then((r) => {
       const v = r.value as {
@@ -129,9 +135,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   useEffect(() => { if (page === "network") testOrthanc(); }, [page]);
 
   const save = async () => {
+    // 병합 저장 — 드래그 panel_order 등 다른 키를 덮어쓰지 않도록 현재 서버 값과 합친다
+    const cur = (await api.getSetting("worklist.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("worklist.prefs",
-      { auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
-        find_fields: findFields, dbl_action: dblAction }, "user");
+      { ...cur, auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
+        find_fields: findFields, dbl_action: dblAction, panels: wlPanels }, "user");
     await api.putSetting("viewer.prefs", {
       hanging: { CT: hangingCT, MR: hangingMR },
       hanging2d: { CT: h2dCT, MR: h2dMR },
@@ -301,6 +309,28 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                   />
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.
+                  </div>
+                </Group>
+                <Group title="워크리스트 구성요소 (UBPACS-Z p.8 — Study List 제외 추가/삭제)">
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                    {([
+                      ["orders", "오더/예약 (Order)"],
+                      ["prior", "과거검사 (Related Study List-1)"],
+                      ["compare", "비교세트 (Related Study List-2)"],
+                      ["thumb", "썸네일 (Thumbnail Window)"],
+                      ["std", "상용구 (Reference Window)"],
+                      ["comment", "Comment / MEMO"],
+                      ["report", "리포트 (Report Window)"],
+                    ] as const).map(([k, label]) => (
+                      <label key={k} style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12.5 }}>
+                        <input type="checkbox" checked={!!wlPanels[k]}
+                               onChange={(e) => setWlPanels((p) => ({ ...p, [k]: e.target.checked }))} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    체크 해제 시 워크리스트에서 해당 창이 숨겨집니다. 배치 순서는 워크리스트에서 그립(⋮) 드래그로 변경.
                   </div>
                 </Group>
                 <Group title="워크리스트 페이지 탭 (UBPACS-Z — 최대 10)">

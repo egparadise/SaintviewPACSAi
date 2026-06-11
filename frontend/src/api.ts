@@ -69,6 +69,11 @@ export interface StudyRow {
   instance_count: number;
   report_status: string | null;
   impression_preview: string;
+  // DICOM 헤더 기반 확장 컬럼 (UBPACS-Z Filter Setting)
+  institution: string;
+  referring_physician: string;
+  memo: string;
+  finalized_at: string;
 }
 
 export interface RelatedExam {
@@ -193,6 +198,10 @@ export const api = {
     req<OrderRow>(`/api/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
   exportMwl: () =>
     req<{ ok: boolean; count: number; dir: string }>("/api/orders/export-mwl", { method: "POST" }),
+  setMemo: (studyId: number, memo: string) =>
+    req<{ ok: boolean }>(`/api/studies/${studyId}/memo`, {
+      method: "PUT", body: JSON.stringify({ memo }),
+    }),
 };
 
 /** S1 자연어 검색 — 적용 전 미리보기(explanation) 필수 */

@@ -75,12 +75,13 @@ const DEFAULT_PREFS: ViewerPrefs = {
   thumbMode: "series", hanging2d: {}, reportDock: true,
 };
 
-export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
+export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
   detail: StudyDetail;
   onClose: () => void;
   addDetail?: StudyDetail | null;    // ② Add View: 기존(detail) 유지 + 이 검사를 분할 추가
   stackDetail?: StudyDetail | null;  // ③ Stack View: 기존 유지 + 이 검사를 같은 페인에 중첩
   keySops?: string[] | null;         // ⑤ Key Image View: 이 SOP 목록만 표시 (F-16)
+  withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open (p.13)
 }) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
   const [series, setSeries] = useState<SeriesNode[]>([]);
@@ -102,6 +103,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
   // 판독 도크(요청 5)
   const [report, setReport] = useState<Report | null>(null);
   const [priorTrees, setPriorTrees] = useState<Record<number, { uid: string; series: SeriesNode[] }>>({});
+  // 오픈 검사 탭 — 여러 검사가 열리면 좌→우로 탭이 쌓인다(브라우저 창 메타포, UBPACS Opened Study List)
+  const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);
   const [annos, setAnnos] = useState<Anno[]>([]);
@@ -148,6 +151,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
 
   /* 시리즈 트리 + 리포트 로드 */
   useEffect(() => {
+    setOpenTabs([{
+      id: detail.id, uid: detail.study_uid,
+      label: `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date}`,
+    }]);
     api.seriesTree(detail.id).then((r) => {
       let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
       // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
@@ -179,6 +186,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
       // ② Add View / ③ Stack View — 기본 로드 완료 후 추가 검사 로드 (UBPACS-Z Study Open)
       if (addDetail) void loadPrior(addDetail.id);
       if (stackDetail) void loadStack(stackDetail.id);
+      // Study With Open (p.13): Related Study List 검사들을 한번에 같이 오픈
+      if (withOpen?.ids.length) {
+        if (withOpen.mode === "add") void loadAddMany(withOpen.ids);
+        else void loadStackMany(withOpen.ids);
+      }
     }).catch(() => setStatus("시리즈 조회 실패"));
     api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => {});
     api.annotations(detail.id).then((r) => setAnnos(r.items)).catch(() => {});
@@ -189,16 +201,66 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, detail.study_uid, addDetail?.id, stackDetail?.id, keySops?.length]);
 
-  /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
-  const loadPrior = async (examId: number) => {
+  /* 시리즈 트리 캐시 — 비교/탭 전환 공용 */
+  const getTree = async (examId: number) => {
     let tree = priorTrees[examId];
     if (!tree) {
       const r = await api.seriesTree(examId);
       tree = { uid: r.study_uid, series: r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality)) };
       setPriorTrees((p) => ({ ...p, [examId]: tree }));
     }
+    return tree;
+  };
+
+  /* 오픈 탭 — 추가 검사가 열릴 때마다 좌→우로 탭이 쌓인다 */
+  const tabLabel = (id: number): string => {
+    const rel = detail.related_exams.find((x) => x.id === id);
+    if (rel) return `${rel.modality} ${rel.study_date}`;
+    if (addDetail?.id === id) return `${addDetail.modality} ${addDetail.study_date}`;
+    if (stackDetail?.id === id) return `${stackDetail.modality} ${stackDetail.study_date}`;
+    return `검사 #${id}`;
+  };
+  const addOpenTab = (id: number, uid: string) =>
+    setOpenTabs((prev) => prev.some((t) => t.id === id) ? prev : [...prev, { id, uid, label: tabLabel(id) }]);
+
+  /* 탭 클릭: 해당 검사를 활성 페인에 표시 (UBPACS Opened Study List 전환) */
+  const loadIntoActive = async (id: number) => {
+    if (id === detail.id) {
+      const s = series[0];
+      if (s) patch(activePane, { ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) });
+      return;
+    }
+    try {
+      const tree = await getTree(id);
+      const s = tree.series[0];
+      if (!s) return;
+      patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+    } catch { setStatus("검사 전환 실패"); }
+  };
+
+  /* 탭 닫기: 목록에서 제거 + 해당 검사를 보이던 페인은 주 검사로 복귀 */
+  const closeTab = (id: number) => {
+    const tab = openTabs.find((t) => t.id === id);
+    setOpenTabs((prev) => prev.filter((t) => t.id !== id));
+    if (!tab) return;
+    setPanes((prev) => {
+      const next = { ...prev };
+      const main = series[0];
+      for (const pid of PANE_IDS) {
+        if (next[pid].studyUid === tab.uid && main) {
+          next[pid] = { ...initPane(detail.study_uid), series: main, index: Math.floor(main.instances.length / 2) };
+        }
+      }
+      return next;
+    });
+  };
+
+  /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
+  const loadPrior = async (examId: number) => {
+    const tree = await getTree(examId);
     const s = tree.series[0];
     if (!s) return;
+    addOpenTab(examId, tree.uid);
     // ④ 변화강조 비교 동선: 1x1이면 자동 1x2 전환, 현재=좌(p0)·과거=우(p1), Link 동기 on
     if (LAYOUTS[layout].count === 1) {
       setLayout("1x2");
@@ -214,18 +276,38 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
   /* ③ Stack View (UBPACS-Z): 기존 시리즈는 썸네일에 유지 + 선택 검사를 활성 페인에 중첩 로드 */
   const loadStack = async (examId: number) => {
     try {
-      const r = await api.seriesTree(examId);
-      const imgSeries = r.series
-        .filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality))
-        .map((s) => ({ ...s, series_desc: `[중첩] ${s.series_desc || s.modality}` }));
+      const r = await getTree(examId);
+      const imgSeries = r.series.map((s) => ({ ...s, series_desc: `[중첩] ${s.series_desc || s.modality}` }));
       if (!imgSeries.length) { setStatus("Stack View: 추가 검사에 영상 시리즈 없음"); return; }
-      setSeries((prev) => [...prev, ...imgSeries]);
+      addOpenTab(examId, r.uid);
+      setSeries((prev) => [...prev, ...imgSeries.filter((s) => !prev.some((p) => p.series_uid === s.series_uid))]);
       const s = imgSeries[0];
       patch(activePane, {
-        ...initPane(r.study_uid), series: s, index: Math.floor(s.instances.length / 2),
+        ...initPane(r.uid), series: s, index: Math.floor(s.instances.length / 2),
       });
       setStatus("Stack View: 선택 검사 중첩 — 기존 영상은 썸네일·다른 페인에 유지");
     } catch { setStatus("Stack View 로드 실패"); }
+  };
+
+  /* Study With Open — ADD: Related 최대 3건을 p1~p3 분할 오픈 / STACK: 순차 중첩 */
+  const loadAddMany = async (ids: number[]) => {
+    const take = ids.slice(0, 3);
+    setLayout(take.length >= 2 ? "2x2" : "1x2");
+    for (let i = 0; i < take.length; i++) {
+      try {
+        const tree = await getTree(take[i]);
+        const s = tree.series[0];
+        if (!s) continue;
+        addOpenTab(take[i], tree.uid);
+        patch(PANE_IDS[i + 1], { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+      } catch { /* 개별 실패 무시 */ }
+    }
+    setSyncScroll(true);
+    setStatus(`Study With Open (ADD VIEW): Related ${take.length}건 함께 오픈`);
+  };
+  const loadStackMany = async (ids: number[]) => {
+    for (const id of ids) await loadStack(id);
+    setStatus(`Study With Open (STACK VIEW): Related ${ids.length}건 중첩 오픈`);
   };
 
   const step = useCallback((pid: string, dir: number) => {
@@ -637,9 +719,28 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops }: {
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
                     background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
         <button onClick={onClose} style={{ fontWeight: 700 }}>WORKLIST</button>
-        <div style={{ background: "var(--accent)", borderRadius: "4px 4px 0 0", padding: "4px 14px",
-                      fontSize: 12, fontWeight: 600, alignSelf: "flex-end" }}>
-          {detail.modality},{detail.body_part || detail.patient_name},{detail.study_date} ✕
+        {/* 오픈 검사 탭 — 좌→우로 쌓임. 클릭=활성 페인에 표시, ✕=닫기(주 검사로 복귀) */}
+        <div style={{ display: "flex", gap: 2, alignSelf: "flex-end", overflowX: "auto", maxWidth: "55%" }}>
+          {openTabs.map((t) => {
+            const isActive = panes[activePane].studyUid === t.uid;
+            return (
+              <div key={t.id} onClick={() => void loadIntoActive(t.id)}
+                   title={t.id === detail.id ? "주 검사" : "클릭=활성 페인에 표시"}
+                   style={{
+                     display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                     background: isActive ? "var(--accent)" : "var(--bg-elevated)",
+                     color: isActive ? "#fff" : "var(--text-secondary)",
+                     borderRadius: "4px 4px 0 0", padding: "4px 11px", fontSize: 11.5,
+                     fontWeight: 600, cursor: "pointer", border: "1px solid var(--border)", borderBottom: "none",
+                   }}>
+                {t.label}
+                {t.id !== detail.id && (
+                  <span onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
+                        style={{ fontSize: 10, opacity: 0.75 }}>✕</span>
+                )}
+              </div>
+            );
+          })}
         </div>
         <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
           [{panes[activePane].index + 1}/{panes[activePane].series?.instances.length ?? 0}]

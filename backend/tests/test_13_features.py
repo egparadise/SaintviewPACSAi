@@ -239,6 +239,28 @@ def test_worklist_tabs_and_tree_settings(client, auth_headers):
                       json={"value": over, "scope": "user"}).status_code == 400
 
 
+# ── 15차: DICOM 헤더 컬럼·MEMO (UBPACS-Z 조회 확장) ─────────
+
+
+def test_memo_and_dicom_columns(client, auth_headers):
+    with SessionLocal() as db:
+        study = register_study(
+            db, study_uid="1.2.840.999.15.1", patient_key="P1500", patient_name="컬럼",
+            study_date="20260611", modality="CR", body_part="CHEST", study_desc="Chest PA",
+            clinical_info="검진", institution="성모병원", referring_physician="Kim^Doctor",
+        )
+        sid = study.id
+    row = client.get("/api/worklist?pid=P1500", headers=auth_headers).json()["items"][0]
+    assert row["institution"] == "성모병원"
+    assert row["referring_physician"] == "Kim^Doctor"
+    assert row["memo"] == ""
+
+    assert client.put(f"/api/studies/{sid}/memo", headers=auth_headers,
+                      json={"memo": "추적검사 필요"}).status_code == 200
+    row2 = client.get("/api/worklist?pid=P1500", headers=auth_headers).json()["items"][0]
+    assert row2["memo"] == "추적검사 필요"
+
+
 # ── 번인 OCR 가드 — 폴백 무중단 ─────────────────────────────
 
 
