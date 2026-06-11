@@ -864,6 +864,45 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
             {page === "monitor" && (
               <>
                 <Group title="모니터 감지 · 뷰어 배치" right={
+                  <span style={{ display: "flex", gap: 4 }}>
+                  <button style={{ padding: "1px 10px", fontSize: 11.5 }}
+                          title="각 모니터 중앙에 번호(1,2,3…)를 3초간 표시 — 어떤 모니터가 어떤 모델인지 확인"
+                          onClick={async () => {
+                            const w = window as unknown as {
+                              getScreenDetails?: () => Promise<{
+                                screens: { label?: string; availLeft: number; availTop: number; availWidth: number; availHeight: number }[];
+                              }>;
+                            };
+                            if (!w.getScreenDetails) {
+                              setMonitorMsg("이 브라우저는 모니터 확인을 지원하지 않습니다 — Chrome/Edge 권장");
+                              return;
+                            }
+                            try {
+                              const det = await w.getScreenDetails();
+                              const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                              let blocked = 0;
+                              det.screens.forEach((s, i) => {
+                                const W = 320, H = 230;
+                                const left = Math.round(s.availLeft + (s.availWidth - W) / 2);
+                                const top = Math.round(s.availTop + (s.availHeight - H) / 2);
+                                const pop = window.open("", `sv_ident_${i}`,
+                                  `left=${left},top=${top},width=${W},height=${H},popup=1`);
+                                if (!pop) { blocked++; return; }
+                                pop.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>모니터 ${i + 1}</title>
+<style>body{margin:0;background:#1769e0;color:#fff;font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;overflow:hidden}
+.n{font-size:120px;font-weight:800;line-height:1}.l{font-size:13px;opacity:.9;text-align:center;padding:0 12px;margin-top:6px}</style></head>
+<body><div style="text-align:center"><div class="n">${i + 1}</div>
+<div class="l">${esc(s.label || `모니터 ${i + 1}`)}<br>${s.availWidth}×${s.availHeight}</div></div></body></html>`);
+                                pop.document.close();
+                                setTimeout(() => { try { pop.close(); } catch { /* 무시 */ } }, 3000);
+                              });
+                              setMonitorMsg(blocked
+                                ? `일부 창이 팝업 차단됨(${blocked}) — 주소창에서 팝업 허용 후 다시 시도`
+                                : "각 모니터 중앙에 번호를 3초간 표시했습니다 — 목록의 번호와 대조하세요");
+                            } catch { setMonitorMsg("모니터 권한이 거부되었습니다"); }
+                          }}>
+                    🔢 모니터 확인
+                  </button>
                   <button className="primary" style={{ padding: "1px 10px", fontSize: 11.5 }} onClick={async () => {
                     const w = window as unknown as {
                       getScreenDetails?: () => Promise<{
@@ -880,9 +919,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                         label: s.label || `모니터 ${i + 1}`, w: s.availWidth, h: s.availHeight,
                         primary: !!s.isPrimary,
                       })));
-                      setMonitorMsg(`${det.screens.length}대 감지됨 — 뷰어를 표시할 모니터를 체크하세요`);
+                      setMonitorMsg(`${det.screens.length}대 감지됨 — 🔢 모니터 확인으로 번호를 대조하고 창별로 지정하세요`);
                     } catch { setMonitorMsg("모니터 권한이 거부되었습니다 — 주소창 권한 아이콘에서 허용 후 다시 시도"); }
                   }}>① 모니터 감지</button>
+                  </span>
                 }>
                   {monitorMsg && <div style={{ fontSize: 12, color: "var(--stat-final)" }}>{monitorMsg}</div>}
                   {monitors.length === 0 ? (
@@ -911,7 +951,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                       <tbody>
                         {monitors.map((m, i) => (
                           <tr key={i}>
-                            <td>🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}</td>
+                            <td>
+                              <b style={{ color: "var(--accent)", marginRight: 4 }}>{i + 1}</b>
+                              🖵 {m.label} ({m.w}×{m.h}){m.primary && " · 주 모니터"}
+                            </td>
                             <td style={{ textAlign: "center" }}>
                               <input type="checkbox" checked={monitorSel.includes(i)}
                                      onChange={(e) => setMonitorSel((p) =>
@@ -947,8 +990,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </span>
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-                    <b>사용 방법:</b> ① 모니터 감지 → ② 창별 모니터 지정 → ③ 하단 <b>OK(저장)</b> →
-                    ④ 다음 오픈부터 적용.<br />
+                    <b>사용 방법:</b> ① 모니터 감지 → 🔢 모니터 확인(각 화면에 번호 표시·목록 번호와 대조)
+                    → ② 창별 모니터 지정 → ③ 하단 <b>OK(저장)</b> → ④ 다음 오픈부터 적용.<br />
                     · <b>뷰어 ☑</b>: 1대=해당 모니터 / 2대 이상=스팬+Series Layout 영상 분할 / 0대=기본 크기<br />
                     · <b>워크리스트 ◉</b>: 위 버튼으로 해당 모니터에 새 창 오픈 (라디오 재클릭=해제)<br />
                     · <b>판독 ◉</b>: 뷰어의 [Reading] 버튼이 해당 모니터에 판독 창을 띄움
