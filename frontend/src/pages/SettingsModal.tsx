@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
+import { GridPicker } from "../lib/GridPicker";
+import { DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import {
   FolderEditModal,
   FolderTreeEditor,
@@ -29,6 +31,7 @@ const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "report", label: "리포트" },
   { key: "reading", label: "판독 (Reading)" },
   { key: "viewer", label: "뷰어" },
+  { key: "hp", label: "행잉 (HP)" },
   { key: "pdf", label: "판독서 PDF", admin: true },
   { key: "ai", label: "AI 정책", admin: true },
 ];
@@ -71,6 +74,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [wlPanels, setWlPanels] = useState<Record<string, boolean>>({
     orders: true, prior: true, compare: true, thumb: true, std: true, comment: true, report: true,
   });
+  // 행잉 프로토콜(HP) 규칙 + 툴바 구성 + W/L 프리셋 (계정 로밍)
+  const [hpRules, setHpRules] = useState<HpRule[]>([]);
+  const [hpModal, setHpModal] = useState<HpRule | "new" | null>(null);
+  const [tbConfig, setTbConfig] = useState<Record<string, boolean>>({});
+  const [wlPresets, setWlPresets] = useState<WlPreset[]>(DEFAULT_WL_PRESETS);
   // 판독(Reading) — 내 서명 정보(확정 시 리포트에 기록)
   const [profName, setProfName] = useState("");
   const [profLicense, setProfLicense] = useState("");
@@ -116,6 +124,13 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (v.hanging2d?.CT) setH2dCT(v.hanging2d.CT);
       if (v.hanging2d?.MR) setH2dMR(v.hanging2d.MR);
       if (v.reportDock !== undefined) setReportDock(v.reportDock);
+      const tb = (v as { toolbar?: Record<string, boolean> }).toolbar;
+      if (tb) setTbConfig(tb);
+      const wp = (v as { wl_presets?: WlPreset[] }).wl_presets;
+      if (wp?.length) setWlPresets(wp);
+    }).catch(() => {});
+    api.getSetting("viewer.hp").then((r) => {
+      setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
     }).catch(() => {});
     api.getSetting("mode.profiles").then((r) => {
       const v = r.value as { profiles?: Record<string, ModeProfile> };
@@ -154,10 +169,13 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     await api.putSetting("worklist.prefs",
       { ...cur, auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
         find_fields: findFields, dbl_action: dblAction, panels: wlPanels }, "user");
+    const curV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("viewer.prefs", {
+      ...curV,
       hanging: { CT: hangingCT, MR: hangingMR },
       hanging2d: { CT: h2dCT, MR: h2dMR },
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
+      toolbar: tbConfig, wl_presets: wlPresets,
     }, "user");
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
@@ -639,7 +657,114 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     </Row>
                   ))}
                 </Group>
+                <Group title="Tools bar 구성 (UBPACS p.18~21 — 계정 로밍)">
+                  {TOOLBAR_DEFS.map((sec) => (
+                    <div key={sec.section}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 3 }}>
+                        {sec.section}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 3 }}>
+                        {sec.items.map((t) => (
+                          <label key={t.id} title={t.desc}
+                                 style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}>
+                            <input type="checkbox" checked={tbConfig[t.id] !== false}
+                                   onChange={(e) => setTbConfig((p) => ({ ...p, [t.id]: e.target.checked }))} />
+                            {t.label} <span style={{ color: "var(--text-secondary)", fontSize: 10.5 }}>{t.desc.split(" — ")[0].split(" (")[0]}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    체크 해제 시 뷰어 툴바에서 해당 버튼이 숨겨집니다 — 로그인 계정별 저장(로밍).
+                  </div>
+                </Group>
+                <Group title="W/L 프리셋 (Presetting — 2D 섹션 버튼)" right={
+                  <button style={{ padding: "1px 8px", fontSize: 11 }}
+                          onClick={() => setWlPresets((p) => [...p, { key: `p${Date.now() % 1e5}`, label: "새 프리셋", q: "40,400" }])}>
+                    ＋ 추가
+                  </button>
+                }>
+                  <table className="grid-table">
+                    <thead><tr><th>이름</th><th style={{ width: 90 }}>Center</th><th style={{ width: 90 }}>Width</th><th style={{ width: 32 }}></th></tr></thead>
+                    <tbody>
+                      {wlPresets.map((p, i) => {
+                        const [c, w] = p.q ? p.q.split(",") : ["", ""];
+                        const setQ = (nc: string, nw: string) =>
+                          setWlPresets((arr) => arr.map((x, j) => j === i ? { ...x, q: nc === "" && nw === "" ? "" : `${nc},${nw}` } : x));
+                        return (
+                          <tr key={p.key}>
+                            <td><input value={p.label} style={{ width: "95%" }}
+                                       onChange={(e) => setWlPresets((arr) => arr.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} /></td>
+                            <td><input value={c} placeholder="(기본)" style={{ width: 70 }}
+                                       onChange={(e) => setQ(e.target.value, w)} /></td>
+                            <td><input value={w} style={{ width: 70 }}
+                                       onChange={(e) => setQ(c, e.target.value)} /></td>
+                            <td><button style={{ padding: "0 6px", fontSize: 11 }}
+                                        onClick={() => setWlPresets((arr) => arr.filter((_, j) => j !== i))}>✕</button></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    뷰어 2D 섹션에 프리셋 버튼으로 표시 — All 토글 시 전체 페인 적용. OK(저장) 시 반영.
+                  </div>
+                </Group>
               </>
+            )}
+
+            {page === "hp" && (
+              <Group title="행잉 프로토콜 (HP) — 장비×부위×Projection → Series/Image Layout" right={
+                <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setHpModal("new")}>＋ 규칙 추가</button>
+              }>
+                <table className="grid-table">
+                  <thead><tr><th>이름</th><th>장비</th><th>부위</th><th>Projection</th><th>Series</th><th>Image</th><th>W/L</th><th style={{ width: 60 }}></th></tr></thead>
+                  <tbody>
+                    {hpRules.map((r) => (
+                      <tr key={r.id}>
+                        <td>{r.name}</td><td>{r.modality || "*"}</td><td>{r.body_part || "*"}</td>
+                        <td>{r.projection || "*"}</td>
+                        <td>{r.s.r}×{r.s.c}</td><td>{r.i.r}×{r.i.c}</td><td>{r.wl || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <button style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setHpModal(r)}>✏</button>
+                          <button style={{ padding: "0 6px", fontSize: 11 }} onClick={async () => {
+                            if (!window.confirm(`HP 규칙 '${r.name}'을 삭제할까요?`)) return;
+                            const next = hpRules.filter((x) => x.id !== r.id);
+                            setHpRules(next);
+                            await api.putSetting("viewer.hp", { rules: next }, "user");
+                            setSaved("HP 규칙 저장됨");
+                          }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {hpRules.length === 0 && (
+                      <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>
+                        규칙 없음 — 예: CR/CHEST/PA → Series 1×1·Image 1×1, MR/SHOULDER → Series 2×2
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  뷰어가 열릴 때 위에서부터 첫 일치 규칙이 자동 적용되고, 타이틀바 HP 메뉴에서 수동 전환할 수 있습니다.
+                  조건이 빈 항목(*)은 무관 매칭 — 계정별 저장(로밍).
+                </div>
+                {hpModal !== null && (
+                  <HpEditModal
+                    init={hpModal === "new" ? null : hpModal}
+                    onSave={async (rule) => {
+                      const next = hpModal === "new"
+                        ? [...hpRules, rule]
+                        : hpRules.map((x) => (x.id === rule.id ? rule : x));
+                      setHpRules(next);
+                      await api.putSetting("viewer.hp", { rules: next }, "user");
+                      setSaved("HP 규칙 저장됨");
+                      setHpModal(null);
+                    }}
+                    onClose={() => setHpModal(null)}
+                  />
+                )}
+              </Group>
             )}
 
             {page === "pdf" && isAdmin && (
@@ -686,6 +811,69 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <div style={{ flex: 1 }} />
           <button className="primary" onClick={save}>OK (저장)</button>
           <button onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── HP 규칙 편집 모달 ── */
+function HpEditModal({ init, onSave, onClose }: {
+  init: HpRule | null;
+  onSave: (rule: HpRule) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [f, setF] = useState<HpRule>(init ?? {
+    id: `hp${Date.now().toString(36)}`, name: "", modality: "", body_part: "",
+    projection: "", s: { r: 1, c: 1 }, i: { r: 1, c: 1 }, wl: "",
+  });
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+      <span style={{ width: 86, color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
+      {children}
+    </label>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
+         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: 440, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>{init ? `HP 규칙 수정 — ${init.name}` : "새 HP 규칙"}</b>
+        <Row label="이름 *">
+          <input autoFocus value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))}
+                 placeholder="예: 흉부 CR 정면" style={{ flex: 1 }} />
+        </Row>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Row label="장비(MOD)">
+            <select value={f.modality} onChange={(e) => setF((p) => ({ ...p, modality: e.target.value }))} style={{ flex: 1 }}>
+              <option value="">* 모든 장비</option>
+              {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM"].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Row>
+          <Row label="부위">
+            <input value={f.body_part} onChange={(e) => setF((p) => ({ ...p, body_part: e.target.value.toUpperCase() }))}
+                   placeholder="CHEST (빈칸=무관)" style={{ flex: 1, minWidth: 0 }} />
+          </Row>
+          <Row label="Projection">
+            <select value={f.projection} onChange={(e) => setF((p) => ({ ...p, projection: e.target.value }))} style={{ flex: 1 }}>
+              <option value="">* 무관</option>
+              {["PA", "AP", "LAT", "OBL", "AXIAL"].map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </Row>
+          <Row label="W/L">
+            <input value={f.wl ?? ""} onChange={(e) => setF((p) => ({ ...p, wl: e.target.value }))}
+                   placeholder="center,width (빈칸=기본)" style={{ flex: 1, minWidth: 0 }} />
+          </Row>
+        </div>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>레이아웃:</span>
+          <GridPicker label="Series" max={3} value={f.s} onPick={(v) => setF((p) => ({ ...p, s: v }))} />
+          <GridPicker label="Image" max={3} value={f.i} onPick={(v) => setF((p) => ({ ...p, i: v }))} />
+        </div>
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <button className="primary" disabled={!f.name.trim()}
+                  onClick={() => void onSave({ ...f, name: f.name.trim() })}>저장</button>
+          <button onClick={onClose}>취소</button>
         </div>
       </div>
     </div>

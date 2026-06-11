@@ -44,6 +44,7 @@ import {
 } from "./WorklistTree";
 
 import { GridPicker } from "../lib/GridPicker";
+import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
@@ -1291,38 +1292,8 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
   );
 }
 
-/* ── 스플리터 — 패널 경계를 드래그해 크기 조절 (계정별 서버 저장) ── */
-function Splitter({ dir, onDrag, onEnd }: {
-  dir: "v" | "h"; onDrag: (delta: number) => void; onEnd: () => void;
-}) {
-  const start = (e: React.MouseEvent) => {
-    e.preventDefault();
-    let last = dir === "v" ? e.clientX : e.clientY;
-    const move = (ev: MouseEvent) => {
-      const cur = dir === "v" ? ev.clientX : ev.clientY;
-      onDrag(cur - last);
-      last = cur;
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      onEnd();
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-  return (
-    <div onMouseDown={start} title="드래그=크기 조절 (계정에 저장)"
-         style={{
-           flexShrink: 0, zIndex: 5, background: "var(--border)", opacity: 0.6,
-           ...(dir === "v" ? { width: 4, cursor: "col-resize" } : { height: 4, cursor: "row-resize" }),
-         }} />
-  );
-}
-
 interface LayoutSizes { railW: number; dH: number; eH: number; thumbW: number; stdW: number; commentW: number }
 const DEFAULT_SIZES: LayoutSizes = { railW: 152, dH: 140, eH: 300, thumbW: 230, stdW: 210, commentW: 250 };
-const clampSz = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /* ── 패널 드래그 래퍼 — 좌측 그립을 끌어 같은 행 안에서 자리 교환 ── */
 function DraggablePanel({ zone, k, onDrop, style, children }: {

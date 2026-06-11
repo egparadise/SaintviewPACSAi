@@ -339,6 +339,16 @@ def test_order_form_fields_and_mwl_tags(client, auth_headers, tmp_path):
         raise AssertionError("오더 .wl 미발견")
 
 
+def test_viewer_hp_setting(client, auth_headers):
+    rules = {"rules": [{"id": "hp1", "name": "흉부 CR 정면", "modality": "CR",
+                        "body_part": "CHEST", "projection": "PA",
+                        "s": {"r": 1, "c": 1}, "i": {"r": 1, "c": 1}, "wl": "-600,1500"}]}
+    assert client.put("/api/settings/viewer.hp", headers=auth_headers,
+                      json={"value": rules, "scope": "user"}).status_code == 200
+    got = client.get("/api/settings/viewer.hp", headers=auth_headers).json()["value"]
+    assert got["rules"][0]["name"] == "흉부 CR 정면"
+
+
 def test_dicom_nodes_global_only(client, auth_headers):
     nodes = {"items": [{"name": "CR01", "role": "scu", "ae_title": "CR01", "ip": "192.168.0.10", "port": 104}]}
     assert client.put("/api/settings/dicom.nodes", headers=auth_headers,

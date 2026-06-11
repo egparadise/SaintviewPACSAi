@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openViewer, type Anno, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
 import { GridPicker } from "../lib/GridPicker";
+import { Splitter, clampSz } from "../lib/Splitter";
+import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 
 type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
@@ -36,14 +38,7 @@ function autoWL(modality: string, bodyPart: string): { q: string; label: string 
   return null; // MR/CR 등은 서버 VOI 기본
 }
 
-const WL_PRESETS = [
-  { key: "auto", label: "Auto", q: "" },
-  { key: "lung", label: "폐", q: "-600,1500" },
-  { key: "medi", label: "종격동", q: "40,400" },
-  { key: "bone", label: "뼈", q: "300,1500" },
-  { key: "brain", label: "뇌", q: "40,80" },
-  { key: "abd", label: "복부", q: "60,400" },
-];
+const WL_PRESETS = DEFAULT_WL_PRESETS;  // 기본값 — 실제 목록은 viewer.prefs.wl_presets(설정 편집)
 
 interface PaneState {
   studyUid: string;       // 비교 검사 지원(F-14): 페인마다 다른 검사 가능
@@ -75,12 +70,18 @@ interface ViewerPrefs {
   thumbMode: "series" | "all";
   hanging2d: Record<string, string>;  // modality → layout key
   reportDock: boolean;
+  paletteW: number;         // 팔레트 폭 (스플리터 조절, 계정 로밍)
+  dockW: number;            // 판독 도크 폭
+  toolbar: Record<string, boolean>;  // 툴바 버튼 표시 여부 (기본 모두 표시)
+  wl_presets: { key: string; label: string; q: string }[];  // W/L Presetting
 }
 const DEFAULT_PREFS: ViewerPrefs = {
   paletteSide: "left", thumbSide: "left", thumbSize: 84,
   thumbMode: "series", hanging2d: {}, reportDock: true,
+  paletteW: 100, dockW: 250, toolbar: {}, wl_presets: WL_PRESETS,
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
   detail: StudyDetail;
   onClose: () => void;
@@ -90,10 +91,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open (p.13)
 }) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
+  const prefsRef = useRef(prefs);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [series, setSeries] = useState<SeriesNode[]>([]);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
   // Image Layout — 페인 내부 이미지 분할(연속 이미지 N×M 타일, UBPACS)
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });
+  // HP(행잉 프로토콜) + W/L 프리셋(All 적용) + 타이틀바 드롭다운
+  const [hpRules, setHpRules] = useState<HpRule[]>([]);
+  const [hpName, setHpName] = useState("기본");
+  const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
+  const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -146,16 +154,40 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setPanes((prev) => ({ ...prev, [pid]: { ...prev[pid], ...p } }));
   }, []);
 
-  /* 설정 로드 + 행잉 적용(요청 4: 모달리티→분할) */
+  /* HP 규칙 적용 — Series/Image layout + W/L 프리셋 */
+  const applyHp = useCallback((rule: HpRule) => {
+    const key = `${Math.min(rule.s.r, 3)}x${Math.min(rule.s.c, 3)}`;
+    if (LAYOUTS[key]) setLayout(key);
+    setImgLay({ r: Math.min(rule.i.r, 3), c: Math.min(rule.i.c, 3) });
+    if (rule.wl !== undefined) {
+      setPanes((prev) => Object.fromEntries(
+        Object.entries(prev).map(([k, p]) => [k, { ...p, wl: rule.wl ?? "" }])));
+    }
+    setHpName(rule.name);
+  }, []);
+
+  /* 설정 로드 + 행잉 적용(모달리티→분할) + HP 규칙 자동 매칭 */
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
       const v = r.value as Partial<ViewerPrefs> & { hanging2d?: Record<string, string> };
       const merged = { ...DEFAULT_PREFS, ...v };
+      if (!merged.wl_presets?.length) merged.wl_presets = WL_PRESETS;
       setPrefs(merged);
       const hp = merged.hanging2d?.[detail.modality];
       if (hp && LAYOUTS[hp]) setLayout(hp as keyof typeof LAYOUTS);
     }).catch(() => {});
-  }, [detail.modality]);
+    // HP: 장비×부위×Projection 매칭 — 첫 일치 규칙 자동 적용 (hanging2d보다 우선)
+    api.getSetting("viewer.hp").then((r) => {
+      const rules = ((r.value as { rules?: HpRule[] }).rules) ?? [];
+      setHpRules(rules);
+      const up = (s: string) => (s || "").toUpperCase();
+      const m = rules.find((x) =>
+        (!x.modality || x.modality === detail.modality) &&
+        (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
+        (!x.projection || up(detail.study_desc).includes(up(x.projection))));
+      if (m) applyHp(m);
+    }).catch(() => {});
+  }, [detail.modality, detail.body_part, detail.study_desc, applyHp]);
 
   /* 시리즈 트리 + 리포트 로드 */
   useEffect(() => {
@@ -533,6 +565,28 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     );
   };
 
+  /* 툴바 표시 여부 (Setting>뷰어>Tools bar — 계정 로밍, 기본 모두 표시) */
+  const tbOn = (id: string) => prefs.toolbar?.[id] !== false;
+
+  /* W/L 프리셋 적용 — All 모드면 모든 페인에 (UBPACS All) */
+  const applyWl = (q: string) => {
+    if (wlAll) {
+      setPanes((prev) => Object.fromEntries(
+        Object.entries(prev).map(([k, p]) => [k, { ...p, wl: q }])));
+    } else {
+      patch(activePane, { wl: q });
+    }
+  };
+
+  /* 패널 크기 영속화 (paletteW/dockW/thumbSize — 계정 로밍) */
+  const persistViewerSizes = () => {
+    api.getSetting("viewer.prefs").then((r) =>
+      api.putSetting("viewer.prefs", {
+        ...r.value, paletteW: prefsRef.current.paletteW,
+        dockW: prefsRef.current.dockW, thumbSize: prefsRef.current.thumbSize,
+      }, "user")).catch(() => {});
+  };
+
   const L = LAYOUTS[layout];
   const paletteHoriz = prefs.paletteSide === "top";
   const paletteRight = prefs.paletteSide === "right";
@@ -558,8 +612,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
       background: "var(--bg-panel)", flexShrink: 0, overflow: "auto", alignItems: paletteHoriz ? "center" : undefined,
       ...(paletteHoriz ? { borderBottom: "1px solid var(--border)" }
-        : { width: 100, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
-                                         : { borderRight: "1px solid var(--border)" }) }),
+        : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
+                                                    : { borderRight: "1px solid var(--border)" }) }),
     }}>
       <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}
               style={{ fontSize: 11, width: paletteHoriz ? 70 : "100%" }}>
@@ -584,20 +638,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               ...(paletteHoriz ? {} : { gridTemplateColumns: "1fr 1fr", padding: "3px 0" }),
             }}>
               {k === "common" && (<>
-                <ModeBtn k="zoom" label="Zoom" title="좌드래그=확대 (우드래그 항상 Zoom)" />
-                <ModeBtn k="pan" label="Pan" title="좌드래그=이동 (중드래그 항상 Pan)" />
-                <ActBtn a="fit" label="Fit" title="화면 맞춤" />
-                <ActBtn a="invert" label="Inv" title="반전" on={panes[activePane].invert} />
-                <ActBtn a="rotL" label="⟲90" title="좌회전" />
-                <ActBtn a="rotR" label="⟳90" title="우회전" />
-                <ActBtn a="flipH" label="⇋" title="좌우반전" />
-                <ActBtn a="flipV" label="⇵" title="상하반전" />
-                <ActBtn a="cine" label={cine ? "■" : "▶"} title="시네" on={cine} />
-                <ActBtn a="capture" label="Cap" title="PNG 저장" />
-                <ActBtn a="reset" label="Reset" title="초기화" />
+                {tbOn("zoom") && <ModeBtn k="zoom" label="Zoom" title="좌드래그=확대 (우드래그 항상 Zoom)" />}
+                {tbOn("pan") && <ModeBtn k="pan" label="Pan" title="좌드래그=이동 (중드래그 항상 Pan)" />}
+                {tbOn("fit") && <ActBtn a="fit" label="Fit" title="화면 맞춤" />}
+                {tbOn("inv") && <ActBtn a="invert" label="Inv" title="반전" on={panes[activePane].invert} />}
+                {tbOn("rotL") && <ActBtn a="rotL" label="⟲90" title="좌회전" />}
+                {tbOn("rotR") && <ActBtn a="rotR" label="⟳90" title="우회전" />}
+                {tbOn("flipH") && <ActBtn a="flipH" label="⇋" title="좌우반전" />}
+                {tbOn("flipV") && <ActBtn a="flipV" label="⇵" title="상하반전" />}
+                {tbOn("cine") && <ActBtn a="cine" label={cine ? "■" : "▶"} title="시네" on={cine} />}
+                {tbOn("cap") && <ActBtn a="capture" label="Cap" title="PNG 저장" />}
+                {tbOn("reset") && <ActBtn a="reset" label="Reset" title="초기화" />}
               </>)}
               {k === "anno" && (<>
-                {TOOL_DEFS.map(([tk, label, title]) => (
+                {TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
                           onClick={() => { setTool(tool === tk ? null : tk); setDraft(null); }}
                           style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
@@ -605,41 +659,63 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     {label}
                   </button>
                 ))}
-                <button title="Reference line — 활성 페인 평면을 다른 페인에 투영(scout)"
-                        onClick={() => setRefOn((r) => !r)}
-                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
-                                 background: refOn ? "var(--accent)" : undefined }}>
-                  Ref{refOn ? "●" : ""}
-                </button>
-                {(detail.modality === "CR" || detail.modality === "DX") && (
+                {tbOn("ref") && (
+                  <button title="Reference line — 활성 페인 평면을 다른 페인에 투영(scout)"
+                          onClick={() => setRefOn((r) => !r)}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
+                                   background: refOn ? "var(--accent)" : undefined }}>
+                    Ref{refOn ? "●" : ""}
+                  </button>
+                )}
+                {tbOn("ctr") && (detail.modality === "CR" || detail.modality === "DX") && (
                   <button title="AI 심흉비 자동계측 (S2) — 초안, 확정 아님" onClick={doCtr}
                           style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
                                    color: "var(--ai)", fontWeight: 700 }}>
                     CTR
                   </button>
                 )}
-                <button title="주석 서버 저장 (로밍)" onClick={saveAnnos}
-                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Save</button>
-                <button title="GSPS 내보내기 — 주석·W/L 표준 저장(Orthanc)" onClick={doGsps}
-                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>GSPS</button>
-                <button title="마지막 주석 삭제" onClick={() => setAnnos((p) => p.slice(0, -1))}
-                        style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Del</button>
-                <button title="주석 전체 삭제" onClick={() => {
-                  if (window.confirm(`주석 ${annos.length}건을 모두 삭제할까요? (저장 전이면 복구 불가)`)) setAnnos([]);
-                }} style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Clr</button>
+                {tbOn("save") && (
+                  <button title="주석 서버 저장 (로밍)" onClick={saveAnnos}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Save</button>
+                )}
+                {tbOn("gsps") && (
+                  <button title="GSPS 내보내기 — 주석·W/L 표준 저장(Orthanc)" onClick={doGsps}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>GSPS</button>
+                )}
+                {tbOn("del") && (
+                  <button title="마지막 주석 삭제" onClick={() => setAnnos((p) => p.slice(0, -1))}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Del</button>
+                )}
+                {tbOn("clr") && (
+                  <button title="주석 전체 삭제" onClick={() => {
+                    if (window.confirm(`주석 ${annos.length}건을 모두 삭제할까요? (저장 전이면 복구 불가)`)) setAnnos([]);
+                  }} style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%" }}>Clr</button>
+                )}
               </>)}
-              {k === "2d" && WL_PRESETS.map((pr) => (
-                <button key={pr.key} title={`W/L ${pr.q || "기본"}`}
-                        onClick={() => patch(activePane, { wl: pr.q })}
+              {k === "2d" && (<>
+                <button title="All — W/L 프리셋을 모든 페인(전체 이미지)에 적용 (UBPACS All)"
+                        onClick={() => setWlAll((a) => !a)}
                         style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
-                                 background: panes[activePane].wl === pr.q ? "var(--accent)" : undefined }}>
-                  {pr.label}
+                                 background: wlAll ? "var(--accent)" : undefined, fontWeight: 700 }}>
+                  All{wlAll ? "●" : ""}
                 </button>
-              ))}
+                {prefs.wl_presets.map((pr) => (
+                  <button key={pr.key} title={`W/L ${pr.q || "기본"} (Presetting — 설정>뷰어에서 편집)`}
+                          onClick={() => applyWl(pr.q)}
+                          style={{ padding: "5px 0", fontSize: 10.5, width: paletteHoriz ? 52 : "100%",
+                                   background: panes[activePane].wl === pr.q ? "var(--accent)" : undefined }}>
+                    {pr.label}
+                  </button>
+                ))}
+              </>)}
               {k === "etc" && (<>
-                <button style={{ padding: "5px 4px", fontSize: 10.5 }} onClick={() => openViewer(detail.study_uid)}>OHIF</button>
-                <button style={{ padding: "5px 4px", fontSize: 10.5 }}
-                        onClick={() => window.dispatchEvent(new CustomEvent("sv-open-3d", { detail: detail.study_uid }))}>3D</button>
+                {tbOn("ohif") && (
+                  <button style={{ padding: "5px 4px", fontSize: 10.5 }} onClick={() => openViewer(detail.study_uid)}>OHIF</button>
+                )}
+                {tbOn("3d") && (
+                  <button style={{ padding: "5px 4px", fontSize: 10.5 }}
+                          onClick={() => window.dispatchEvent(new CustomEvent("sv-open-3d", { detail: detail.study_uid }))}>3D</button>
+                )}
               </>)}
             </div>
           )}
@@ -700,7 +776,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* 판독 도크(요청 5): 현재 리포트 + 과거검사(클릭→비교 로드) */
   const dock = prefs.reportDock && (
-    <div style={{ width: 250, borderLeft: "1px solid var(--border)", background: "var(--bg-panel)",
+    <div style={{ width: prefs.dockW, borderLeft: "1px solid var(--border)", background: "var(--bg-panel)",
                   display: "flex", flexDirection: "column", flexShrink: 0, overflow: "auto" }}>
       <div style={{ padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
                     background: "var(--bg-elevated)" }}>REPORT {report?.created_by === "ai" && "· AI 초안"}</div>
@@ -769,13 +845,37 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <button onClick={onClose}>닫기</button>
       </div>
 
-      {/* Study/Series Titlebar (UBPACS p.14 — 검사·시리즈 정보 전용 띠) */}
+      {/* Study/Series Titlebar (UBPACS p.14·p.16 — Opened/Related/Series/HP 드롭다운) */}
       <div style={{
-        display: "flex", gap: 10, alignItems: "center", padding: "2px 10px",
+        display: "flex", gap: 8, alignItems: "center", padding: "2px 10px",
         background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)",
         fontSize: 11, color: "var(--text-secondary)", flexShrink: 0,
       }}>
-        <b style={{ color: "var(--accent)" }}>HP</b>
+        <TitleMenu id="opened" icon="▤" title="Opened Study List — 열린 검사 전환" menu={menu} setMenu={setMenu}
+                   items={openTabs.map((t) => ({
+                     label: `${t.uid === panes[activePane].studyUid ? "● " : ""}${t.label}`,
+                     onClick: () => void loadIntoActive(t.id),
+                   }))} />
+        <TitleMenu id="related" icon="🗂" title="Related Study List — 클릭=Open" menu={menu} setMenu={setMenu}
+                   items={detail.related_exams.map((e) => ({
+                     label: `${e.status}/${detail.patient_key}/${e.modality}/${e.study_date}/${e.study_desc}`,
+                     onClick: () => void loadPrior(e.id),
+                   }))} />
+        <TitleMenu id="series" icon="≣" title="Open Series — 시리즈 전환" menu={menu} setMenu={setMenu}
+                   items={series.map((s) => ({
+                     label: `S${s.series_number} ${s.series_desc || s.modality} (${s.instances.length}장)`,
+                     onClick: () => patch(activePane, {
+                       ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2),
+                     }),
+                   }))} />
+        <TitleMenu id="hp" icon={`HP:${hpName}`} title="Hanging Protocol — 설정>행잉(HP)에서 규칙 관리" menu={menu} setMenu={setMenu}
+                   items={[
+                     { label: "기본 (HP 해제)", onClick: () => { setHpName("기본"); setImgLay({ r: 1, c: 1 }); setLayout("1x1"); } },
+                     ...hpRules.map((r) => ({
+                       label: `${r.name} — ${r.modality || "*"}/${r.body_part || "*"}/${r.projection || "*"} · S${r.s.r}×${r.s.c} I${r.i.r}×${r.i.c}${r.wl ? ` · W/L ${r.wl}` : ""}`,
+                       onClick: () => applyHp(r),
+                     })),
+                   ]} />
         <span>[{panes[activePane].index + 1}/{panes[activePane].series?.instances.length ?? 0}]</span>
         <span style={{ color: "var(--text-primary)" }}>
           {detail.status.toUpperCase()}, {detail.patient_name}, {detail.modality}, {detail.study_date}, {detail.study_desc}
@@ -792,10 +892,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {paletteHoriz && palette}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
+        {prefs.paletteSide === "left" && paletteOpen && (
+          <Splitter dir="v" onEnd={persistViewerSizes}
+                    onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW + dx, 64, 240) }))} />
+        )}
         {!paletteOpen && prefs.paletteSide === "left" && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
         )}
         {prefs.thumbSide === "left" && thumbs}
+        {prefs.thumbSide === "left" && thumbOpen && (
+          <Splitter dir="v" onEnd={persistViewerSizes}
+                    onDrag={(dx) => setPrefs((p) => ({ ...p, thumbSize: clampSz(p.thumbSize + dx, 48, 200) }))} />
+        )}
 
         {/* 뷰포트 그리드 */}
         <div style={{ flex: 1, display: "grid", minWidth: 0, minHeight: 0,
@@ -871,15 +979,64 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           })}
         </div>
 
+        {thumbRight && thumbOpen && (
+          <Splitter dir="v" onEnd={persistViewerSizes}
+                    onDrag={(dx) => setPrefs((p) => ({ ...p, thumbSize: clampSz(p.thumbSize - dx, 48, 200) }))} />
+        )}
         {thumbRight && thumbs}
+        {paletteRight && paletteOpen && (
+          <Splitter dir="v" onEnd={persistViewerSizes}
+                    onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW - dx, 64, 240) }))} />
+        )}
         {paletteRight && palette}
         {!paletteOpen && paletteRight && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
+        )}
+        {prefs.reportDock && (
+          <Splitter dir="v" onEnd={persistViewerSizes}
+                    onDrag={(dx) => setPrefs((p) => ({ ...p, dockW: clampSz(p.dockW - dx, 180, 480) }))} />
         )}
         {dock}
       </div>
       {thumbHoriz && thumbs}
     </div>
+  );
+}
+
+/* 타이틀바 드롭다운 메뉴 (Opened/Related/Series/HP — UBPACS p.16) */
+function TitleMenu({ id, icon, title, items, menu, setMenu }: {
+  id: "opened" | "related" | "series" | "hp";
+  icon: string; title: string;
+  items: { label: string; onClick: () => void }[];
+  menu: string | null;
+  setMenu: (m: "opened" | "related" | "series" | "hp" | null) => void;
+}) {
+  return (
+    <span style={{ position: "relative" }}>
+      <button onClick={() => setMenu(menu === id ? null : id)} title={title}
+              style={{ padding: "0 7px", fontSize: 11, background: menu === id ? "var(--accent)" : undefined }}>
+        {icon}
+      </button>
+      {menu === id && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, zIndex: 360, minWidth: 260, maxHeight: 280,
+          overflow: "auto", background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          borderRadius: 5, boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: "3px 0",
+        }} onMouseLeave={() => setMenu(null)}>
+          {items.map((it, i) => (
+            <div key={i} onClick={() => { it.onClick(); setMenu(null); }}
+                 style={{ padding: "4px 12px", fontSize: 11.5, cursor: "pointer", whiteSpace: "nowrap" }}
+                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                 onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+              {it.label}
+            </div>
+          ))}
+          {items.length === 0 && (
+            <div style={{ padding: "6px 12px", fontSize: 11, color: "var(--text-secondary)" }}>항목 없음</div>
+          )}
+        </div>
+      )}
+    </span>
   );
 }
 
