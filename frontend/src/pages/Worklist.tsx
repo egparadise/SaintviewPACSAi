@@ -17,6 +17,7 @@ import {
   type BatchCandidate,
   type InstanceThumb,
   type KeyImage,
+  type NlQueryResult,
   type Report,
   type SrJson,
   type StudyDetail,
@@ -83,15 +84,17 @@ export const DEFAULT_COLUMNS = [
 
 /* ── [A] 액션 툴바 ─────────────────────────────── */
 function ActionToolbar({
-  selected, onAction, searchText, setSearchText, onSearch,
+  selected, onAction, searchText, setSearchText, onSearch, onNlSearch,
 }: {
   selected: StudyDetail | null;
   onAction: (a: string) => void;
   searchText: string;
   setSearchText: (s: string) => void;
   onSearch: () => void;
+  onNlSearch: (text: string) => void;
 }) {
   const need = !selected;
+  const [nlText, setNlText] = useState("");
   const Btn = ({ a, label, primary, title }: { a: string; label: string; primary?: boolean; title?: string }) => (
     <button className={primary ? "primary" : ""} disabled={need && a !== "batch" && a !== "refresh"}
             title={title} onClick={() => onAction(a)}>
@@ -128,6 +131,14 @@ function ActionToolbar({
       <button title="현재 검색조건을 바로가기로 저장" onClick={() => {
         window.dispatchEvent(new CustomEvent("sv-save-shortcut"));
       }}>★저장</button>
+      {/* S1 자연어 검색 (nl_to_query) — AI 기능이므로 보라 포인트 */}
+      <input
+        placeholder="AI 검색 — 예: 지난주 흉부 CT 미판독" value={nlText}
+        onChange={(e) => setNlText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && nlText.trim()) { onNlSearch(nlText); } }}
+        title="자연어로 검색 조건을 입력하면 AI가 필터로 변환합니다 (적용 전 미리보기)"
+        style={{ width: 200, background: "var(--bg-canvas)", borderColor: "var(--ai)" }}
+      />
       <input
         placeholder="SEARCH — 환자 ID/이름 (=정확 / 접두% / !제외)" value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
@@ -198,7 +209,8 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
       case "status":
         return (
           <select key={key} value={filters.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-            <option value="">*Any 상태</option><option value="received">도착</option>
+            <option value="">*Any 상태</option><option value="unread">미판독(확정 전)</option>
+            <option value="received">도착</option>
             <option value="draft_ready">AI초안</option><option value="reading">판독중</option>
             <option value="finalized">확정</option>
           </select>
@@ -310,7 +322,7 @@ function StudyGrid({
 /* ── [D-좌] 과거검사 (선택 환자, F-14) ────────────── */
 function PriorStudiesGrid({ detail, onAddCompare }: {
   detail: StudyDetail | null;
-  onAddCompare: (e: { study_uid: string; study_date: string; modality: string; study_desc: string }) => void;
+  onAddCompare: (e: { id: number; study_uid: string; study_date: string; modality: string; study_desc: string }) => void;
 }) {
   return (
     <PanelBox title={`과거검사 ${detail ? `— ${detail.patient_name}` : ""} (더블클릭=비교세트 추가)`}>
@@ -336,19 +348,27 @@ function PriorStudiesGrid({ detail, onAddCompare }: {
 }
 
 /* ── [D-우] 비교세트 (Complementary set) ─────────── */
-interface CompareItem { study_uid: string; study_date: string; modality: string; study_desc: string }
-function ComparisonSetGrid({ items, current, onRemove, onOpenCompare }: {
+interface CompareItem { id: number; study_uid: string; study_date: string; modality: string; study_desc: string }
+function ComparisonSetGrid({ items, current, onRemove, onOpenCompare, onMerge }: {
   items: CompareItem[];
   current: StudyDetail | null;
   onRemove: (uid: string) => void;
   onOpenCompare: () => void;
+  onMerge: () => void;
 }) {
   return (
     <PanelBox title="비교세트 (Complementary set)" right={
-      <button className="primary" disabled={!current || items.length === 0} onClick={onOpenCompare}
-              style={{ padding: "2px 10px", fontSize: 11.5 }}>
-        비교 열기 ({items.length + (current ? 1 : 0)})
-      </button>
+      <span style={{ display: "flex", gap: 4 }}>
+        <button disabled={!current || items.length === 0} onClick={onMerge}
+                title="묶음판독(report_merge) — 비교세트 검사들을 현재 검사 판독 하나로 병합"
+                style={{ padding: "2px 10px", fontSize: 11.5 }}>
+          묶음판독
+        </button>
+        <button className="primary" disabled={!current || items.length === 0} onClick={onOpenCompare}
+                style={{ padding: "2px 10px", fontSize: 11.5 }}>
+          비교 열기 ({items.length + (current ? 1 : 0)})
+        </button>
+      </span>
     }>
       <table className="grid-table">
         <thead><tr><th>검사일</th><th>MOD</th><th>검사명</th><th></th></tr></thead>
@@ -855,6 +875,8 @@ export function Worklist() {
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
   const [viewer2dDetail, setViewer2dDetail] = useState<StudyDetail | null>(null);
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
+  const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
+  const [nlBusy, setNlBusy] = useState(false);
   const insertRef = useRef<((t: string) => void) | null>(null);
 
   // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
@@ -970,7 +992,7 @@ export function Worklist() {
       case "compare":
         if (target) setCompareSet((prev) =>
           prev.some((c) => c.study_uid === target.study_uid) ? prev
-            : [...prev, { study_uid: target.study_uid, study_date: target.study_date, modality: target.modality, study_desc: target.study_desc }]);
+            : [...prev, { id: target.id, study_uid: target.study_uid, study_date: target.study_date, modality: target.modality, study_desc: target.study_desc }]);
         break;
       case "pdf": {
         if (!target) break;
@@ -1012,15 +1034,86 @@ export function Worklist() {
     openViewerCompare([selected.study_uid, ...compareSet.map((c) => c.study_uid)], hpFor(selected.modality));
   }, [selected, compareSet]);
 
+  // 묶음판독(report_merge): 현재 검사 + 비교세트 → 판독 1건 병합 (03b: 건수 명시 confirm)
+  const doMerge = useCallback(async () => {
+    if (!selected || compareSet.length === 0) return;
+    if (!window.confirm(
+      `현재 검사 + 비교세트 ${compareSet.length}건을 하나의 판독으로 병합(묶음판독)합니다.\n` +
+      `부속 검사 소견은 [MOD 검사일] 태그로 합쳐집니다. 진행할까요?`)) return;
+    try {
+      await api.mergeReports([selected.id, ...compareSet.map((c) => c.id)]);
+      setCompareSet([]);
+      onChanged();
+      alert("묶음판독 초안이 생성되었습니다 — REPORT 패널에서 검토하세요.");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "묶음판독 실패");
+    }
+  }, [selected, compareSet, onChanged]);
+
+  // S1 자연어 검색: 변환 → 미리보기 배너 → 사용자 적용
+  const onNlSearch = useCallback(async (text: string) => {
+    setNlBusy(true);
+    try { setNlPreview(await api.nlQuery(text)); }
+    catch (e) { alert(e instanceof Error ? e.message : "자연어 검색 실패"); }
+    finally { setNlBusy(false); }
+  }, []);
+
+  const applyNlPreview = useCallback(() => {
+    if (!nlPreview) return;
+    const f = nlPreview.filter;
+    const next: Record<string, string> = {};
+    if (f.patient_id) next.pid = f.patient_id;
+    if (f.patient_name) next.pname = f.patient_name;
+    if (f.sex) next.sex = f.sex;
+    if (f.modality) next.modality = f.modality;
+    if (f.body_part) next.body_part = f.body_part;
+    if (f.study_desc) next.desc = f.study_desc;
+    if (f.status) next.status = f.status;
+    if (f.finding) next.finding = f.finding;
+    if (f.emergency) next.emergency = "true";
+    const iso = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    if (f.date_from) next.date_from_iso = iso(f.date_from);
+    if (f.date_to) next.date_to_iso = iso(f.date_to);
+    setDatePreset("all");
+    setFilters(next);
+    setNlPreview(null);
+    setRefreshKey((k) => k + 1);
+  }, [nlPreview]);
+
   const emergencyCount = useMemo(() => items.filter((i) => i.emergency).length, [items]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
-                     onSearch={() => setRefreshKey((k) => k + 1)} />
+                     onSearch={() => setRefreshKey((k) => k + 1)}
+                     onNlSearch={onNlSearch} />
       <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
                  onSearch={() => setRefreshKey((k) => k + 1)} />
+
+      {/* S1 자연어 검색 미리보기 — 적용 전 사용자 확인(03b: AI 결과는 항상 라벨링) */}
+      {(nlBusy || nlPreview) && (
+        <div style={{
+          display: "flex", gap: 8, alignItems: "center", padding: "5px 10px",
+          background: "var(--bg-panel)", borderBottom: "1px solid var(--ai)", fontSize: 12.5,
+        }}>
+          <span className="badge ai">AI 검색</span>
+          {nlBusy ? (
+            <span style={{ color: "var(--text-secondary)" }}>변환 중…</span>
+          ) : nlPreview && (
+            <>
+              <span>해석: <b>{nlPreview.explanation}</b></span>
+              {nlPreview.source !== "live" && (
+                <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+                  ({nlPreview.source === "mock" ? "규칙 기반" : "AI 실패 — 규칙 기반 폴백"})
+                </span>
+              )}
+              <button className="primary" style={{ padding: "1px 12px", fontSize: 12 }} onClick={applyNlPreview}>적용</button>
+              <button style={{ padding: "1px 10px", fontSize: 12 }} onClick={() => setNlPreview(null)}>취소</button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 중단: 날짜트리 + 메인 그리드 */}
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
@@ -1040,7 +1133,7 @@ export function Worklist() {
                             prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
         <ComparisonSetGrid items={compareSet} current={selected}
                            onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
-                           onOpenCompare={openCompare} />
+                           onOpenCompare={openCompare} onMerge={doMerge} />
       </div>
 
       {/* 하단2: 상용구 | 리포트 | 오더 (디자인 §3 [E]) */}

@@ -3,6 +3,13 @@ import { useEffect, useState } from "react";
 import { api, type AiQuality, type OrthancStatus } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS } from "./Worklist";
 
+/** 05 Mode Profile — 백엔드 mode.profiles JSON 항목 (07 A.7 v1) */
+interface ModeProfile {
+  label?: string;
+  worklist?: Record<string, unknown>;
+  viewer?: Record<string, unknown>;
+}
+
 const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "env", label: "환경 (Environment)" },
   { key: "network", label: "네트워크 (DICOM)" },
@@ -42,6 +49,9 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   const [phraseCount, setPhraseCount] = useState(0);
+  // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
+  const [modeProfiles, setModeProfiles] = useState<Record<string, ModeProfile>>({});
+  const [modeJson, setModeJson] = useState("");
 
   useEffect(() => {
     api.getSetting("worklist.prefs").then((r) => {
@@ -74,6 +84,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     }).catch(() => {});
     api.getSetting("report.phrases").then((r) => {
       setPhraseCount(((r.value as { items?: unknown[] }).items ?? []).length);
+    }).catch(() => {});
+    api.getSetting("mode.profiles").then((r) => {
+      const v = r.value as { profiles?: Record<string, ModeProfile> };
+      setModeProfiles(v.profiles ?? {});
+      setModeJson(JSON.stringify(r.value, null, 2));
     }).catch(() => {});
     if (isAdmin) {
       api.getSetting("pdf.template").then((r) => {
@@ -139,39 +154,56 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             {page === "env" && (
               <>
-                <Group title="제품 모드 프리셋 (05 Mode Profile v1)">
+                <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <select id="sv-mode" defaultValue="">
                       <option value="" disabled>모드 선택…</option>
-                      <option value="saintvidw">saintvidw (기본 — AI 중심)</option>
-                      <option value="infinitt">INFINITT 에뮬레이션</option>
-                      <option value="ubpacs">UBPACS-Z 에뮬레이션</option>
-                      <option value="sonic">SonicPACS 에뮬레이션</option>
+                      {Object.entries(modeProfiles).map(([k, p]) => (
+                        <option key={k} value={k}>{p.label ?? k}</option>
+                      ))}
                     </select>
                     <button onClick={async () => {
                       const m = (document.getElementById("sv-mode") as HTMLSelectElement).value;
-                      if (!m) return;
-                      const P: Record<string, { wl: Record<string, unknown>; vw: Record<string, unknown> }> = {
-                        saintvidw: { wl: { columns: DEFAULT_COLUMNS, find_fields: DEFAULT_FIND_FIELDS, dbl_action: "viewer2d" },
-                                     vw: { paletteSide: "left", thumbSide: "left", thumbMode: "series", reportDock: true } },
-                        infinitt:  { wl: { columns: ["status","patient_name","patient_key","sex","study_date","accession_no","modality","series_count","instance_count","body_part","impression"], find_fields: DEFAULT_FIND_FIELDS, dbl_action: "viewer2d" },
-                                     vw: { paletteSide: "top", thumbSide: "bottom", thumbMode: "series", reportDock: false } },
-                        ubpacs:    { wl: { columns: DEFAULT_COLUMNS, find_fields: ["pid","pname","sex","modality","date","desc","status"], dbl_action: "viewer2d" },
-                                     vw: { paletteSide: "left", thumbSide: "left", thumbMode: "all", reportDock: true } },
-                        sonic:     { wl: { columns: ["status","patient_key","patient_name","study_date","modality","study_desc","impression"], find_fields: ["pid","pname","modality","date"], dbl_action: "ohif" },
-                                     vw: { paletteSide: "top", thumbSide: "bottom", thumbMode: "series", reportDock: false } },
-                      };
-                      const prof = P[m];
+                      const prof = modeProfiles[m];
+                      if (!prof) return;
                       const cur = (await api.getSetting("worklist.prefs")).value;
-                      await api.putSetting("worklist.prefs", { ...cur, ...prof.wl }, "user");
+                      await api.putSetting("worklist.prefs", { ...cur, ...(prof.worklist ?? {}) }, "user");
                       const curv = (await api.getSetting("viewer.prefs")).value;
-                      await api.putSetting("viewer.prefs", { ...curv, ...prof.vw }, "user");
-                      setSaved(`'${m}' 모드 적용 — 새로고침 시 반영`);
+                      await api.putSetting("viewer.prefs", { ...curv, ...(prof.viewer ?? {}) }, "user");
+                      setSaved(`'${prof.label ?? m}' 모드 적용 — 새로고침 시 반영`);
                     }}>적용</button>
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
+                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드.
                   </div>
+                  {isAdmin && (
+                    <details>
+                      <summary style={{ fontSize: 11.5, cursor: "pointer", color: "var(--text-secondary)" }}>
+                        프로파일 JSON 편집 (관리자 — 전역 적용)
+                      </summary>
+                      <textarea value={modeJson} onChange={(e) => setModeJson(e.target.value)}
+                                spellCheck={false}
+                                style={{
+                                  width: "100%", height: 160, marginTop: 6, fontSize: 11,
+                                  fontFamily: "Consolas, monospace", background: "var(--bg-canvas)",
+                                  color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 4,
+                                }} />
+                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                        <button onClick={async () => {
+                          try {
+                            const parsed = JSON.parse(modeJson);
+                            if (!parsed.profiles) throw new Error("최상위에 profiles 객체가 필요합니다");
+                            await api.putSetting("mode.profiles", parsed, "global");
+                            setModeProfiles(parsed.profiles);
+                            setSaved("모드 프로파일 JSON 저장됨 (전역)");
+                          } catch (e) {
+                            alert(e instanceof Error ? `JSON 오류: ${e.message}` : "저장 실패");
+                          }
+                        }}>JSON 저장</button>
+                      </div>
+                    </details>
+                  )}
                 </Group>
                 <Group title="워크리스트 동작">
                   <Row label="자동 갱신">
@@ -182,7 +214,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                   </Row>
                   <Row label="기본 상태 필터">
                     <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
-                      <option value="">전체</option><option value="draft_ready">AI초안</option>
+                      <option value="">전체</option><option value="unread">미판독(확정 전)</option>
+                      <option value="draft_ready">AI초안</option>
                       <option value="reading">판독중</option><option value="received">도착</option>
                     </select>
                   </Row>

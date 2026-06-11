@@ -91,6 +91,97 @@ def finalize_report(db: Session, report: Report, *, username: str) -> Report:
     return report
 
 
+def merge_reports(db: Session, study_ids: list[int], *, username: str) -> Report:
+    """묶음판독(report_merge — UBPACS-Z Direct Report 계열).
+
+    동일 환자의 검사 여러 건을 첫 번째 검사(primary)의 판독 하나로 병합한다.
+    부속 검사들의 소견·임프레션은 [MOD 검사일] 태그를 붙여 합치고,
+    comparison.prior_study_refs에 부속 StudyUID를 기록한다.
+    """
+    if len(study_ids) < 2:
+        raise WorkflowError("묶음판독은 검사 2건 이상이 필요합니다.")
+    studies = [db.get(Study, sid) for sid in study_ids]
+    if any(s is None for s in studies):
+        raise WorkflowError("존재하지 않는 검사가 포함되어 있습니다.")
+    if len({s.patient_id for s in studies}) != 1:
+        raise WorkflowError("동일 환자의 검사만 묶음판독할 수 있습니다.")
+
+    primary, secondaries = studies[0], studies[1:]
+    base_report = latest_report(db, primary.id)
+    if base_report and base_report.status == "finalized":
+        raise WorkflowError("확정된 판독에는 병합할 수 없습니다. 새 버전(addendum)을 사용하세요.")
+
+    import copy
+
+    if base_report:
+        sr = copy.deepcopy(base_report.sr_json or {})
+    else:
+        sr = {
+            "exam": {"modality": primary.modality, "body_part": primary.body_part,
+                     "technique": primary.study_desc},
+            "comparison": {"prior_study_refs": [], "summary": ""},
+            "findings": [],
+            "impression": [],
+            "recommendations": [],
+            "ai_meta": {"caveats": []},
+        }
+    sr.setdefault("comparison", {"prior_study_refs": [], "summary": ""})
+    sr.setdefault("findings", [])
+    sr.setdefault("impression", [])
+    sr.setdefault("ai_meta", {"caveats": []})
+
+    for s in secondaries:
+        tag = f"[{s.modality} {s.study_date}]"
+        rep = latest_report(db, s.id)
+        if rep and rep.sr_json:
+            for fd in rep.sr_json.get("findings", []):
+                merged = dict(fd)
+                merged["organ"] = f"{tag} {fd.get('organ', '')}".strip()
+                sr["findings"].append(merged)
+            stmts = [i.get("statement", "") for i in rep.sr_json.get("impression", []) if i.get("statement")]
+            if stmts:
+                sr["impression"].append({
+                    "rank": len(sr["impression"]) + 1,
+                    "statement": f"{tag} " + " / ".join(stmts),
+                    "confidence": (rep.sr_json.get("impression") or [{}])[0].get("confidence", "low"),
+                    "codes": [],
+                })
+        else:
+            sr["findings"].append({
+                "organ": tag, "observation": f"{s.study_desc} — 기존 판독 없음(영상 직접 확인 필요)",
+                "severity": "normal", "measurements": [],
+            })
+        if s.study_uid not in sr["comparison"]["prior_study_refs"]:
+            sr["comparison"]["prior_study_refs"].append(s.study_uid)
+
+    sr["ai_meta"].setdefault("caveats", []).append(
+        f"묶음판독: 검사 {len(study_ids)}건 병합 — 부속 검사 소견은 [MOD 검사일] 태그로 표기"
+    )
+
+    report = Report(
+        study_id=primary.id,
+        version=(base_report.version + 1) if base_report else 1,
+        status="in_review",
+        sr_json=sr,
+        narrative_text=narrative_from_sr(sr),
+        created_by=username,
+        reviewed_by=username,
+        ai_sources={"merged_study_ids": [s.id for s in secondaries]},
+    )
+    db.add(report)
+    primary.status = "reading"
+    db.add(
+        AuditLog(
+            action="report_merge",
+            target_type="study",
+            target_id=str(primary.id),
+            detail={"by": username, "study_ids": study_ids},
+        )
+    )
+    db.commit()
+    return report
+
+
 def _diff_against_ai_draft(db: Session, final: Report) -> dict:
     """F-20: AI 초안(v1, created_by='ai') 대비 확정본 차이 지표."""
     draft = db.execute(

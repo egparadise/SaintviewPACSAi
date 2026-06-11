@@ -124,7 +124,11 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
     if f.body_part:
         q = q.where(Study.body_part.like(f"%{f.body_part}%"))
     if f.status:
-        q = q.where(Study.status == f.status)
+        if f.status == "unread":
+            # S1 '미판독' — 확정 전 전체(received/draft_ready/reading/suspended)
+            q = q.where(Study.status != "finalized")
+        else:
+            q = q.where(Study.status == f.status)
     if f.date_from:
         q = q.where(Study.study_date >= f.date_from)
     if f.date_to:

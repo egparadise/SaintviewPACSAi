@@ -17,6 +17,7 @@ ALLOWED_KEYS = {
     "worklist.prefs",        # 사용자 기본 필터·자동갱신·컬럼 구성(F-8)
     "viewer.prefs",          # 사용자 뷰어 환경(행잉·오버레이)
     "report.phrases",        # 상용구 사전 (화면분석 §5.6 Predefined Readings)
+    "mode.profiles",         # 05 제품 모드 프로파일 JSON (S7 — 전역/관리자 전용)
 }
 
 
@@ -30,6 +31,10 @@ def read_setting(key: str, db: Session = Depends(get_db), user: dict = Depends(c
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
     value = get_setting(db, key, user=user["sub"], default={})
+    if key == "mode.profiles" and not value:
+        from app.services.mode_profiles import DEFAULT_MODE_PROFILES
+
+        value = DEFAULT_MODE_PROFILES
     return {"key": key, "value": value}
 
 
@@ -39,6 +44,8 @@ def write_setting(
 ):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
+    if key == "mode.profiles" and body.scope != "global":
+        raise HTTPException(status_code=400, detail="mode.profiles는 전역(global) 설정만 허용")
     if body.scope == "global":
         if user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="전역 설정은 관리자만 변경할 수 있습니다")

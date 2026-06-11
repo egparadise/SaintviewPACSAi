@@ -11,6 +11,7 @@ from app.services.report_service import (
     WorkflowError,
     finalize_report,
     list_reports,
+    merge_reports,
     update_report,
 )
 
@@ -224,6 +225,20 @@ def batch_review_candidates(
         if len(items) >= limit:
             break
     return {"items": items}
+
+
+class MergeBody(BaseModel):
+    study_ids: list[int]  # [0]=primary(현재 선택), 나머지=부속
+
+
+@router.post("/reports/merge")
+def merge(body: MergeBody, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """묶음판독(report_merge) — 동일 환자 다검사를 primary 검사 판독 하나로 병합."""
+    try:
+        report = merge_reports(db, body.study_ids, username=user["sub"])
+    except WorkflowError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return _report_out(report)
 
 
 class BatchFinalize(BaseModel):

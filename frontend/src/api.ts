@@ -166,7 +166,22 @@ export const api = {
   orthancStatus: () => req<OrthancStatus>("/api/admin/orthanc-status"),
   seriesTree: (studyId: number) =>
     req<{ study_uid: string; series: SeriesNode[] }>(`/api/studies/${studyId}/series-tree`),
+  nlQuery: (text: string) =>
+    req<NlQueryResult>("/api/worklist/nl-query", { method: "POST", body: JSON.stringify({ text }) }),
+  mergeReports: (study_ids: number[]) =>
+    req<Report>("/api/reports/merge", { method: "POST", body: JSON.stringify({ study_ids }) }),
 };
+
+/** S1 자연어 검색 — 적용 전 미리보기(explanation) 필수 */
+export interface NlQueryResult {
+  filter: {
+    patient_id: string; patient_name: string; sex: string; modality: string;
+    body_part: string; study_desc: string; status: string;
+    date_from: string; date_to: string; finding: string; emergency: boolean;
+  };
+  explanation: string;
+  source: "mock" | "live" | "live_fallback";
+}
 
 export interface SeriesNode {
   series_uid: string;

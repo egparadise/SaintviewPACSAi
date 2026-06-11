@@ -92,6 +92,41 @@ SR_SCHEMA: dict = {
 }
 
 
+# S1 자연어 검색(nl_to_query) — 자연어 → 워크리스트 필터 구조화 출력 스키마
+NL_QUERY_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "filter": {
+            "type": "object",
+            "properties": {
+                "patient_id": {"type": "string"},
+                "patient_name": {"type": "string"},
+                "sex": {"type": "string", "enum": ["", "M", "F", "O"]},
+                "modality": {"type": "string"},
+                "body_part": {"type": "string"},
+                "study_desc": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["", "unread", "received", "draft_ready", "reading", "finalized", "suspended"],
+                },
+                "date_from": {"type": "string"},  # YYYYMMDD 또는 ""
+                "date_to": {"type": "string"},
+                "finding": {"type": "string"},
+                "emergency": {"type": "boolean"},
+            },
+            "required": [
+                "patient_id", "patient_name", "sex", "modality", "body_part",
+                "study_desc", "status", "date_from", "date_to", "finding", "emergency",
+            ],
+            "additionalProperties": False,
+        },
+        "explanation": {"type": "string"},
+    },
+    "required": ["filter", "explanation"],
+    "additionalProperties": False,
+}
+
+
 def has_critical(sr_json: dict) -> bool:
     return any(f.get("severity") == "critical" for f in (sr_json or {}).get("findings", []))
 

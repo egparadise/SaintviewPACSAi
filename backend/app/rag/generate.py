@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from app.config import get_settings
 from app.rag.deid import mask
 from app.rag.retrieval import PriorReport, SimilarCase
-from app.rag.schemas import SR_SCHEMA
+from app.rag.schemas import NL_QUERY_SCHEMA, SR_SCHEMA
 
 SYSTEM_PROMPT = """당신은 영상의학과 판독 보조 시스템이다. 주어진 검사 정보, 동일 환자의 과거 판독,
 유사 증례를 근거로 Structured Report 초안을 생성한다.
@@ -142,6 +142,47 @@ def _generate_live(gi: GenerationInput, sources: dict) -> GenerationResult:
         latency_sec=round(latency, 2),
         sources=sources,
     )
+
+
+NL_QUERY_SYSTEM = """당신은 PACS 워크리스트 검색 도우미다. 사용자의 한국어/영어 자연어 요청을
+검색 필터 JSON으로 변환한다.
+
+규칙:
+1. 날짜는 YYYYMMDD 형식. '지난주'=오늘-7일~오늘, '어제'=어제~어제, '오늘'=오늘~오늘.
+2. '미판독'(아직 확정되지 않음)은 status='unread'. '확정/판독완료'는 'finalized'.
+3. 요청에 없는 조건은 빈 문자열("")로 둔다. 추측하지 마라.
+4. modality는 DICOM 약어(CT/MR/CR/US/MG/DX 등), body_part는 영문 대문자(CHEST/ABDOMEN/BRAIN 등).
+5. explanation에는 해석한 조건을 한국어 한 줄로 요약한다(사용자가 적용 전 확인)."""
+
+
+def generate_nl_query(text: str, today_iso: str) -> dict:
+    """S1 nl_to_query live 경로 — 검색 요청 텍스트도 PHI 게이트를 통과시킨다."""
+    import anthropic
+
+    from app.rag.deid import assert_no_phi
+
+    masked = mask(text).text
+    assert_no_phi(masked)
+
+    settings = get_settings()
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=settings.ai_model,
+        max_tokens=2000,
+        thinking={"type": "adaptive"},
+        output_config={
+            "effort": "medium",
+            "format": {"type": "json_schema", "schema": NL_QUERY_SCHEMA},
+        },
+        system=[{
+            "type": "text",
+            "text": NL_QUERY_SYSTEM,
+            "cache_control": {"type": "ephemeral"},
+        }],
+        messages=[{"role": "user", "content": f"오늘 날짜: {today_iso}\n검색 요청: {masked}"}],
+    )
+    out = next(b.text for b in response.content if b.type == "text")
+    return json.loads(out)
 
 
 def _generate_mock(gi: GenerationInput, sources: dict) -> GenerationResult:

@@ -24,9 +24,9 @@
 |---|---|---|---|
 | 1 | 상용구 관리 고도화(Modality×BodyPart 분류 콤보, ClassA/B) | 중 | 현 패널 group 필드 확장 |
 | 2 | 자동 최적 W/L(AI — 03c Image Manipulation 프롬프트) | 중 | "AI 적용" 배지 + 수동 우선 |
-| 3 | report_copy / report_merge(묶음판독) | 중 | UBPACS-Z Direct Report 계열 |
+| 3 | ~~report_copy / report_merge(묶음판독)~~ | 중 | **완료** — copy 10차, merge 12차(`POST /api/reports/merge`) |
 | 4 | 변화 강조(Prior 비교 정량화 — F-14 확장) | 중 | RAG comparison과 연동 |
-| 5 | **Mode Profile JSON 4종 + 전환**(05) | 대 | 시장 진입 차별화(경쟁사 유사성+통합성) |
+| 5 | ~~**Mode Profile JSON 4종 + 전환**(05)~~ | 대 | **완료** — 프리셋 10차, 서버 JSON화 12차(`mode.profiles`) |
 | 6 | 패널 배치 사용자화(드래그) | 대 | 5구역 레이아웃 엔진 |
 | 7 | 위치기준 W/L, EDIT 탭, commentWindow/memoWindow, searchWizard | 소~중 | UBPACS-Z UX 세부 |
 | 8 | 외부 AI 결과 병합(F-12), 2차 승인(F-17 UI), 음성 STT(P3) | 중~대 | |

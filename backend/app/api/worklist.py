@@ -58,6 +58,20 @@ def worklist(
     return {"items": items, "total": total}
 
 
+class NlQueryBody(BaseModel):
+    text: str
+
+
+@router.post("/worklist/nl-query")
+def nl_query(body: NlQueryBody, user: dict = Depends(current_user)):
+    """S1 자연어 검색 — 자연어를 필터로 변환해 미리보기 반환(적용은 사용자 확인 후)."""
+    from app.rag.nl_query import nl_to_query
+
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="검색 문장을 입력하세요")
+    return nl_to_query(body.text)
+
+
 @router.get("/studies/{study_id}")
 def get_study(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     detail = study_detail(db, study_id)
