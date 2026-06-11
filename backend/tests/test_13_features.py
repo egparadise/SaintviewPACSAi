@@ -427,6 +427,40 @@ def test_bookmark_and_order_name_columns(client, auth_headers):
     assert row2["bookmark"] is True
 
 
+# ── 29차: 서버 네트워크 — 폴더 공유·DB 테스트 ───────────────
+
+
+def test_server_network_share(client, auth_headers, tmp_path):
+    # 미설정 시 안내
+    client.put("/api/settings/server.network", headers=auth_headers,
+               json={"value": {}, "scope": "global"})
+    assert client.get("/api/share", headers=auth_headers).status_code == 404
+
+    # 디렉토리 설정 → 목록/다운로드 (path traversal 차단)
+    (tmp_path / "hello.txt").write_text("share-me", encoding="utf-8")
+    assert client.put("/api/settings/server.network", headers=auth_headers,
+                      json={"value": {"local_share_dir": str(tmp_path),
+                                      "web": {"ip": "127.0.0.1", "port": 8000, "ae_title": "SAINTVIEW"}},
+                            "scope": "global"}).status_code == 200
+    # user scope 거부(전역 전용)
+    assert client.put("/api/settings/server.network", headers=auth_headers,
+                      json={"value": {}, "scope": "user"}).status_code == 400
+
+    r = client.get("/api/share", headers=auth_headers)
+    assert r.status_code == 200
+    assert any(f["name"] == "hello.txt" for f in r.json()["items"])
+    dl = client.get("/api/share/file?name=hello.txt", headers=auth_headers)
+    assert dl.status_code == 200 and dl.content == b"share-me"
+    assert client.get("/api/share/file?name=..%2F..%2Fsecret", headers=auth_headers).status_code in (400, 404)
+
+
+def test_net_db_test(client, auth_headers):
+    r = client.post("/api/admin/net-test/db", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert "latency_ms" in r.json()
+
+
 # ── 번인 OCR 가드 — 폴백 무중단 ─────────────────────────────
 
 

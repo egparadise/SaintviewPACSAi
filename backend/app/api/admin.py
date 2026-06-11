@@ -75,6 +75,89 @@ def apply_dicom_nodes(db: Session = Depends(get_db), user: dict = Depends(admin_
         client.close()
 
 
+@router.post("/net-test/ping")
+def net_ping(body: dict, user: dict = Depends(admin_user)):
+    """Ping 테스트 — ICMP(시스템 ping) + 포트 지정 시 TCP 연결 확인."""
+    import platform
+    import socket
+    import subprocess
+    import time
+
+    ip = str(body.get("ip", "")).strip()
+    if not ip:
+        raise HTTPException(status_code=400, detail="ip는 필수입니다")
+    flag = "-n" if platform.system() == "Windows" else "-c"
+    t0 = time.monotonic()
+    try:
+        r = subprocess.run(["ping", flag, "1", "-w" if platform.system() == "Windows" else "-W",
+                            "2000" if platform.system() == "Windows" else "2", ip],
+                           capture_output=True, timeout=5)
+        icmp_ok = r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        icmp_ok = False
+    icmp_ms = round((time.monotonic() - t0) * 1000)
+
+    tcp_ok = None
+    port = body.get("port")
+    if port:
+        try:
+            with socket.create_connection((ip, int(port)), timeout=3):
+                tcp_ok = True
+        except OSError:
+            tcp_ok = False
+    return {"ok": icmp_ok or tcp_ok is True, "icmp": icmp_ok, "icmp_ms": icmp_ms, "tcp": tcp_ok}
+
+
+@router.post("/net-test/echo")
+def net_dicom_echo(body: dict, user: dict = Depends(admin_user)):
+    """DICOM C-ECHO 테스트 — pynetdicom Verification SCU."""
+    ip = str(body.get("ip", "")).strip()
+    try:
+        port = int(body.get("port", 0))
+    except (TypeError, ValueError):
+        port = 0
+    aet = str(body.get("ae_title", "")).strip() or "ANY-SCP"
+    if not ip or not (0 < port < 65536):
+        raise HTTPException(status_code=400, detail="ip/port가 올바르지 않습니다")
+    try:
+        from pynetdicom import AE
+        from pynetdicom.sop_class import Verification
+
+        ae = AE(ae_title="SAINTVIEW")
+        ae.add_requested_context(Verification)
+        ae.acse_timeout = 5
+        ae.network_timeout = 5
+        assoc = ae.associate(ip, port, ae_title=aet)
+        if not assoc.is_established:
+            return {"ok": False, "detail": "연관(Association) 수립 실패 — AE Title/IP/Port 확인"}
+        status = assoc.send_c_echo()
+        assoc.release()
+        ok = bool(status and getattr(status, "Status", 1) == 0)
+        return {"ok": ok, "detail": "C-ECHO 성공" if ok else f"C-ECHO 응답 상태 {getattr(status, 'Status', '?')}"}
+    except Exception as e:  # noqa: BLE001 — 테스트 결과로 보고
+        return {"ok": False, "detail": f"C-ECHO 실패: {e}"}
+
+
+@router.post("/net-test/db")
+def net_db_test(db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """DB 연동 테스트 — 현재 엔진으로 SELECT 1."""
+    import time
+
+    from sqlalchemy import text
+
+    t0 = time.monotonic()
+    try:
+        db.execute(text("SELECT 1"))
+        ms = round((time.monotonic() - t0) * 1000, 1)
+        from app.config import get_settings
+
+        url = get_settings().database_url
+        masked = url.split("@")[-1] if "@" in url else url  # 자격증명 마스킹
+        return {"ok": True, "latency_ms": ms, "dialect": db.bind.dialect.name if db.bind else "?", "target": masked}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)}
+
+
 @router.get("/audit")
 def audit(limit: int = 100, db: Session = Depends(get_db), user: dict = Depends(admin_user)):
     rows = db.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)).scalars().all()

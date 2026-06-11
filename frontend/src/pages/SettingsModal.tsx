@@ -28,6 +28,7 @@ interface ModeProfile {
 const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "env", label: "환경 (Environment)" },
   { key: "network", label: "네트워크 (DICOM)" },
+  { key: "servernet", label: "서버 네트워크" },
   { key: "worklist", label: "워크리스트" },
   { key: "report", label: "리포트" },
   { key: "reading", label: "판독 (Reading)" },
@@ -108,6 +109,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // DICOM 노드 (SCP/SCU) — 전역/관리자
   const [nodes, setNodes] = useState<DicomNode[]>([]);
   const [nodeMsg, setNodeMsg] = useState("");
+  // 서버 네트워크 — 로컬 공유 디렉토리 + 웹서버(IP/Port/Name/AET) + 연결 테스트
+  const [snDir, setSnDir] = useState("");
+  const [snWeb, setSnWeb] = useState({ ip: "", port: "", name: "", ae_title: "" });
+  const [snMsg, setSnMsg] = useState("");
   // 상용구 관리 (DB 테이블)
   const [phrases, setPhrases] = useState<PhraseRow[]>([]);
   const [phraseModal, setPhraseModal] = useState<PhraseRow | "new" | null>(null);
@@ -178,6 +183,14 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
     api.phrases().then((r) => setPhrases(r.items)).catch(() => {});
     api.getSetting("dicom.nodes").then((r) => {
       setNodes(((r.value as { items?: DicomNode[] }).items) ?? []);
+    }).catch(() => {});
+    api.getSetting("server.network").then((r) => {
+      const v = r.value as { local_share_dir?: string; web?: { ip?: string; port?: number | string; name?: string; ae_title?: string } };
+      setSnDir(v.local_share_dir ?? "");
+      setSnWeb({
+        ip: v.web?.ip ?? "", port: String(v.web?.port ?? ""),
+        name: v.web?.name ?? "", ae_title: v.web?.ae_title ?? "",
+      });
     }).catch(() => {});
     if (isAdmin) {
       api.getSetting("pdf.template").then((r) => {
@@ -428,6 +441,86 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                   <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", gap: 8 }}>
                     SCU=우리가 전송(C-STORE 대상), SCP=수신 노드. MWL 응답은 Orthanc(SAINTVIEW:4242)가 담당.
                     {nodeMsg && <b style={{ color: "var(--stat-final)" }}>{nodeMsg}</b>}
+                  </div>
+                </Group>
+              </>
+            )}
+
+            {page === "servernet" && (
+              <>
+                <Group title="로컬 서버 — 폴더 공유">
+                  <Row label="공유 디렉토리">
+                    <input value={snDir} onChange={(e) => setSnDir(e.target.value)} disabled={!isAdmin}
+                           placeholder="C:\PACS\share" style={{ width: 320 }} />
+                  </Row>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    워크리스트 우측 [Local Server] 버튼에서 이 폴더의 파일 목록·다운로드가 제공됩니다 (서버 PC 기준 경로).
+                  </div>
+                </Group>
+                <Group title="웹 서버">
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <Row label="IP 주소">
+                      <input value={snWeb.ip} disabled={!isAdmin} placeholder="192.168.0.10"
+                             onChange={(e) => setSnWeb((p) => ({ ...p, ip: e.target.value }))} style={{ flex: 1, minWidth: 0 }} />
+                    </Row>
+                    <Row label="Port">
+                      <input value={snWeb.port} disabled={!isAdmin} placeholder="8000"
+                             onChange={(e) => setSnWeb((p) => ({ ...p, port: e.target.value }))} style={{ width: 90 }} />
+                    </Row>
+                    <Row label="Name">
+                      <input value={snWeb.name} disabled={!isAdmin} placeholder="Saintview Main"
+                             onChange={(e) => setSnWeb((p) => ({ ...p, name: e.target.value }))} style={{ flex: 1, minWidth: 0 }} />
+                    </Row>
+                    <Row label="AE Title">
+                      <input value={snWeb.ae_title} disabled={!isAdmin} placeholder="SAINTVIEW"
+                             onChange={(e) => setSnWeb((p) => ({ ...p, ae_title: e.target.value.toUpperCase() }))} style={{ flex: 1, minWidth: 0 }} />
+                    </Row>
+                  </div>
+                  {isAdmin && (
+                    <div>
+                      <button className="primary" onClick={async () => {
+                        try {
+                          await api.putSetting("server.network", {
+                            local_share_dir: snDir,
+                            web: { ...snWeb, port: Number(snWeb.port) || snWeb.port },
+                          }, "global");
+                          setSnMsg("서버 네트워크 설정 저장됨 (전역)");
+                        } catch (e) { setSnMsg(e instanceof Error ? e.message : "저장 실패"); }
+                      }}>서버 설정 저장</button>
+                    </div>
+                  )}
+                </Group>
+                <Group title="연결 테스트 (Ping · DICOM Echo · DB)">
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button onClick={async () => {
+                      if (!snWeb.ip) { setSnMsg("IP를 먼저 입력하세요"); return; }
+                      setSnMsg("Ping 테스트 중…");
+                      try {
+                        const r = await api.netPing(snWeb.ip, Number(snWeb.port) || undefined);
+                        setSnMsg(`Ping: ${r.icmp ? `OK (${r.icmp_ms}ms)` : "실패"}${r.tcp !== null ? ` · TCP ${snWeb.port}: ${r.tcp ? "OK" : "실패"}` : ""}`);
+                      } catch (e) { setSnMsg(e instanceof Error ? e.message : "Ping 실패"); }
+                    }}>Ping 테스트</button>
+                    <button onClick={async () => {
+                      if (!snWeb.ip || !snWeb.port) { setSnMsg("IP/Port를 먼저 입력하세요"); return; }
+                      setSnMsg("DICOM C-ECHO 테스트 중…");
+                      try {
+                        const r = await api.netEcho(snWeb.ip, Number(snWeb.port), snWeb.ae_title);
+                        setSnMsg(`DICOM Echo: ${r.ok ? "✅ " : "❌ "}${r.detail}`);
+                      } catch (e) { setSnMsg(e instanceof Error ? e.message : "Echo 실패"); }
+                    }}>DICOM Echo Test</button>
+                    <button onClick={async () => {
+                      setSnMsg("DB 연동 테스트 중…");
+                      try {
+                        const r = await api.netDb();
+                        setSnMsg(r.ok
+                          ? `DB: ✅ ${r.dialect} (${r.latency_ms}ms) — ${r.target}`
+                          : `DB: ❌ ${r.detail}`);
+                      } catch (e) { setSnMsg(e instanceof Error ? e.message : "DB 테스트 실패"); }
+                    }}>DB 연동 Test</button>
+                  </div>
+                  {snMsg && <div style={{ fontSize: 12.5, color: snMsg.includes("❌") || snMsg.includes("실패") ? "var(--stat-emergency)" : "var(--stat-final)" }}>{snMsg}</div>}
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    테스트는 관리자 권한으로 백엔드 서버에서 수행됩니다 (Echo=AE Title 검증 포함, DB=현재 연결 엔진 SELECT 1).
                   </div>
                 </Group>
               </>

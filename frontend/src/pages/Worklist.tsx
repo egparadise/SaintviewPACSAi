@@ -24,6 +24,7 @@ import {
   type PhraseRow,
   type Report,
   type SeriesNode,
+  type ServerNetwork,
   type SrJson,
   type StudyDetail,
   type StudyRow,
@@ -361,6 +362,109 @@ function SearchRail({ active, onPick, tree, width }: {
   );
 }
 
+/* ── 서버 선택 버튼 (탭 바 우측) — Local Server: 폴더 공유 / Web Server: 주소·포트 ── */
+function ServerButtons() {
+  const [mode, setMode] = useState<"local" | "web" | null>(
+    (localStorage.getItem("sv_server_mode") as "local" | "web") || null);
+  const [open, setOpen] = useState<null | "local" | "web">(null);
+  const [net, setNet] = useState<ServerNetwork>({});
+  const [files, setFiles] = useState<{ name: string; is_dir: boolean; size: number; mtime: number }[]>([]);
+  const [shareDir, setShareDir] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    api.getSetting("server.network").then((r) => setNet(r.value as ServerNetwork)).catch(() => {});
+  }, []);
+
+  const pick = (m: "local" | "web") => {
+    setMode(m);
+    localStorage.setItem("sv_server_mode", m);
+    setErr("");
+    if (open === m) { setOpen(null); return; }
+    setOpen(m);
+    if (m === "local") {
+      api.shareList().then((r) => { setFiles(r.items); setShareDir(r.dir); })
+        .catch((e) => { setFiles([]); setShareDir(""); setErr(e instanceof Error ? e.message : "조회 실패"); });
+    }
+  };
+  const fmtSize = (n: number) => n > 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n > 1024 ? `${(n / 1024).toFixed(0)}KB` : `${n}B`;
+
+  return (
+    <span style={{ position: "relative", display: "flex", gap: 3, marginLeft: "auto", alignSelf: "center" }}>
+      <button onClick={() => pick("local")}
+              title="Local Server — 공유 폴더 보기/다운로드 (설정>서버 네트워크에서 디렉토리 지정)"
+              style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
+                       background: mode === "local" ? "var(--accent)" : undefined,
+                       color: mode === "local" ? "#fff" : undefined }}>
+        Local Server
+      </button>
+      <button onClick={() => pick("web")}
+              title="Web Server — 서버 주소·포트 확인 (설정>서버 네트워크)"
+              style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
+                       background: mode === "web" ? "var(--accent)" : undefined,
+                       color: mode === "web" ? "#fff" : undefined }}>
+        Web Server
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: 0, zIndex: 360, minWidth: 320, maxHeight: 320,
+          overflow: "auto", background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          borderRadius: 6, boxShadow: "0 6px 20px rgba(0,0,0,0.5)", padding: 10, fontSize: 12,
+        }} onMouseLeave={() => setOpen(null)}>
+          {open === "local" ? (
+            <>
+              <b>Local Server — 폴더 공유</b>
+              {err ? (
+                <div style={{ color: "var(--stat-emergency)", marginTop: 6 }}>{err}</div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", gap: 5, alignItems: "center", margin: "5px 0", color: "var(--text-secondary)" }}>
+                    <code style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {shareDir}
+                    </code>
+                    <MiniBtn onClick={() => navigator.clipboard?.writeText(shareDir)}>경로 복사</MiniBtn>
+                  </div>
+                  <table className="grid-table">
+                    <thead><tr><th>이름</th><th style={{ width: 64 }}>크기</th></tr></thead>
+                    <tbody>
+                      {files.slice(0, 20).map((f) => (
+                        <tr key={f.name} style={{ cursor: f.is_dir ? undefined : "pointer" }}
+                            onClick={() => {
+                              if (f.is_dir) return;
+                              window.open(`${(import.meta.env.VITE_API_BASE ?? "http://localhost:8000")}/api/share/file?name=${encodeURIComponent(f.name)}`, "_blank");
+                            }}>
+                          <td>{f.is_dir ? "📁" : "📄"} {f.name}</td>
+                          <td>{f.is_dir ? "-" : fmtSize(f.size)}</td>
+                        </tr>
+                      ))}
+                      {files.length === 0 && <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>비어 있음</td></tr>}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <b>Web Server</b>
+              <table className="grid-table" style={{ marginTop: 6 }}>
+                <tbody>
+                  <tr><th style={{ width: 80 }}>주소(IP)</th><td>{net.web?.ip || "(미설정)"}</td></tr>
+                  <tr><th>Port</th><td>{net.web?.port || "(미설정)"}</td></tr>
+                  <tr><th>Name</th><td>{net.web?.name || "-"}</td></tr>
+                  <tr><th>AE Title</th><td>{net.web?.ae_title || "-"}</td></tr>
+                </tbody>
+              </table>
+              <div style={{ marginTop: 5, color: "var(--text-secondary)", fontSize: 11 }}>
+                설정 변경·Ping/Echo/DB 테스트는 설정 &gt; 서버 네트워크에서.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 /* ── 워크리스트 페이지 탭 바 (UBPACS-Z — 저장된 검색 정의를 페이지로, 최대 10) ── */
 function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
   tabs: WorklistTab[]; activeId: string;
@@ -389,6 +493,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
       ))}
       <button onClick={onAdd} title="현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)"
               style={{ padding: "1px 9px", fontSize: 13, marginLeft: 4, marginBottom: 3 }}>＋</button>
+      <ServerButtons />
     </div>
   );
 }

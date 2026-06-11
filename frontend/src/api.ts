@@ -269,6 +269,19 @@ export const api = {
     req<{ ok: boolean }>("/api/auth/profile", {
       method: "PUT", body: JSON.stringify({ display_name, license_no }),
     }),
+  shareList: () =>
+    req<{ dir: string; items: { name: string; is_dir: boolean; size: number; mtime: number }[] }>("/api/share"),
+  netPing: (ip: string, port?: number) =>
+    req<{ ok: boolean; icmp: boolean; icmp_ms: number; tcp: boolean | null }>("/api/admin/net-test/ping", {
+      method: "POST", body: JSON.stringify({ ip, port }),
+    }),
+  netEcho: (ip: string, port: number, ae_title: string) =>
+    req<{ ok: boolean; detail: string }>("/api/admin/net-test/echo", {
+      method: "POST", body: JSON.stringify({ ip, port, ae_title }),
+    }),
+  netDb: () =>
+    req<{ ok: boolean; latency_ms?: number; dialect?: string; target?: string; detail?: string }>(
+      "/api/admin/net-test/db", { method: "POST" }),
   applyDicomNodes: () =>
     req<{ ok: boolean; applied: number; errors: string[] }>("/api/admin/dicom-nodes/apply", {
       method: "POST",
@@ -362,6 +375,12 @@ export interface PhraseRow {
   shortcut: string;
   kind: "phrase" | "template";
   created_by: string;
+}
+
+/** 서버 네트워크 설정 (Setting>서버 네트워크 — 전역) */
+export interface ServerNetwork {
+  local_share_dir?: string;
+  web?: { ip?: string; port?: number | string; name?: string; ae_title?: string };
 }
 
 export interface Profile {

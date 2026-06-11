@@ -23,6 +23,7 @@ ALLOWED_KEYS = {
     "dicom.nodes",           # SCP/SCU 장비 노드 목록 (AE Title/IP/Port — 전역/관리자)
     "viewer.hp",             # 행잉 프로토콜 규칙 (장비×부위×Projection → Series/Image layout)
     "report.prefs",          # 리포트 구성 (AI 패널 표시·자동 적용 — UBPACS Report Composition)
+    "server.network",        # 서버 네트워크 (로컬 공유 디렉토리·웹서버 IP/Port/Name/AET — 전역)
 }
 
 
@@ -49,7 +50,7 @@ def write_setting(
 ):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
-    if key in ("mode.profiles", "dicom.nodes") and body.scope != "global":
+    if key in ("mode.profiles", "dicom.nodes", "server.network") and body.scope != "global":
         raise HTTPException(status_code=400, detail=f"{key}는 전역(global) 설정만 허용")
     if key == "worklist.tabs" and len(body.value.get("items", [])) > 10:
         raise HTTPException(status_code=400, detail="워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)")
