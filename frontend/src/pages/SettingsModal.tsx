@@ -71,6 +71,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // 리포트 구성 (Report Composition)
   const [rptAiPanel, setRptAiPanel] = useState(true);
   const [rptAutoApply, setRptAutoApply] = useState(true);
+  // 뷰어 닫기 동작 (닫기 다이얼로그 "기본으로" 체크와 동일 설정)
+  const [closeMode, setCloseMode] = useState<"ask" | "save_current" | "save_all" | "discard">("ask");
   const [quality, setQuality] = useState<AiQuality | null>(null);
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
@@ -134,6 +136,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       if (tb) setTbConfig(tb);
       const wp = (v as { wl_presets?: WlPreset[] }).wl_presets;
       if (wp?.length) setWlPresets(wp);
+      const cm = (v as { close_mode?: "ask" | "save_current" | "save_all" | "discard" }).close_mode;
+      if (cm) setCloseMode(cm);
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -189,7 +193,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       hanging: { CT: hangingCT, MR: hangingMR },
       hanging2d: { CT: h2dCT, MR: h2dMR },
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
-      toolbar: tbConfig, wl_presets: wlPresets,
+      toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
     }, "user");
     await api.putSetting("report.prefs", { ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
     if (isAdmin) {
@@ -677,6 +681,18 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                       뷰어 우측에 리포트·과거검사 표시
                     </label>
                   </Row>
+                  <Row label="닫기 동작">
+                    <select value={closeMode}
+                            onChange={(e) => setCloseMode(e.target.value as typeof closeMode)}>
+                      <option value="ask">항상 묻기 (닫기 다이얼로그)</option>
+                      <option value="save_current">현재 화면 저장하고 닫기</option>
+                      <option value="save_all">전체 변경사항 저장하고 닫기 (주석+GSPS)</option>
+                      <option value="discard">저장하지 않고 닫기</option>
+                    </select>
+                  </Row>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    닫기 다이얼로그에서 "기본으로" 체크 시 이 설정이 자동 변경됩니다. Exam 탭은 ✕/전체닫기 전까지 유지.
+                  </div>
                 </Group>
                 <Group title="2D 행잉 (모달리티 → 분할)">
                   {([["CT", h2dCT, setH2dCT], ["MR", h2dMR, setH2dMR]] as const).map(([m, v, set]) => (

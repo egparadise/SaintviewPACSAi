@@ -77,12 +77,17 @@ interface ViewerPrefs {
   dockW: number;            // 판독 도크 폭
   toolbar: Record<string, boolean>;  // 툴바 버튼 표시 여부 (기본 모두 표시)
   wl_presets: { key: string; label: string; q: string }[];  // W/L Presetting
+  close_mode: "ask" | "save_current" | "save_all" | "discard";  // 닫기 동작 (Setting>Viewer)
 }
 const DEFAULT_PREFS: ViewerPrefs = {
   paletteSide: "left", thumbSide: "left", thumbSize: 84,
   thumbMode: "series", hanging2d: {}, reportDock: true,
   paletteW: 100, dockW: 250, toolbar: {}, wl_presets: WL_PRESETS,
+  close_mode: "ask",
 };
+
+// Exam 탭 영속 — 뷰어를 닫았다 다시 열어도 ✕/전체닫기 전까지 우측에 계속 쌓인다 (UBPACS)
+let persistedTabs: { id: number; uid: string; label: string }[] = [];
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
@@ -125,6 +130,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [priorTrees, setPriorTrees] = useState<Record<number, { uid: string; series: SeriesNode[] }>>({});
   // 오픈 검사 탭 — 여러 검사가 열리면 좌→우로 탭이 쌓인다(브라우저 창 메타포, UBPACS Opened Study List)
   const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
+  useEffect(() => { persistedTabs = openTabs; }, [openTabs]);  // ✕/전체닫기 전까지 세션 유지
+  const [closeDlg, setCloseDlg] = useState(false);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);
   const [annos, setAnnos] = useState<Anno[]>([]);
@@ -195,10 +202,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* 시리즈 트리 + 리포트 로드 */
   useEffect(() => {
-    setOpenTabs([{
+    // Exam 탭 영속 복원: 기존 탭(좌측) + 새로 연 검사(우측)
+    const main = {
       id: detail.id, uid: detail.study_uid,
       label: `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date}`,
-    }]);
+    };
+    setOpenTabs([...persistedTabs.filter((t) => t.id !== detail.id), main]);
     api.seriesTree(detail.id).then((r) => {
       let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
       // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
@@ -380,7 +389,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         case "Escape":
           if (draft) setDraft(null);
           else if (tool) setTool(null);
-          else onClose();
+          else requestCloseRef.current();
           break;
         case " ": e.preventDefault(); act("cine"); break;
         case "1": setLayout("1x1"); break;
@@ -567,6 +576,36 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         )}
       </svg>
     );
+  };
+
+  /* 닫기 동작 — 3종 선택(체크 시 기본 저장 → viewer.prefs.close_mode, Setting>뷰어) */
+  const doClose = async (mode: "save_current" | "save_all" | "discard", remember: boolean) => {
+    setCloseDlg(false);
+    if (remember) {
+      setPrefs((p) => ({ ...p, close_mode: mode }));
+      api.getSetting("viewer.prefs").then((r) =>
+        api.putSetting("viewer.prefs", { ...r.value, close_mode: mode }, "user")).catch(() => {});
+    }
+    try {
+      if (mode === "save_current") {
+        await api.saveAnnotations(detail.id, annos);
+      } else if (mode === "save_all") {
+        await api.saveAnnotations(detail.id, annos);
+        await doGsps();  // 전체 변경사항 = 주석 + 표시상태(GSPS) 저장
+      }
+    } catch { /* 저장 실패해도 닫기는 진행 */ }
+    onClose();
+  };
+  const requestClose = () => {
+    if (prefs.close_mode === "ask") setCloseDlg(true);
+    else void doClose(prefs.close_mode, false);
+  };
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+  const closeAllTabs = () => {
+    persistedTabs = [];
+    setOpenTabs([]);
+    requestClose();
   };
 
   /* 툴바 표시 여부 (Setting>뷰어>Tools bar — 계정 로밍, 기본 모두 표시) */
@@ -817,7 +856,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {/* 상단 검사탭 바 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
                     background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
-        <button onClick={onClose} style={{ fontWeight: 700 }}>WORKLIST</button>
+        <button onClick={requestClose} style={{ fontWeight: 700 }}>WORKLIST</button>
         {/* 좌상단: Series Layout(뷰포트 분할) · Image Layout(페인 내 이미지 타일) — UBPACS p.14 */}
         <GridPicker label="Srs" max={3}
                     value={{ r: LAYOUTS[layout].rows, c: LAYOUTS[layout].cols }}
@@ -838,19 +877,29 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                      fontWeight: 600, cursor: "pointer", border: "1px solid var(--border)", borderBottom: "none",
                    }}>
                 {t.label}
-                {t.id !== detail.id && (
-                  <span onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
-                        style={{ fontSize: 10, opacity: 0.75 }}>✕</span>
-                )}
+                <span title={t.id === detail.id ? "주 검사 닫기 = 뷰어 닫기" : "이 Exam 닫기"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (t.id === detail.id) requestClose();
+                        else closeTab(t.id);
+                      }}
+                      style={{ fontSize: 10, opacity: 0.75 }}>✕</span>
               </div>
             );
           })}
+          <button onClick={closeAllTabs} title="전체 닫기 — 모든 Exam 탭을 닫고 뷰어 종료"
+                  style={{ padding: "2px 9px", fontSize: 10.5, whiteSpace: "nowrap", alignSelf: "center" }}>
+            전체 닫기
+          </button>
         </div>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setPrefs((p) => ({ ...p, reportDock: !p.reportDock }))}>판독창</button>
         <button onClick={() => setOverlayOn((o) => !o)}>{overlayOn ? "INFO ●" : "INFO ○"}</button>
-        <button onClick={onClose}>닫기</button>
+        <button onClick={requestClose}
+                title={`닫기 — 현재 동작: ${prefs.close_mode === "ask" ? "항상 묻기"
+                     : prefs.close_mode === "save_current" ? "현재 화면 저장"
+                     : prefs.close_mode === "save_all" ? "전체 저장" : "저장 안 함"} (Setting>뷰어)`}>닫기</button>
       </div>
 
       {/* Study/Series Titlebar (UBPACS p.14·p.16 — Opened/Related/Series/HP 드롭다운) */}
@@ -1020,6 +1069,52 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {dock}
       </div>
       {thumbHoriz && thumbs}
+      {closeDlg && (
+        <CloseDialog onPick={(m, r) => void doClose(m, r)} onCancel={() => setCloseDlg(false)} />
+      )}
+    </div>
+  );
+}
+
+/* 닫기 옵션 다이얼로그 — 체크박스 선택 시 해당 동작이 기본이 되어 다음부터 묻지 않음 (Setting>뷰어 저장) */
+function CloseDialog({ onPick, onCancel }: {
+  onPick: (mode: "save_current" | "save_all" | "discard", remember: boolean) => void;
+  onCancel: () => void;
+}) {
+  const [chk, setChk] = useState<Record<string, boolean>>({});
+  const Row = ({ mode, label, desc, primary }: {
+    mode: "save_current" | "save_all" | "discard"; label: string; desc: string; primary?: boolean;
+  }) => (
+    <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+      <button className={primary ? "primary" : ""} onClick={() => onPick(mode, !!chk[mode])}
+              style={{ flex: 1, textAlign: "left", padding: "8px 12px" }}>
+        <b style={{ fontSize: 12.5 }}>{label}</b>
+        <div style={{ fontSize: 11, color: primary ? undefined : "var(--text-secondary)", marginTop: 2 }}>{desc}</div>
+      </button>
+      <label title="체크하고 닫으면 다음부터 묻지 않고 이 동작으로 닫습니다 (Setting>뷰어>닫기 동작에서 변경)"
+             style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: "var(--text-secondary)", flexShrink: 0 }}>
+        <input type="checkbox" checked={!!chk[mode]}
+               onChange={(e) => setChk((p) => ({ ...p, [mode]: e.target.checked }))} />
+        기본으로
+      </label>
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 500 }}
+         onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: 430, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>뷰어 닫기 — 변경사항을 저장할까요?</b>
+        <Row mode="save_current" primary label="현재 화면 저장하고 닫기"
+             desc="현재 검사의 주석/측정을 서버에 저장합니다" />
+        <Row mode="save_all" label="전체 화면 변경사항 저장하고 닫기"
+             desc="주석/측정 저장 + 표시 상태(W/L·주석)를 GSPS로 Orthanc에 보존합니다" />
+        <Row mode="discard" label="어떤 것도 저장하지 않고 닫기"
+             desc="저장하지 않은 주석/측정은 사라집니다" />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={onCancel}>취소 (계속 판독)</button>
+        </div>
+      </div>
     </div>
   );
 }
