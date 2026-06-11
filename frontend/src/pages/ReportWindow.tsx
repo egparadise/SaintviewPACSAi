@@ -13,7 +13,11 @@ export function ReportWindow() {
   const [reports, setReports] = useState<Report[]>([]);
   const [navList, setNavList] = useState<number[]>([]);
   const [navIdx, setNavIdx] = useState(0);
-  const [tab, setTab] = useState<Tab>("read");
+  const [tab, setTab] = useState<Tab>("read");  // (구버전 호환 — 중앙은 항상 판독)
+  const [sideTab, setSideTab] = useState<"hist" | "sheet">("hist");      // 좌측: 판독 기록 | 기록지
+  const [rightTab, setRightTab] = useState<"std" | "tpl">("std");        // 우측: 단축키 | 템플릿
+  const [hosp, setHosp] = useState("");                                  // Hospital Comment (= study.memo)
+  const [relatedView, setRelatedView] = useState<{ label: string; text: string } | null>(null);
   const [fontPx, setFontPx] = useState(12);
   const [reading, setReading] = useState("");
   const [conclusion, setConclusion] = useState("");
@@ -43,6 +47,8 @@ export function ReportWindow() {
   const loadStudy = async (id: number) => {
     const d = await api.study(id);
     setDetail(d);
+    setHosp(d.memo ?? "");
+    setRelatedView(null);
     document.title = `Reading — ${d.modality} ${d.patient_name} ${d.study_date}`;
     const r = await api.reports(id);
     setReports(r.items);
@@ -55,10 +61,19 @@ export function ReportWindow() {
       if (!ok) { setMsg("인증 토큰을 받지 못했습니다 — 뷰어/워크리스트에서 다시 열어주세요"); return; }
       try {
         await loadStudy(initId);
-        const d = await api.study(initId);
-        setNavList([initId, ...d.related_exams.map((e) => e.id)]);
+        // ◀▶ = 워크리스트 순서 환자 이동 (뷰어 화살표와 동일 동작)
+        api.worklist({ limit: "500" }).then((r) => {
+          const ids = r.items.map((it) => it.id);
+          setNavList(ids);
+          setNavIdx(Math.max(0, ids.indexOf(initId)));
+        }).catch(() => setNavList([initId]));
         api.phrases().then((r) => setPhrases(r.items)).catch(() => {});
-        api.getSetting("report.prefs").then((r) => setRdOpts(r.value as Record<string, unknown>)).catch(() => {});
+        api.getSetting("report.prefs").then((r) => {
+          const v = r.value as Record<string, unknown>;
+          setRdOpts(v);
+          if (v.sidebar_tab === "sheet") setSideTab("sheet");
+          if (v.panel_tab === "template") setRightTab("tpl");
+        }).catch(() => {});
       } catch (e) { setMsg(e instanceof Error ? e.message : "검사 로드 실패"); }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,6 +105,7 @@ export function ReportWindow() {
     if (!report || !sr || !detail) return;
     try {
       await api.updateReport(report.id, sr);
+      if (hosp !== (detail.memo ?? "")) await api.setMemo(detail.id, hosp);  // Hospital Comment
       const r = await api.reports(detail.id);
       setReports(r.items);
       setTouched(false);
@@ -155,126 +171,215 @@ export function ReportWindow() {
       </div>
     );
   }
+  void tab; void setTab; void histView;  // (구버전 탭 상태 — 레이아웃 개편으로 미사용)
 
   const taStyle: React.CSSProperties = {
     width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
-    border: "1px solid var(--border)", borderRadius: 3, padding: 7,
+    border: "1px solid var(--border)", borderRadius: 4, padding: 8,
     fontFamily: "inherit", fontSize: fontPx, resize: "none",
   };
-  const phraseList = phrases.filter((p) => p.kind === (tab === "std" ? "phrase" : "template"));
+  const inStyle: React.CSSProperties = {
+    width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
+    border: "1px solid var(--border)", borderRadius: 4, padding: "6px 8px", fontSize: fontPx,
+  };
+  const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "var(--text-primary)" };
+  const sideTabStyle = (on: boolean): React.CSSProperties => ({
+    flex: 1, textAlign: "center", padding: "9px 0", fontSize: 12.5, cursor: "pointer",
+    fontWeight: on ? 700 : 400,
+    borderBottom: on ? "2px solid var(--accent)" : "2px solid transparent",
+    color: on ? "var(--text-primary)" : "var(--text-secondary)",
+    background: on ? undefined : "var(--bg-elevated)",
+  });
+  const phraseList = phrases.filter((p) => p.kind === (rightTab === "std" ? "phrase" : "template"));
+  const relatedDone = detail.related_exams.filter((e) => e.status === "finalized");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-canvas)" }}>
-      {/* 탭 */}
-      <div style={{ display: "flex", background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)" }}>
-        {([["read", "판독"], ["hist", "판독 기록"], ["std", "단축키"], ["tpl", "템플릿"]] as const).map(([k, label]) => (
-          <div key={k} onClick={() => setTab(k)}
-               style={{ flex: 1, textAlign: "center", padding: "8px 0", fontSize: 13, cursor: "pointer",
-                        fontWeight: tab === k ? 700 : 400,
-                        borderBottom: tab === k ? "2px solid var(--accent)" : "2px solid transparent",
-                        color: tab === k ? "var(--text-primary)" : "var(--text-secondary)" }}>
-            {label}
-          </div>
-        ))}
+      {/* 최상단: Font size 바 (레퍼런스) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 14px",
+                    background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+        <span style={{ marginLeft: "auto", color: "var(--text-secondary)" }}>Font size</span>
+        <button style={{ padding: "0 8px" }} onClick={() => setFontPx((f) => Math.max(10, f - 1))}>−</button>
+        <input type="range" min={10} max={24} value={fontPx} onChange={(e) => setFontPx(Number(e.target.value))} />
+        <b>{fontPx}px</b>
+        <button style={{ padding: "0 8px" }} onClick={() => setFontPx((f) => Math.min(24, f + 1))}>＋</button>
       </div>
-      {/* 상단 바 */}
-      <div style={{ display: "flex", gap: 5, alignItems: "center", padding: "5px 8px",
-                    borderBottom: "1px solid var(--border)", fontSize: 12, flexWrap: "wrap" }}>
-        <span style={{ color: "var(--text-secondary)" }}>Font</span>
-        <button style={{ padding: "0 7px" }} onClick={() => setFontPx((f) => Math.max(10, f - 1))}>−</button>
-        <span>{fontPx}px</span>
-        <button style={{ padding: "0 7px" }} onClick={() => setFontPx((f) => Math.min(24, f + 1))}>＋</button>
-        <label title="CVR Notice — critical 소견 경고" style={{ display: "flex", gap: 3, alignItems: "center" }}>
-          <input type="checkbox" checked={!!rdOpts.cvr_notice}
-                 onChange={(e) => setRdOpts((p) => ({ ...p, cvr_notice: e.target.checked }))} />
-          CVR
-        </label>
-        <span style={{ flex: 1 }} />
-        <button title="이전 검사 판독" style={{ padding: "1px 9px" }} disabled={navIdx <= 0}
-                onClick={() => void nav(-1)}>◀</button>
-        <button title="다음 검사 판독" style={{ padding: "1px 9px" }} disabled={navIdx >= navList.length - 1}
-                onClick={() => void nav(1)}>▶</button>
-        <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 9px" }} onClick={() => initText(report)}>초기화</button>
-        <button className="primary" title={`저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 11px" }}
-                disabled={!report || finalized} onClick={() => void save()}>저장</button>
-        <button title={`승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
-                style={{ padding: "2px 11px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4 }}
-                disabled={!report || finalized} onClick={() => void approve()}>승인</button>
-      </div>
-      {!!rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
-        <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 10px", fontWeight: 700 }}>
-          ⚠ CVR Notice — CRITICAL 소견 포함 검사
-        </div>
-      )}
 
-      {tab === "read" && (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 6, padding: 10, overflow: "auto" }}>
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            ID: <b style={{ color: "var(--text-primary)" }}>{detail.patient_key}</b> ·
-            Reporter: {report?.created_by === "ai" ? `AI(${report.ai_model})` : report?.created_by ?? "-"} ·
-            Report Day: {detail.study_date}
-            {msg && <span style={{ color: "var(--stat-final)", marginLeft: 8 }}>{msg}</span>}
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {/* 좌측 사이드바: 판독 기록 | 기록지 */}
+        <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid var(--border)",
+                      display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
+            <div style={sideTabStyle(sideTab === "hist")} onClick={() => setSideTab("hist")}>판독 기록</div>
+            <div style={sideTabStyle(sideTab === "sheet")} onClick={() => setSideTab("sheet")}>기록지</div>
           </div>
-          {detail.clinical_info && (
-            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Study/Req Comment: {detail.clinical_info}</div>
-          )}
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)" }}>Reading</div>
-          <textarea value={reading} placeholder="판독 소견을 입력하세요" disabled={finalized}
-                    onChange={(e) => { setReading(e.target.value); setTouched(true); }}
-                    style={{ ...taStyle, flex: 1.4, minHeight: 140 }} />
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)" }}>Conclusion</div>
-          <textarea value={conclusion} placeholder="결론을 입력하세요" disabled={finalized}
-                    onChange={(e) => setConclusion(e.target.value)}
-                    style={{ ...taStyle, flex: 1, minHeight: 100 }} />
-          {sig && (
-            <div style={{ fontSize: 12, color: "var(--stat-final)" }}>
-              ✍ {sig.name}{sig.license_no && ` (면허 제${sig.license_no}호)`} · {sig.signed_at?.slice(0, 16).replace("T", " ")}
-            </div>
-          )}
+          <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+            {sideTab === "hist" ? (
+              reports.length === 0 && relatedDone.length === 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+                              padding: "60px 18px", textAlign: "center" }}>
+                  <div style={{ fontSize: 34, opacity: 0.5 }}>🕘</div>
+                  <b style={{ fontSize: 13.5 }}>이전 판독 기록이 없습니다</b>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    이 환자의 이전 검사 기록이 없거나 판독이 완료되지 않았습니다.
+                  </div>
+                  <button className="primary" style={{ padding: "4px 14px", fontSize: 12 }}
+                          onClick={() => window.open(
+                            `${window.location.origin}${window.location.pathname}?viewer=2d&study=${detail.id}`,
+                            "sv_viewer")}>
+                    ▶ 이전 검사 영상 요청
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {reports.slice(1).map((r) => (
+                    <div key={r.id}
+                         onClick={() => setRelatedView({
+                           label: `v${r.version} · ${r.created_by === "ai" ? "AI" : r.created_by}`,
+                           text: r.narrative_text || "(내용 없음)",
+                         })}
+                         style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d" }}>
+                      📄 현재 검사 v{r.version} · {r.status} · {r.created_by === "ai" ? "AI" : r.created_by}
+                    </div>
+                  ))}
+                  {relatedDone.map((e) => (
+                    <div key={e.id}
+                         onClick={async () => {
+                           try {
+                             const rr = await api.reports(e.id);
+                             const fin = rr.items.find((x) => x.status === "finalized") ?? rr.items[0];
+                             setRelatedView({
+                               label: `${e.study_date} ${e.modality} ${e.study_desc}`,
+                               text: fin?.narrative_text || "(판독 없음)",
+                             });
+                           } catch { /* 무시 */ }
+                         }}
+                         style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d" }}
+                         onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
+                         onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
+                      🗂 {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+                    </div>
+                  ))}
+                  {relatedView && (
+                    <div style={{ padding: 10, borderTop: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 4 }}>[{relatedView.label}] 읽기 전용</div>
+                      <div style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
+                        {relatedView.text}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              <table className="grid-table" style={{ fontSize: 12 }}>
+                <tbody>
+                  <tr><th style={{ width: 90 }}>환자 ID</th><td>{detail.patient_key}</td></tr>
+                  <tr><th>이름</th><td>{detail.patient_name}</td></tr>
+                  <tr><th>성별/생년</th><td>{detail.sex} / {detail.birth_date}</td></tr>
+                  <tr><th>검사명</th><td>{detail.study_desc}</td></tr>
+                  <tr><th>Modality</th><td>{detail.modality}</td></tr>
+                  <tr><th>부위</th><td>{detail.body_part}</td></tr>
+                  <tr><th>검사일</th><td>{detail.study_date}</td></tr>
+                  <tr><th>Accession</th><td>{detail.accession_no}</td></tr>
+                  <tr><th>기관</th><td>{detail.institution || "-"}</td></tr>
+                  <tr><th>의뢰의</th><td>{detail.referring_physician || "-"}</td></tr>
+                  <tr><th>임상정보</th><td>{detail.clinical_info || "-"}</td></tr>
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
-      )}
 
-      {tab === "hist" && (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          {reports.map((r) => (
-            <div key={r.id} onClick={() => setHistView(histView?.id === r.id ? null : r)}
-                 style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d",
-                          background: histView?.id === r.id ? "var(--accent-subtle)" : undefined }}>
-              v{r.version} · {r.status} · {r.created_by === "ai" ? "AI" : r.created_by}
-              {r.finalized_at && ` · ${r.finalized_at.slice(0, 10)}`}
+        {/* 중앙: 판독 본문 */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 12px",
+                        borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+            <b>(/)</b>
+            <span>ID: <b>{detail.patient_key}</b></span>
+            <span style={{ color: "var(--text-secondary)" }}>{detail.modality}/{detail.study_date}</span>
+            {msg && <span style={{ color: "var(--stat-final)" }}>{msg}</span>}
+            <span style={{ flex: 1 }} />
+            <label title="CVR Notice — critical 소견 경고" style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <input type="checkbox" checked={!!rdOpts.cvr_notice}
+                     onChange={(e) => setRdOpts((p) => ({ ...p, cvr_notice: e.target.checked }))} />
+              CVR Notice
+            </label>
+            <button title="이전 환자 (워크리스트 순서 — 뷰어 ◀와 동일)" style={{ padding: "1px 10px" }}
+                    disabled={navIdx <= 0} onClick={() => void nav(-1)}>◀</button>
+            <button title="다음 환자 (워크리스트 순서 — 뷰어 ▶와 동일)" style={{ padding: "1px 10px" }}
+                    disabled={navIdx >= navList.length - 1} onClick={() => void nav(1)}>▶</button>
+            <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>초기화</button>
+            <button className="primary" title={`저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
+                    disabled={!report || finalized} onClick={() => void save()}>저장</button>
+            <button title={`승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
+                    style={{ padding: "2px 12px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4 }}
+                    disabled={!report || finalized} onClick={() => void approve()}>승인</button>
+          </div>
+          {!!rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
+            <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 12px", fontWeight: 700 }}>
+              ⚠ CVR Notice — CRITICAL 소견 포함 검사
             </div>
-          ))}
-          {reports.length === 0 && (
-            <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>이전 판독 기록이 없습니다</div>
           )}
-          {histView && (
-            <div style={{ padding: 10, fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
-              {histView.narrative_text || "(내용 없음)"}
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "14px 18px",
+                        display: "flex", flexDirection: "column", gap: 10, maxWidth: 1100 }}>
+            <div style={{ display: "flex", gap: 16, alignItems: "center", fontSize: 12.5 }}>
+              <span><b>ID:</b> <input readOnly value={detail.patient_key} style={{ ...inStyle, width: 150, display: "inline-block" }} /></span>
+              <span><b>Reporter:</b> <input readOnly
+                value={report?.created_by === "ai" ? `AI(${report.ai_model})` : report?.created_by ?? ""}
+                style={{ ...inStyle, width: 190, display: "inline-block" }} /></span>
+              <span><b>Report Day:</b> <input readOnly value={detail.study_date} style={{ ...inStyle, width: 120, display: "inline-block" }} /></span>
             </div>
-          )}
+            <div style={labelStyle}>Hospital Comment</div>
+            <input value={hosp} disabled={finalized} placeholder="병원 코멘트 (저장 시 함께 기록)"
+                   onChange={(e) => setHosp(e.target.value)} style={inStyle} />
+            <div style={labelStyle}>Study/Req Comment</div>
+            <input readOnly value={detail.clinical_info ?? ""} style={inStyle} />
+            <div style={labelStyle}>Refer Comment</div>
+            <input readOnly value={detail.referring_physician ?? ""} style={inStyle} />
+            <div style={labelStyle}>Reading</div>
+            <textarea value={reading} placeholder="판독 소견을 입력하세요" disabled={finalized}
+                      onChange={(e) => { setReading(e.target.value); setTouched(true); }}
+                      style={{ ...taStyle, minHeight: 140, flex: 1.2 }} />
+            <div style={labelStyle}>Conclusion</div>
+            <textarea value={conclusion} placeholder="결론을 입력하세요" disabled={finalized}
+                      onChange={(e) => setConclusion(e.target.value)}
+                      style={{ ...taStyle, minHeight: 110, flex: 1 }} />
+            {sig && (
+              <div style={{ fontSize: 12.5, color: "var(--stat-final)" }}>
+                ✍ {sig.name}{sig.license_no && ` (면허 제${sig.license_no}호)`} · {sig.signed_at?.slice(0, 16).replace("T", " ")}
+              </div>
+            )}
+          </div>
         </div>
-      )}
 
-      {(tab === "std" || tab === "tpl") && (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-          {phraseList.map((p) => (
-            <div key={p.id} onClick={() => tab === "std" ? insertPhrase(p) : applyTemplate(p)}
-                 title={`${p.reading_text ? `[판독] ${p.reading_text}\n` : ""}${p.text ? `[결론] ${p.text}` : ""}`}
-                 style={{ padding: "7px 10px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid #24282d" }}
-                 onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
-                 onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-              {p.category && <span style={{ color: "var(--text-secondary)" }}>[{p.category}] </span>}
-              {p.name}
-              {p.shortcut && <span style={{ color: "var(--accent)", float: "right" }}>Alt+{p.shortcut}</span>}
-            </div>
-          ))}
-          {phraseList.length === 0 && (
-            <div style={{ padding: 14, fontSize: 12, color: "var(--text-secondary)" }}>
-              등록된 {tab === "std" ? "단축키가" : "템플릿이"} 없습니다 — 설정 &gt; 판독(Reading)에서 등록
-            </div>
-          )}
+        {/* 우측 사이드바: 단축키 | 템플릿 */}
+        <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid var(--border)",
+                      display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
+            <div style={sideTabStyle(rightTab === "std")} onClick={() => setRightTab("std")}>단축키</div>
+            <div style={sideTabStyle(rightTab === "tpl")} onClick={() => setRightTab("tpl")}>템플릿</div>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+            {phraseList.map((p) => (
+              <div key={p.id} onClick={() => rightTab === "std" ? insertPhrase(p) : applyTemplate(p)}
+                   title={`${p.reading_text ? `[판독] ${p.reading_text}\n` : ""}${p.text ? `[결론] ${p.text}` : ""}`}
+                   style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid #24282d" }}
+                   onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
+                   onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
+                {p.category && <span style={{ color: "var(--text-secondary)" }}>[{p.category}] </span>}
+                {p.name}
+                {p.shortcut && <span style={{ color: "var(--accent)", float: "right" }}>Alt+{p.shortcut}</span>}
+              </div>
+            ))}
+            {phraseList.length === 0 && (
+              <div style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)", textAlign: "center" }}>
+                등록된 {rightTab === "std" ? "단축키가" : "템플릿이"} 없습니다.
+                <br />설정 &gt; 판독(Reading)에서 등록
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

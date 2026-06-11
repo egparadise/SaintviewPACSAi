@@ -123,6 +123,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
   const [settingsOpen, setSettingsOpen] = useState(false);  // 뷰어 내 Setting
+  // ◀▶ 환자 이동 — 워크리스트 순서. 미오픈=열면서 이동, 오픈=해당 Exam 탭으로 전환
+  const [wlIds, setWlIds] = useState<number[]>([]);
+  useEffect(() => {
+    api.worklist({ limit: "500" }).then((r) => setWlIds(r.items.map((it) => it.id))).catch(() => {});
+  }, []);
+  const navPatient = (dir: 1 | -1) => {
+    const idx = wlIds.indexOf(detail.id);
+    const target = wlIds[idx + dir];
+    if (target === undefined) return;
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("viewer") === "2d") {
+      // 새 창 모드: 같은 창에서 해당 검사로 네비게이트 (탭은 localStorage로 유지·누적)
+      p.set("study", String(target));
+      ["add", "stack", "keysops", "wo_mode", "wo_ids"].forEach((k) => p.delete(k));
+      window.location.search = p.toString();
+    }
+  };
   const [activePane, setActivePane] = useState("p0");
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
@@ -822,6 +839,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
                                                     : { borderRight: "1px solid var(--border)" }) }),
     }}>
+      {/* ◀▶ 환자 이동 (워크리스트 순서 — 미오픈=열며 이동, 오픈=해당 탭 전환) */}
+      <div style={{ display: "flex", gap: 3, ...(paletteHoriz ? {} : { width: "100%" }) }}>
+        <button title="이전 환자(검사)로 이동" onClick={() => navPatient(-1)}
+                disabled={wlIds.indexOf(detail.id) <= 0}
+                style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>◀</button>
+        <button title="다음 환자(검사)로 이동" onClick={() => navPatient(1)}
+                disabled={wlIds.indexOf(detail.id) < 0 || wlIds.indexOf(detail.id) >= wlIds.length - 1}
+                style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>▶</button>
+      </div>
       <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}
               style={{ fontSize: 12, width: paletteHoriz ? 76 : "100%", padding: "4px 2px" }}>
         <option value="1x1">1 X 1</option><option value="1x2">1 X 2</option><option value="2x2">2 X 2</option>
