@@ -290,6 +290,23 @@ def test_phrases_crud_and_shortcut(client, auth_headers):
     assert client.delete(f"/api/phrases/{pid}", headers=auth_headers).status_code == 200
 
 
+def test_phrase_template_kind(client, auth_headers):
+    # 템플릿(kind=template) — 판독/결론 분리 본문, 단축키 없음
+    r = client.post("/api/phrases", headers=auth_headers, json={
+        "name": "흉부 정상 템플릿", "kind": "template", "modality": "CR",
+        "reading_text": "Both lungs are clear.", "text": "No active lung lesion.",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["kind"] == "template"
+    assert r.json()["reading_text"] == "Both lungs are clear."
+    assert r.json()["shortcut"] == ""  # 템플릿은 단축키 없음
+    # 판독/결론 둘 다 비면 400
+    assert client.post("/api/phrases", headers=auth_headers, json={
+        "name": "x", "kind": "template",
+    }).status_code == 400
+    client.delete(f"/api/phrases/{r.json()['id']}", headers=auth_headers)
+
+
 def test_profile_and_finalize_signature(client, auth_headers):
     # 판독의 등록 (설정 > Reading)
     assert client.put("/api/auth/profile", headers=auth_headers,

@@ -1,5 +1,5 @@
 // 설정 — INFINITT Setting options 패턴(좌측 트리 + 우측 페이지, 화면분석 §5)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
@@ -72,6 +72,13 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // 리포트 구성 (Report Composition)
   const [rptAiPanel, setRptAiPanel] = useState(true);
   const [rptAutoApply, setRptAutoApply] = useState(true);
+  // 판독(Reading) 페이지 — 기본/단축키/템플릿 3탭 + 레포트 옵션(report.prefs)
+  const [rdTab, setRdTab] = useState<"basic" | "shortcut" | "template">("basic");
+  const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({
+    open_next_after_save: false, save_alert: false, auto_insert_prior: false,
+    cvr_notice: false, sidebar_tab: "history", panel_tab: "shortcut",
+    insert_pos: "end", key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A",
+  });
   // 뷰어 닫기 동작 (닫기 다이얼로그 "기본으로" 체크와 동일 설정)
   const [closeMode, setCloseMode] = useState<"ask" | "save_current" | "save_all" | "discard">("ask");
   // 모니터 설정 — 하드웨어 모니터 감지 후 뷰어 표시 모니터 선택(다중=스팬)
@@ -150,9 +157,10 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
     }).catch(() => {});
     api.getSetting("report.prefs").then((r) => {
-      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean };
+      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean } & Record<string, unknown>;
       if (v.ai_panel !== undefined) setRptAiPanel(v.ai_panel);
       if (v.auto_apply !== undefined) setRptAutoApply(v.auto_apply);
+      setRdOpts((prev) => ({ ...prev, ...v }));
     }).catch(() => {});
     api.getSetting("mode.profiles").then((r) => {
       const v = r.value as { profiles?: Record<string, ModeProfile> };
@@ -203,7 +211,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel },
     }, "user");
-    await api.putSetting("report.prefs", { ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
+    await api.putSetting("report.prefs",
+      { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
     if (isAdmin) {
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
       await api.putSetting("ai.policy", {
@@ -420,25 +429,103 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
             )}
 
             {page === "reading" && (
-              <Group title="판독의 등록 (Reading) — 확정 서명에 기록">
-                <Row label="이름(표시명)">
-                  <input value={profName} onChange={(e) => setProfName(e.target.value)}
-                         placeholder="홍길동" style={{ width: 220 }} />
-                </Row>
-                <Row label="면허번호">
-                  <input value={profLicense} onChange={(e) => setProfLicense(e.target.value)}
-                         placeholder="12345" style={{ width: 220 }} />
-                </Row>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button className="primary" onClick={async () => {
-                    await api.putProfile(profName, profLicense);
-                    setSaved("판독의 정보 저장됨 — 이후 확정(서명)부터 적용");
-                  }}>판독의 정보 저장</button>
-                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    리포트 확정 시 "✍ {profName || "이름"} (면허 제{profLicense || "번호"}호)"로 서명이 기록됩니다 (PDF 포함).
-                  </span>
+              <>
+                {/* 서브탭 — 기본 설정 / 단축키 설정 / 템플릿 설정 (레퍼런스 Report 설정) */}
+                <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)" }}>
+                  {([["basic", "기본 설정"], ["shortcut", "단축키 설정"], ["template", "템플릿 설정"]] as const).map(([k, label]) => (
+                    <div key={k} onClick={() => setRdTab(k)}
+                         style={{ padding: "6px 16px", fontSize: 12.5, cursor: "pointer",
+                                  fontWeight: rdTab === k ? 700 : 400,
+                                  background: rdTab === k ? "var(--bg-elevated)" : undefined,
+                                  borderBottom: rdTab === k ? "2px solid var(--accent)" : "2px solid transparent" }}>
+                      {label}
+                    </div>
+                  ))}
                 </div>
-              </Group>
+
+                {rdTab === "basic" && (
+                  <>
+                    <Group title="판독의 등록 — 확정 서명에 기록">
+                      <Row label="이름(표시명)">
+                        <input value={profName} onChange={(e) => setProfName(e.target.value)}
+                               placeholder="홍길동" style={{ width: 220 }} />
+                      </Row>
+                      <Row label="면허번호">
+                        <input value={profLicense} onChange={(e) => setProfLicense(e.target.value)}
+                               placeholder="12345" style={{ width: 220 }} />
+                      </Row>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <button className="primary" onClick={async () => {
+                          await api.putProfile(profName, profLicense);
+                          setSaved("판독의 정보 저장됨 — 이후 확정(서명)부터 적용");
+                        }}>판독의 정보 저장</button>
+                      </div>
+                    </Group>
+                    <Group title="레포트 옵션">
+                      {([
+                        ["open_next_after_save", "저장(확정) 후 다음 레포트 열기"],
+                        ["save_alert", "레포트 저장 알림 사용"],
+                        ["auto_insert_prior", "이전 검사 비교 정보 자동 삽입"],
+                        ["cvr_notice", "CVR Notice — critical 소견 경고 기본 표시"],
+                      ] as const).map(([k, label]) => (
+                        <label key={k} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                          <input type="checkbox" checked={!!rdOpts[k]}
+                                 onChange={(e) => setRdOpts((p) => ({ ...p, [k]: e.target.checked }))} />
+                          {label}
+                        </label>
+                      ))}
+                      <Row label="사이드바 기본 탭">
+                        <select value={String(rdOpts.sidebar_tab ?? "history")}
+                                onChange={(e) => setRdOpts((p) => ({ ...p, sidebar_tab: e.target.value }))}>
+                          <option value="history">판독 이력</option>
+                          <option value="read">판독</option>
+                        </select>
+                      </Row>
+                      <Row label="단축키 패널 기본 탭">
+                        <select value={String(rdOpts.panel_tab ?? "shortcut")}
+                                onChange={(e) => setRdOpts((p) => ({ ...p, panel_tab: e.target.value }))}>
+                          <option value="shortcut">단축키</option>
+                          <option value="template">템플릿</option>
+                        </select>
+                      </Row>
+                      <Row label="텍스트 삽입 위치">
+                        <select value={String(rdOpts.insert_pos ?? "end")}
+                                onChange={(e) => setRdOpts((p) => ({ ...p, insert_pos: e.target.value }))}>
+                          <option value="end">맨 끝에 삽입</option>
+                          <option value="cursor">커서 위치에 삽입</option>
+                        </select>
+                      </Row>
+                    </Group>
+                    <Group title="시스템 단축키" right={
+                      <button style={{ padding: "1px 8px", fontSize: 11 }}
+                              onClick={() => setRdOpts((p) => ({ ...p, key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A" }))}>
+                        기본값으로 초기화
+                      </button>
+                    }>
+                      <Row label="리포트 저장">
+                        <KeyCaptureInput value={String(rdOpts.key_save ?? "Ctrl+S")}
+                                         onChange={(v) => setRdOpts((p) => ({ ...p, key_save: v }))} />
+                      </Row>
+                      <Row label="리포트 승인">
+                        <KeyCaptureInput value={String(rdOpts.key_approve ?? "Ctrl+Shift+A")}
+                                         onChange={(v) => setRdOpts((p) => ({ ...p, key_approve: v }))} />
+                      </Row>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                        옵션·단축키는 OK(저장) 시 계정에 저장(로밍) — 뷰어 판독 창에 즉시 적용됩니다.
+                      </div>
+                    </Group>
+                  </>
+                )}
+
+                {rdTab === "shortcut" && (
+                  <ReadingItemEditor kind="phrase" items={phrases}
+                                     reload={() => api.phrases().then((r) => setPhrases(r.items))} />
+                )}
+                {rdTab === "template" && (
+                  <ReadingItemEditor kind="template" items={phrases}
+                                     reload={() => api.phrases().then((r) => setPhrases(r.items))} />
+                )}
+              </>
             )}
 
             {page === "worklist" && (
@@ -923,6 +1010,143 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           <div style={{ flex: 1 }} />
           <button className="primary" onClick={save}>OK (저장)</button>
           <button onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── 키 캡처 입력 (시스템 단축키 — [입력] 후 키 조합을 누르면 기록) ── */
+function KeyCaptureInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [cap, setCap] = useState(false);
+  const ref = useRef<HTMLInputElement | null>(null);
+  return (
+    <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <input ref={ref} value={value} readOnly placeholder="키를 입력하세요"
+             style={{ width: 140, background: cap ? "var(--accent-subtle)" : undefined }}
+             onKeyDown={(e) => {
+               if (!cap) return;
+               e.preventDefault();
+               if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+               const combo = [e.ctrlKey && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt",
+                              e.key.length === 1 ? e.key.toUpperCase() : e.key].filter(Boolean).join("+");
+               onChange(combo);
+               setCap(false);
+             }} />
+      <button className={cap ? "primary" : ""} style={{ padding: "1px 9px", fontSize: 11 }}
+              onClick={() => { setCap((c) => !c); ref.current?.focus(); }}>
+        {cap ? "입력 중…" : "입력"}
+      </button>
+      <button style={{ padding: "1px 9px", fontSize: 11 }} onClick={() => onChange("")}>지우기</button>
+    </span>
+  );
+}
+
+/* ── 판독 단축키/템플릿 편집기 (레퍼런스: 목록 | 추가 폼 — 모달리티·코드·이름·판독·결론) ── */
+function ReadingItemEditor({ kind, items, reload }: {
+  kind: "phrase" | "template";
+  items: PhraseRow[];
+  reload: () => void;
+}) {
+  const list = items.filter((p) => p.kind === kind);
+  const label = kind === "phrase" ? "단축키" : "템플릿";
+  const [sel, setSel] = useState<PhraseRow | null>(null);
+  const empty = { name: "", modality: "", shortcut: "", reading_text: "", text: "" };
+  const [f, setF] = useState(empty);
+  const [cap, setCap] = useState(false);
+  useEffect(() => {
+    setF(sel ? { name: sel.name, modality: sel.modality, shortcut: sel.shortcut,
+                 reading_text: sel.reading_text, text: sel.text } : empty);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel]);
+
+  const save = async () => {
+    try {
+      const body = { ...f, kind, body_part: sel?.body_part ?? "" };
+      if (sel) await api.updatePhrase(sel.id, body);
+      else await api.createPhrase(body);
+      setSel(null);
+      setF(empty);
+      reload();
+    } catch (e) { alert(e instanceof Error ? e.message : "저장 실패"); }
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 14, minHeight: 320 }}>
+      {/* 좌: 목록 */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <b style={{ fontSize: 12.5 }}>{label} 목록</b>
+          <button className="primary" style={{ padding: "2px 10px", fontSize: 11.5 }}
+                  onClick={() => { setSel(null); setF(empty); }}>＋ {label} 추가</button>
+        </div>
+        <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
+          {list.map((p) => (
+            <div key={p.id} onClick={() => setSel(p)}
+                 style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d",
+                          display: "flex", gap: 6, alignItems: "center",
+                          background: sel?.id === p.id ? "var(--accent-subtle)" : undefined }}>
+              <span style={{ color: "var(--text-secondary)" }}>[{p.modality || "공통"}]</span>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
+              {p.shortcut && <span style={{ color: "var(--accent)" }}>Alt+{p.shortcut}</span>}
+              <button style={{ padding: "0 6px", fontSize: 11 }} onClick={async (e) => {
+                e.stopPropagation();
+                if (!window.confirm(`'${p.name}'을 삭제할까요?`)) return;
+                await api.deletePhrase(p.id);
+                if (sel?.id === p.id) setSel(null);
+                reload();
+              }}>✕</button>
+            </div>
+          ))}
+          {list.length === 0 && (
+            <div style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)", textAlign: "center" }}>
+              등록된 {label}가 없습니다.
+            </div>
+          )}
+        </div>
+      </div>
+      {/* 우: 추가/수정 폼 (레퍼런스 폼 구성) */}
+      <div style={{ flex: 1.1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+        <b style={{ fontSize: 12.5 }}>{sel ? `${label} 수정 — ${sel.name}` : `새 ${label} 추가`}</b>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>모달리티</div>
+        <select value={f.modality} onChange={(e) => setF((p) => ({ ...p, modality: e.target.value }))}>
+          <option value="">공통 (모든 장비)</option>
+          {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM"].map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {kind === "phrase" && (
+          <>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>단축키 코드 (Alt+키)</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <input value={f.shortcut} readOnly placeholder="단축키를 입력하세요"
+                     style={{ flex: 1, background: cap ? "var(--accent-subtle)" : undefined }}
+                     onKeyDown={(e) => {
+                       if (!cap) return;
+                       e.preventDefault();
+                       if (/^[a-zA-Z0-9]$/.test(e.key)) { setF((p) => ({ ...p, shortcut: e.key.toUpperCase() })); setCap(false); }
+                     }} />
+              <button className={cap ? "primary" : ""} style={{ padding: "2px 10px", fontSize: 11.5 }}
+                      onClick={(e) => { setCap((c) => !c); (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}>
+                입력
+              </button>
+            </div>
+          </>
+        )}
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{label} 이름</div>
+        <input value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))} />
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>판독 (Reading)</div>
+        <textarea value={f.reading_text} rows={5}
+                  onChange={(e) => setF((p) => ({ ...p, reading_text: e.target.value }))}
+                  style={{ background: "var(--bg-canvas)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                           borderRadius: 3, padding: 6, fontFamily: "inherit", fontSize: 12, resize: "vertical" }} />
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>결론 (Conclusion)</div>
+        <textarea value={f.text} rows={4}
+                  onChange={(e) => setF((p) => ({ ...p, text: e.target.value }))}
+                  style={{ background: "var(--bg-canvas)", color: "var(--text-primary)", border: "1px solid var(--border)",
+                           borderRadius: 3, padding: 6, fontFamily: "inherit", fontSize: 12, resize: "vertical" }} />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="primary" style={{ padding: "4px 18px" }}
+                  disabled={!f.name.trim() || !(f.text.trim() || f.reading_text.trim())}
+                  onClick={() => void save()}>저장</button>
         </div>
       </div>
     </div>

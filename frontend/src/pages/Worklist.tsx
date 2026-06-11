@@ -757,12 +757,14 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
   // 리포트 구성(Setting>리포트 — Report Composition) + STT 엔진(Setting>AI 정책)
   const [aiPanelOn, setAiPanelOn] = useState(true);
   const [autoApply, setAutoApply] = useState(true);
+  const [openNext, setOpenNext] = useState(false);  // 저장(확정) 후 다음 레포트 열기
   const [sttEngine, setSttEngine] = useState("browser");
   useEffect(() => {
     api.getSetting("report.prefs").then((r) => {
-      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean };
+      const v = r.value as { ai_panel?: boolean; auto_apply?: boolean; open_next_after_save?: boolean };
       if (v.ai_panel !== undefined) setAiPanelOn(v.ai_panel);
       if (v.auto_apply !== undefined) setAutoApply(v.auto_apply);
+      if (v.open_next_after_save !== undefined) setOpenNext(v.open_next_after_save);
     }).catch(() => {});
     api.getSetting("ai.policy").then((r) => {
       setSttEngine(((r.value as { stt_engine?: string }).stt_engine) ?? "browser");
@@ -877,6 +879,7 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
       if (!finalized) await api.updateReport(current.id, draft);
       await api.finalizeReport(current.id);
       onChanged();
+      if (openNext && onNav) onNav(1);  // 옵션: 저장(확정) 후 다음 레포트 열기
     } finally { setBusy(false); }
   };
 

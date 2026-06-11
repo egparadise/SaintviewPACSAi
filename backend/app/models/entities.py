@@ -172,6 +172,8 @@ class Phrase(Base):
     body_part: Mapped[str] = mapped_column(String(64), default="", index=True)  # 빈값=공통
     category: Mapped[str] = mapped_column(String(64), default="")               # 분류(자동: MOD-부위)
     shortcut: Mapped[str] = mapped_column(String(8), default="")                # Alt+키 (한 글자/숫자)
+    kind: Mapped[str] = mapped_column(String(16), default="phrase")             # phrase(단축키) | template(템플릿)
+    reading_text: Mapped[str] = mapped_column(Text, default="")                 # 판독(Reading) 본문 — text는 결론
     created_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

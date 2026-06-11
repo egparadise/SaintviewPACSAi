@@ -21,6 +21,7 @@ def _out(p: Phrase) -> dict:
     return {
         "id": p.id, "name": p.name, "text": p.text, "modality": p.modality,
         "body_part": p.body_part, "category": p.category, "shortcut": p.shortcut,
+        "kind": p.kind, "reading_text": p.reading_text,
         "created_by": p.created_by,
     }
 
@@ -65,16 +66,20 @@ def list_phrases(
 
 class PhraseBody(BaseModel):
     name: str
-    text: str
+    text: str = ""             # 결론(Conclusion) 본문
+    reading_text: str = ""     # 판독(Reading) 본문
     modality: str = ""
     body_part: str = ""
     shortcut: str = ""
+    kind: str = "phrase"       # phrase(단축키) | template(템플릿)
 
 
 def _validate(body: PhraseBody, db: Session, *, exclude_id: int | None = None) -> None:
-    if not body.name.strip() or not body.text.strip():
-        raise HTTPException(status_code=400, detail="이름과 본문은 필수입니다")
-    if body.shortcut:
+    if body.kind not in ("phrase", "template"):
+        raise HTTPException(status_code=400, detail="kind는 phrase|template")
+    if not body.name.strip() or not (body.text.strip() or body.reading_text.strip()):
+        raise HTTPException(status_code=400, detail="이름과 본문(판독 또는 결론)은 필수입니다")
+    if body.shortcut and body.kind == "phrase":
         if len(body.shortcut) != 1 or not body.shortcut.isalnum():
             raise HTTPException(status_code=400, detail="단축키는 영문/숫자 1글자 (Alt+키로 삽입)")
         dup = db.execute(
@@ -88,10 +93,11 @@ def _validate(body: PhraseBody, db: Session, *, exclude_id: int | None = None) -
 def create_phrase(body: PhraseBody, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     _validate(body, db)
     p = Phrase(
-        name=body.name.strip()[:128], text=body.text,
+        name=body.name.strip()[:128], text=body.text, reading_text=body.reading_text,
         modality=body.modality.strip().upper()[:16], body_part=body.body_part.strip().upper()[:64],
         category=_category(body.modality.strip().upper(), body.body_part.strip().upper()),
-        shortcut=body.shortcut.strip().upper()[:8], created_by=user["sub"],
+        shortcut=(body.shortcut.strip().upper()[:8] if body.kind == "phrase" else ""),
+        kind=body.kind, created_by=user["sub"],
     )
     db.add(p)
     db.add(AuditLog(action="phrase_create", target_type="phrase", target_id=p.name,
@@ -110,10 +116,12 @@ def update_phrase(
     _validate(body, db, exclude_id=phrase_id)
     p.name = body.name.strip()[:128]
     p.text = body.text
+    p.reading_text = body.reading_text
     p.modality = body.modality.strip().upper()[:16]
     p.body_part = body.body_part.strip().upper()[:64]
     p.category = _category(p.modality, p.body_part)
-    p.shortcut = body.shortcut.strip().upper()[:8]
+    p.kind = body.kind
+    p.shortcut = body.shortcut.strip().upper()[:8] if body.kind == "phrase" else ""
     db.add(AuditLog(action="phrase_update", target_type="phrase", target_id=str(phrase_id),
                     detail={"by": user["sub"]}))
     db.commit()

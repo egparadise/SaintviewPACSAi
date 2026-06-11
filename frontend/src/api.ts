@@ -350,15 +350,17 @@ export interface OrderRow {
   dicom_study_id: string;    // DICOM StudyID (0020,0010)
 }
 
-/** 상용구 — DB 테이블(phrases), Modality×BodyPart 축 + Alt+단축키 */
+/** 상용구/템플릿 — DB 테이블(phrases). kind=phrase(단축키)|template, text=결론, reading_text=판독 */
 export interface PhraseRow {
   id: number;
   name: string;
   text: string;
+  reading_text: string;
   modality: string;
   body_part: string;
   category: string;
   shortcut: string;
+  kind: "phrase" | "template";
   created_by: string;
 }
 
