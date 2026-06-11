@@ -217,6 +217,28 @@ def test_mwl_export(client, auth_headers, tmp_path):
     assert sps.Modality and sps.ScheduledStationAETitle
 
 
+# ── 14차: 워크리스트 페이지 탭·검색 폴더 트리 설정 ──────────
+
+
+def test_worklist_tabs_and_tree_settings(client, auth_headers):
+    # 트리 라운드트립 (탐색기형 — 조건 누적 병합은 프론트 책임, 서버는 저장/로밍)
+    tree = {"nodes": [{"id": "n1", "label": "응급실", "filter": {"emergency": True},
+                       "children": [{"id": "n2", "label": "DR", "filter": {"modality": "DX"},
+                                     "children": []}]}]}
+    assert client.put("/api/settings/worklist.tree", headers=auth_headers,
+                      json={"value": tree, "scope": "user"}).status_code == 200
+    got = client.get("/api/settings/worklist.tree", headers=auth_headers).json()["value"]
+    assert got["nodes"][0]["children"][0]["filter"]["modality"] == "DX"
+
+    # 탭: 10개 초과 거부 (UBPACS-Z 규격)
+    ok_tabs = {"items": [{"id": f"t{i}", "label": f"W{i}", "filter": {}} for i in range(10)]}
+    assert client.put("/api/settings/worklist.tabs", headers=auth_headers,
+                      json={"value": ok_tabs, "scope": "user"}).status_code == 200
+    over = {"items": [{"id": f"t{i}", "label": f"W{i}", "filter": {}} for i in range(11)]}
+    assert client.put("/api/settings/worklist.tabs", headers=auth_headers,
+                      json={"value": over, "scope": "user"}).status_code == 400
+
+
 # ── 번인 OCR 가드 — 폴백 무중단 ─────────────────────────────
 
 

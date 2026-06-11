@@ -25,6 +25,22 @@ import {
   type StudyRow,
 } from "../api";
 
+import {
+  DEFAULT_TAB,
+  FolderTreeEditor,
+  filtersToFolder,
+  folderSummary,
+  folderToFilters,
+  loadTabs,
+  loadTree,
+  mergedFilter,
+  newId,
+  saveTabs,
+  saveTree,
+  type TreeNode,
+  type WorklistTab,
+} from "./WorklistTree";
+
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 
@@ -240,7 +256,7 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
   );
 }
 
-/* ── [C-좌] 날짜/폴더 트리 ─────────────────────── */
+/* ── [C-좌] 검색 레일: 기간 프리셋 + 검색 폴더 트리 (UBPACS-Z Search Filter) ── */
 const DATE_PRESETS = [
   { key: "today", label: "Today", days: 0 },
   { key: "3d", label: "최근 3일", days: 3 },
@@ -248,7 +264,9 @@ const DATE_PRESETS = [
   { key: "1m", label: "최근 1개월", days: 30 },
   { key: "all", label: "전체", days: -1 },
 ];
-function DateTree({ active, onPick }: { active: string; onPick: (key: string, from: string) => void }) {
+function SearchRail({ active, onPick, tree }: {
+  active: string; onPick: (key: string, from: string) => void; tree: React.ReactNode;
+}) {
   const pick = (p: { key: string; days: number }) => {
     if (p.days < 0) return onPick(p.key, "");
     const d = new Date();
@@ -257,8 +275,8 @@ function DateTree({ active, onPick }: { active: string; onPick: (key: string, fr
   };
   return (
     <div style={{
-      width: 120, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
-      padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
+      width: 152, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+      padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, minHeight: 0,
     }}>
       <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px" }}>
         기간
@@ -266,13 +284,52 @@ function DateTree({ active, onPick }: { active: string; onPick: (key: string, fr
       {DATE_PRESETS.map((p) => (
         <div key={p.key} onClick={() => pick(p)}
              style={{
-               padding: "4px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+               padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
                background: active === p.key ? "var(--accent-subtle)" : undefined,
                color: active === p.key ? "var(--text-primary)" : "var(--text-secondary)",
              }}>
           {p.label}
         </div>
       ))}
+      <div style={{
+        fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
+        padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
+      }}>
+        검색 폴더
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{tree}</div>
+    </div>
+  );
+}
+
+/* ── 워크리스트 페이지 탭 바 (UBPACS-Z — 저장된 검색 정의를 페이지로, 최대 10) ── */
+function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
+  tabs: WorklistTab[]; activeId: string;
+  onPick: (t: WorklistTab) => void; onAdd: () => void; onRemove: (id: string) => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", gap: 2, padding: "4px 8px 0", alignItems: "flex-end",
+      background: "var(--bg-canvas)", borderBottom: "1px solid var(--border)",
+    }}>
+      {tabs.map((t) => (
+        <div key={t.id} onClick={() => onPick(t)} title={folderSummary(t.filter)}
+             style={{
+               display: "flex", alignItems: "center", gap: 6, padding: "4px 11px",
+               borderRadius: "4px 4px 0 0", cursor: "pointer", fontSize: 11.5, fontWeight: 700,
+               background: t.id === activeId ? "var(--accent)" : "var(--bg-elevated)",
+               color: t.id === activeId ? "#fff" : "var(--text-secondary)",
+               border: "1px solid var(--border)", borderBottom: "none", whiteSpace: "nowrap",
+             }}>
+          {t.label.toUpperCase()}
+          {t.id !== "default" && (
+            <span title="페이지 삭제" onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
+                  style={{ fontSize: 10, opacity: 0.75 }}>✕</span>
+          )}
+        </div>
+      ))}
+      <button onClick={onAdd} title="현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)"
+              style={{ padding: "1px 9px", fontSize: 13, marginLeft: 4, marginBottom: 3 }}>＋</button>
     </div>
   );
 }
@@ -1013,6 +1070,11 @@ export function Worklist() {
   const [panelOrder, setPanelOrder] = useState<{ d: string[]; e: string[] }>({
     d: ["prior", "compare"], e: ["std", "report", "orders"],
   });
+  // UBPACS-Z: 워크리스트 페이지 탭(최대 10) + 검색 폴더 트리 (서버 로밍)
+  const [tabs, setTabs] = useState<WorklistTab[]>([DEFAULT_TAB]);
+  const [activeTabId, setActiveTabId] = useState(DEFAULT_TAB.id);
+  const [treeNodes, setTreeNodes] = useState<TreeNode[]>([]);
+  const [selNodeId, setSelNodeId] = useState<string | null>(null);
   const insertRef = useRef<((t: string) => void) | null>(null);
 
   // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
@@ -1031,6 +1093,8 @@ export function Worklist() {
       const po = (v as { panel_order?: { d?: string[]; e?: string[] } }).panel_order;
       if (po?.d?.length === 2 && po?.e?.length === 3) setPanelOrder({ d: po.d, e: po.e });
     }).catch(() => {});
+    loadTabs().then(setTabs).catch(() => {});
+    loadTree().then(setTreeNodes).catch(() => {});
     // ETC 섹션의 3D 버튼(Viewer2D 내부) → 3D 뷰어 전환
     const h = (e: Event) => setViewer3dUid((e as CustomEvent).detail as string);
     window.addEventListener("sv-open-3d", h);
@@ -1196,6 +1260,57 @@ export function Worklist() {
     finally { setNlBusy(false); }
   }, []);
 
+  /* ── UBPACS-Z 페이지 탭 + 검색 폴더 ── */
+  // 탭 전환: 저장된 검색 정의를 페이지처럼 적용
+  const pickTab = useCallback((tab: WorklistTab) => {
+    setActiveTabId(tab.id);
+    setSelNodeId(null);
+    setSearchText("");
+    setDatePreset(tab.filter.date ?? "all");
+    setFilters(folderToFilters(tab.filter));
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  // 현재 검색조건 스냅샷 → 새 페이지 등록 (최대 10)
+  const addTab = useCallback(async (treeFilter?: { label: string; filter: WorklistTab["filter"] }) => {
+    if (tabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)"); return; }
+    const label = prompt("페이지 이름 — 현재 검색조건이 저장됩니다 (예: CR, 응급실)",
+                         treeFilter?.label ?? `WORKLIST ${tabs.length + 1}`);
+    if (!label) return;
+    const tab: WorklistTab = {
+      id: newId(), label,
+      filter: treeFilter?.filter ?? filtersToFolder(filtersRef.current, datePreset),
+    };
+    const next = [...tabs, tab];
+    setTabs(next);
+    setActiveTabId(tab.id);
+    try { await saveTabs(next); } catch (e) { alert(e instanceof Error ? e.message : "페이지 저장 실패"); }
+  }, [tabs, datePreset]);
+
+  const removeTab = useCallback(async (id: string) => {
+    const t = tabs.find((x) => x.id === id);
+    if (!t || !window.confirm(`'${t.label}' 페이지를 삭제할까요?`)) return;
+    const next = tabs.filter((x) => x.id !== id);
+    const fixed = next.length ? next : [DEFAULT_TAB];
+    setTabs(fixed);
+    if (activeTabId === id) pickTab(fixed[0]);
+    try { await saveTabs(fixed); } catch {}
+  }, [tabs, activeTabId, pickTab]);
+
+  // 폴더 클릭: 루트→폴더 경로 조건 누적 병합 적용 (예: 응급실›DR›Chest)
+  const applyFolder = useCallback((node: TreeNode) => {
+    setSelNodeId(node.id);
+    const merged = mergedFilter(treeNodes, node.id) ?? node.filter;
+    setDatePreset(merged.date ?? "");
+    setFilters(folderToFilters(merged));
+    setRefreshKey((k) => k + 1);
+  }, [treeNodes]);
+
+  const onTreeChange = useCallback((next: TreeNode[]) => {
+    setTreeNodes(next);
+    saveTree(next).catch((e) => alert(e instanceof Error ? e.message : "검색 폴더 저장 실패"));
+  }, []);
+
   // 패널 자리 교환 + 서버 저장(로밍)
   const onPanelDrop = useCallback((zone: "d" | "e", src: string, dst: string) => {
     if (src === dst) return;
@@ -1237,6 +1352,9 @@ export function Worklist() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
+      {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환 */}
+      <WorklistTabsBar tabs={tabs} activeId={activeTabId}
+                       onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)} />
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
                      onSearch={() => setRefreshKey((k) => k + 1)}
@@ -1268,12 +1386,15 @@ export function Worklist() {
         </div>
       )}
 
-      {/* 중단: 날짜트리 + 메인 그리드 */}
+      {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 */}
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
-        <DateTree active={datePreset} onPick={(key, from) => {
+        <SearchRail active={datePreset} onPick={(key, from) => {
           setDatePreset(key);
           setFilters((f) => ({ ...f, tree_from: from, date_from_iso: "", date_to_iso: "" }));
-        }} />
+        }} tree={
+          <FolderTreeEditor nodes={treeNodes} onChange={onTreeChange}
+                            selectedId={selNodeId} onSelect={applyFolder} applyHint />
+        } />
         <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
                    onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                    onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />

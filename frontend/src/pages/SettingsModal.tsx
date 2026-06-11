@@ -2,6 +2,18 @@
 import { useEffect, useState } from "react";
 import { api, type AiQuality, type OrthancStatus } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS } from "./Worklist";
+import {
+  FolderEditModal,
+  FolderTreeEditor,
+  folderSummary,
+  loadTabs,
+  loadTree,
+  newId,
+  saveTabs,
+  saveTree,
+  type TreeNode,
+  type WorklistTab,
+} from "./WorklistTree";
 
 /** 05 Mode Profile — 백엔드 mode.profiles JSON 항목 (07 A.7 v1) */
 interface ModeProfile {
@@ -52,6 +64,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
   const [modeProfiles, setModeProfiles] = useState<Record<string, ModeProfile>>({});
   const [modeJson, setModeJson] = useState("");
+  // UBPACS-Z: 워크리스트 페이지 탭 + 검색 폴더 트리 (워크리스트 화면과 동일 데이터)
+  const [wlTabs, setWlTabs] = useState<WorklistTab[]>([]);
+  const [wlTree, setWlTree] = useState<TreeNode[]>([]);
+  const [selTreeId, setSelTreeId] = useState<string | null>(null);
+  const [tabModal, setTabModal] = useState<{ index: number } | "add" | null>(null);
 
   useEffect(() => {
     api.getSetting("worklist.prefs").then((r) => {
@@ -90,6 +107,8 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
       setModeProfiles(v.profiles ?? {});
       setModeJson(JSON.stringify(r.value, null, 2));
     }).catch(() => {});
+    loadTabs().then(setWlTabs).catch(() => {});
+    loadTree().then(setWlTree).catch(() => {});
     if (isAdmin) {
       api.getSetting("pdf.template").then((r) => {
         const v = r.value as Record<string, string>;
@@ -284,6 +303,91 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
                     컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.
                   </div>
                 </Group>
+                <Group title="워크리스트 페이지 탭 (UBPACS-Z — 최대 10)">
+                  <table className="grid-table">
+                    <thead><tr><th style={{ width: 130 }}>이름</th><th>검색 조건</th><th style={{ width: 118 }}></th></tr></thead>
+                    <tbody>
+                      {wlTabs.map((t, i) => (
+                        <tr key={t.id}>
+                          <td>{t.label}</td>
+                          <td style={{ color: "var(--text-secondary)" }}>{folderSummary(t.filter)}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} title="조건 수정"
+                                    onClick={() => setTabModal({ index: i })}>✏</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title="위로"
+                                    onClick={() => {
+                                      const next = [...wlTabs];
+                                      [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                                      setWlTabs(next);
+                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                    }}>▲</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === wlTabs.length - 1} title="아래로"
+                                    onClick={() => {
+                                      const next = [...wlTabs];
+                                      [next[i], next[i + 1]] = [next[i + 1], next[i]];
+                                      setWlTabs(next);
+                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                    }}>▼</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={t.id === "default"} title="삭제"
+                                    onClick={() => {
+                                      if (!window.confirm(`'${t.label}' 페이지를 삭제할까요?`)) return;
+                                      const next = wlTabs.filter((x) => x.id !== t.id);
+                                      setWlTabs(next);
+                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                    }}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                      {wlTabs.length === 0 && (
+                        <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>페이지 없음</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button onClick={() => setTabModal("add")} disabled={wlTabs.length >= 10}>＋ 페이지 추가</button>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      워크리스트 상단 탭과 동일 데이터 — 탭 ＋ 버튼은 현재 검색조건을 스냅샷으로 등록.
+                    </span>
+                  </div>
+                </Group>
+                <Group title="검색 폴더 트리 (탐색기형 — 예: 응급실 › DR › Chest)">
+                  <div style={{
+                    height: 190, display: "flex", flexDirection: "column", padding: 4,
+                    border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-canvas)",
+                  }}>
+                    <FolderTreeEditor nodes={wlTree} selectedId={selTreeId}
+                                      onSelect={(n) => setSelTreeId(n.id)}
+                                      onChange={(next) => {
+                                        setWlTree(next);
+                                        saveTree(next).then(() => setSaved("검색 폴더 저장됨")).catch(() => {});
+                                      }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    각 폴더는 자기 조건만 가지며, 워크리스트에서 폴더 클릭 시 <b>상위 경로 조건이 누적 병합</b>되어 검색됩니다.
+                    변경은 즉시 서버 저장(로밍).
+                  </div>
+                </Group>
+                {tabModal !== null && (
+                  <FolderEditModal
+                    title={tabModal === "add" ? "새 워크리스트 페이지"
+                         : `페이지 수정 — ${wlTabs[tabModal.index]?.label ?? ""}`}
+                    init={tabModal === "add" ? undefined
+                        : { label: wlTabs[tabModal.index].label, filter: wlTabs[tabModal.index].filter }}
+                    onSave={(label, filter) => {
+                      let next: WorklistTab[];
+                      if (tabModal === "add") {
+                        if (wlTabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다"); return; }
+                        next = [...wlTabs, { id: newId(), label, filter }];
+                      } else {
+                        next = wlTabs.map((t, i) => (i === tabModal.index ? { ...t, label, filter } : t));
+                      }
+                      setWlTabs(next);
+                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                      setTabModal(null);
+                    }}
+                    onClose={() => setTabModal(null)}
+                  />
+                )}
               </>
             )}
 
