@@ -332,8 +332,9 @@ export function ModalityPanel() {
               Called AE Title 검증
             </label>
             <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-              장비 목록은 즉시 Orthanc에 반영됩니다. 수신 포트 개폐·등록장비 전용 정책은
-              생성된 <code>deploy/orthanc-generated.json</code>을 컨테이너에 마운트 후 재기동해야 적용됩니다.
+              장비 목록은 즉시 Orthanc에 반영됩니다(재기동 불필요). 수신 정책(등록장비 전용·포트 개폐·Called AE)은
+              생성된 <code>deploy/scp-policy.env</code>를 <code>deploy/.env</code>에 반영 후
+              <code>docker compose up -d orthanc</code>로 적용됩니다(데이터는 볼륨 보존).
             </div>
           </>
         ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>상태 확인 중…</div>}

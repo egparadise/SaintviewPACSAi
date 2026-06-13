@@ -21,3 +21,4 @@ deploy/orthanc-generated.json
 
 # 백업 출력물(런타임)
 backend/backup/
+deploy/scp-policy.env

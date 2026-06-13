@@ -315,7 +315,7 @@ export const api = {
       "/api/admin/modalities/apply", { method: "POST" }),
   scpStatus: () => req<ScpStatus>("/api/admin/scp-status"),
   scpConfig: (body: { receive_enabled: boolean; registered_only: boolean; check_called_aet: boolean }) =>
-    req<{ ok: boolean; config: ScpConfig; generated_file: string | null; note: string }>(
+    req<{ ok: boolean; config: ScpConfig; generated_files: string[]; note: string }>(
       "/api/admin/scp-config", { method: "POST", body: JSON.stringify(body) }),
 
   // ── 서버 관리 2단계: 저장공간·백업·압축 ──

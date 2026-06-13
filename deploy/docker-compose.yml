@@ -30,8 +30,13 @@ services:
       ORTHANC__DICOM_WEB__ENABLE: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
       ORTHANC__OVERWRITE_INSTANCES: "true"
-      # 수신 검증 옵션 (화면분석 §5.3 — calling/called AE 검증은 운영 시 활성화)
-      ORTHANC__DICOM_CHECK_CALLED_AET: "false"
+      # ── SCP 수신 정책 (설정>장비·수신에서 토글 → deploy/scp-policy.env 생성 후 .env 반영·재기동) ──
+      # 등록 장비만 수신(미등록 호스트/AET의 C-STORE 거부)
+      ORTHANC__DICOM_CHECK_MODALITY_HOST: "${ORTHANC_CHECK_MODALITY_HOST:-false}"
+      # Called AE Title 검증 (화면분석 §5.3)
+      ORTHANC__DICOM_CHECK_CALLED_AET: "${ORTHANC_CHECK_CALLED_AET:-false}"
+      # SCP 수신 리스너 on/off (false=DICOM 포트 닫음)
+      ORTHANC__DICOM_SERVER_ENABLED: "${ORTHANC_DICOM_SERVER_ENABLED:-true}"
       # MWL(P2) — 백엔드 /api/orders/export-mwl이 .wl 파일을 쓰면 장비 C-FIND(MWL)에 응답
       ORTHANC__WORKLISTS__ENABLE: "true"
       ORTHANC__WORKLISTS__DATABASE: "/var/lib/orthanc/worklists"

@@ -506,38 +506,44 @@ def scp_config(body: ScpConfigBody, db: Session = Depends(get_db),
            "check_called_aet": body.check_called_aet}
     set_setting(db, SCP_KEY, cfg, scope="global")
 
-    # 등록 장비 → Orthanc 설정 스니펫
+    # 등록 장비 → Orthanc 설정 스니펫(참고용 JSON 프래그먼트)
     mods = db.execute(select(Modality).where(
         Modality.enabled.is_(True), Modality.allow_receive.is_(True)
     )).scalars().all()
     dicom_modalities = {
         m.name: [m.ae_title, m.host, m.port] for m in mods if m.host and 0 < m.port < 65536
     }
-    from app.config import get_settings
-
-    s = get_settings()
     orthanc_conf = {
         "DicomModalities": dicom_modalities,
-        # 등록 장비 전용 수신 — 미등록 호스트/AET의 C-STORE 거부
         "DicomCheckModalityHost": bool(body.registered_only),
         "DicomCheckCalledAet": bool(body.check_called_aet),
-        "DicomAlwaysAllowStore": (not body.registered_only) and body.receive_enabled,
-        "DicomAlwaysAllowEcho": True,
-        # SCP 수신 비활성 시 DICOM 포트를 닫는다(0=리스너 비활성)
         "DicomServerEnabled": bool(body.receive_enabled),
     }
-    out_path = _repo_root() / "deploy" / "orthanc-generated.json"
-    written = False
+    deploy = _repo_root() / "deploy"
+    written: list[str] = []
+    errors = ""
     try:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(orthanc_conf, indent=2, ensure_ascii=False), encoding="utf-8")
-        written = True
+        deploy.mkdir(parents=True, exist_ok=True)
+        json_path = deploy / "orthanc-generated.json"
+        json_path.write_text(json.dumps(orthanc_conf, indent=2, ensure_ascii=False), encoding="utf-8")
+        written.append(json_path.name)
+        # orthancteam/orthanc 이미지는 ORTHANC__* 환경변수로 설정을 받는다(설정 파일 마운트 불가).
+        # docker-compose가 참조하는 deploy/.env에 그대로 반영할 수 있는 스니펫을 생성.
+        env_path = deploy / "scp-policy.env"
+        env_lines = [
+            "# Saintview SCP 수신 정책 — deploy/.env에 반영 후 `docker compose up -d orthanc`로 적용",
+            "# (장비 목록은 백엔드가 런타임으로 Orthanc에 등록하므로 재기동 불필요)",
+            f"ORTHANC_CHECK_MODALITY_HOST={'true' if body.registered_only else 'false'}",
+            f"ORTHANC_CHECK_CALLED_AET={'true' if body.check_called_aet else 'false'}",
+            f"ORTHANC_DICOM_SERVER_ENABLED={'true' if body.receive_enabled else 'false'}",
+            "",
+        ]
+        env_path.write_text("\n".join(env_lines), encoding="utf-8")
+        written.append(env_path.name)
     except OSError as e:
         errors = str(e)
-    else:
-        errors = ""
 
-    # 런타임 즉시 반영(장비 목록) — 수신 정책은 재기동 필요
+    # 런타임 즉시 반영(장비 목록) — 수신 정책 플래그만 재기동 필요
     applied = apply_modalities(db=db, user=user)  # 동일 권한 게이트 통과한 user 재사용
 
     db.add(AuditLog(account_id=user.get("uid"), action="scp_config",
@@ -545,14 +551,14 @@ def scp_config(body: ScpConfigBody, db: Session = Depends(get_db),
     db.commit()
     return {
         "ok": True, "config": cfg,
-        "generated_file": str(out_path) if written else None,
+        "generated_files": written,
         "write_error": errors or None,
         "runtime_modalities": applied,
         "note": (
-            "장비 목록은 Orthanc에 즉시 반영되었습니다. "
-            "수신 포트 개폐·등록장비 전용 수신(DicomCheckModalityHost) 정책은 "
-            f"생성된 {out_path.name}을(를) Orthanc 컨테이너에 마운트한 뒤 재기동해야 적용됩니다. "
-            f"(현재 Orthanc 기본 AET={s.orthanc_url})"
+            "등록 장비는 Orthanc에 즉시 반영되었습니다(재기동 불필요). "
+            "수신 정책(등록장비 전용·포트 개폐·Called AE 검증)은 생성된 deploy/scp-policy.env의 "
+            "값을 deploy/.env에 반영한 뒤 `docker compose up -d orthanc`로 컨테이너를 재기동하면 적용됩니다. "
+            "데이터는 명명 볼륨에 보존됩니다."
         ),
     }
 

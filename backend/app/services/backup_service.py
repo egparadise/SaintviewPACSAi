@@ -17,19 +17,23 @@ from app.models import BackupJob, Study
 from app.services.settings_service import get_setting, set_setting
 
 # 압축 포맷 → DICOM 전송구문 UID (백업 시 적용)
+# ⚠ orthancteam/orthanc 이미지는 JPEG2000/JPEG-LS/JPEG 무손실 트랜스코딩을 기본 지원(실측 확인).
+#   JPEG 베이스라인(4.50)은 8비트 영상 전용 — 16비트 CT/MR은 변환 불가 시 원본 폴백.
 TRANSFER_SYNTAX: dict[str, str] = {
     "none": "1.2.840.10008.1.2.1",            # Explicit VR Little Endian (비압축)
     "jpeg2000_lossless": "1.2.840.10008.1.2.4.90",
     "jpeg2000": "1.2.840.10008.1.2.4.91",     # 손실
+    "jpegls_lossless": "1.2.840.10008.1.2.4.80",  # JPEG-LS 무손실 (16비트 권장)
     "jpeg_lossless": "1.2.840.10008.1.2.4.70",
-    "jpeg": "1.2.840.10008.1.2.4.50",         # JPEG Baseline (손실)
+    "jpeg": "1.2.840.10008.1.2.4.50",         # JPEG Baseline (손실, 8비트 전용)
 }
 COMPRESSION_LABELS: dict[str, str] = {
     "none": "비압축 DICOM",
     "jpeg2000_lossless": "JPEG2000 무손실",
     "jpeg2000": "JPEG2000 (손실)",
+    "jpegls_lossless": "JPEG-LS 무손실",
     "jpeg_lossless": "JPEG 무손실",
-    "jpeg": "JPEG (손실)",
+    "jpeg": "JPEG 베이스라인 (손실·8비트 전용)",
 }
 
 BACKUP_POLICY_KEY = "backup.policy"

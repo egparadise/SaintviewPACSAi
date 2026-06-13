@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from app.models import BackupJob
 from app.services.backup_service import (
@@ -126,6 +127,40 @@ def test_policy_and_storage_endpoints(client, auth_headers):
     assert run.json()["status"] in ("queued", "running", "done", "failed")
     jobs = client.get("/api/admin/backup/jobs", headers=auth_headers).json()["items"]
     assert len(jobs) >= 1
+
+
+def test_backup_real_jpeg2000_transcode(db, tmp_path):
+    """통합 — 실제 Orthanc에서 JPEG2000 무손실로 백업, 출력 전송구문 확인(미가동 시 skip)."""
+    import io
+
+    import pydicom
+
+    from app.dicom.orthanc import OrthancClient
+
+    c = OrthancClient()
+    try:
+        if not c.alive():
+            pytest.skip("Orthanc 미가동 — 통합 테스트 건너뜀")
+        studies = c._client.get("/studies").json()
+        if not studies:
+            pytest.skip("Orthanc에 검사 없음")
+        sid = studies[0]
+        uid = c.study_metadata(sid)["MainDicomTags"]["StudyInstanceUID"]
+    finally:
+        c.close()
+
+    _mk_study(db, uid + "-bkp", sid, "20260101")  # orthanc_id = 실제 Orthanc study id
+    job = BackupJob(kind="manual", status="queued", compression="jpeg2000_lossless",
+                    target_dir=str(tmp_path), date_from="", date_to="")
+    db.add(job); db.commit(); db.refresh(job)
+    run_backup_job(db, job.id)  # 실제 OrthancClient 사용
+    db.refresh(job)
+    assert job.status == "done", job.error
+    assert job.instance_count >= 1 and job.total_bytes > 0
+    files = list(tmp_path.rglob("*.dcm"))
+    assert files
+    ds = pydicom.dcmread(io.BytesIO(files[0].read_bytes()))
+    assert str(ds.file_meta.TransferSyntaxUID) == "1.2.840.10008.1.2.4.90", "JPEG2000 무손실로 변환되지 않음"
 
 
 def test_purge_requires_confirm(client, auth_headers):
