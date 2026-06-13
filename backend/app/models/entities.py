@@ -164,6 +164,12 @@ class Account(Base):
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # 비활성 계정은 로그인 거부
     email: Mapped[str] = mapped_column(String(128), default="")
+    # 가입자 등록 정보 (가입 폼) — 주민번호는 앞 6자리(생년월일)만, 전체 저장 금지
+    title: Mapped[str] = mapped_column(String(64), default="")   # 직책
+    sex: Mapped[str] = mapped_column(String(8), default="")
+    birth6: Mapped[str] = mapped_column(String(6), default="")   # 주민번호 앞 6자리(YYMMDD)
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    mobile: Mapped[str] = mapped_column(String(32), default="")
     # 판독 서명(Reading) — 확정 시 리포트에 이름·면허번호가 함께 기록된다
     display_name: Mapped[str] = mapped_column(String(64), default="")
     license_no: Mapped[str] = mapped_column(String(32), default="")
@@ -275,8 +281,16 @@ class Hospital(Base):
     ae_title: Mapped[str] = mapped_column(String(32), default="")  # 병원 대표 AET(수신 식별 보조)
     address: Mapped[str] = mapped_column(String(256), default="")
     phone: Mapped[str] = mapped_column(String(64), default="")
+    fax: Mapped[str] = mapped_column(String(64), default="")
+    homepage: Mapped[str] = mapped_column(String(256), default="")
+    departments: Mapped[str] = mapped_column(String(256), default="")  # 진료과(콤마 구분)
     contact: Mapped[str] = mapped_column(String(128), default="")  # 담당자
     max_accounts: Mapped[int] = mapped_column(Integer, default=0)   # 라이선스 계정 수(0=무제한)
+    license_clients: Mapped[int] = mapped_column(Integer, default=0)  # Client(뷰어) 라이선스 수
+    modality_limit: Mapped[int] = mapped_column(Integer, default=0)   # 연결할 Modality 수(0=무제한)
+    # 결재(가입) — 카드 전체번호 저장 금지, 마지막 4자리만
+    billing_method: Mapped[str] = mapped_column(String(24), default="")  # monthly_transfer | card
+    billing_card_last4: Mapped[str] = mapped_column(String(4), default="")
     enforce_isolation: Mapped[bool] = mapped_column(Boolean, default=False)  # 소속 계정은 자기 병원 검사만
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str] = mapped_column(Text, default="")

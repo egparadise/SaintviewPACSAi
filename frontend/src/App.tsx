@@ -6,14 +6,18 @@ import { Worklist } from "./pages/Worklist";
 import { SettingsModal } from "./pages/SettingsModal";
 import { ViewerWindow } from "./pages/ViewerWindow";
 import { ReportWindow } from "./pages/ReportWindow";
+import { Landing } from "./pages/Landing";
+import { Signup } from "./pages/Signup";
 
 // 뷰어/판독 새 창 모드 — 워크리스트 없이 전용 페이지
 const _params = new URLSearchParams(window.location.search);
 const IS_VIEWER_WINDOW = _params.get("viewer") === "2d";
 const IS_REPORT_WINDOW = _params.get("report") === "1";
 
-function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
-  const [username, setUsername] = useState("admin");
+function Login({ onLogin, onBack, initialUsername }: {
+  onLogin: (user: string, role: string) => void; onBack?: () => void; initialUsername?: string;
+}) {
+  const [username, setUsername] = useState(initialUsername || "admin");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(localStorage.getItem("sv_remember") === "1");
   const [error, setError] = useState("");
@@ -54,6 +58,12 @@ function Login({ onLogin }: { onLogin: (user: string, role: string) => void }) {
         </label>
         {error && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{error}</div>}
         <button className="primary" type="submit">로그인</button>
+        {onBack && (
+          <button type="button" onClick={onBack}
+                  style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>
+            ← 홈으로
+          </button>
+        )}
       </form>
     </div>
   );
@@ -69,17 +79,28 @@ export default function App() {
       : null,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 미인증 화면 흐름: 홈(landing) → 가입(signup) / 로그인(login)
+  const [authView, setAuthView] = useState<"landing" | "login" | "signup">("landing");
+  const [prefillUser, setPrefillUser] = useState("");
 
   if (!user) {
-    return (
-      <Login
-        onLogin={(name, role) => {
-          localStorage.setItem("sv_user", name);
-          localStorage.setItem("sv_role", role);
-          setUser({ name, role });
-        }}
-      />
-    );
+    const doLogin = (name: string, role: string) => {
+      localStorage.setItem("sv_user", name);
+      localStorage.setItem("sv_role", role);
+      setUser({ name, role });
+    };
+    if (authView === "signup") {
+      return (
+        <Signup
+          onCancel={() => setAuthView("landing")}
+          onDone={(username) => { setPrefillUser(username); setAuthView("login"); }}
+        />
+      );
+    }
+    if (authView === "login") {
+      return <Login onLogin={doLogin} onBack={() => setAuthView("landing")} initialUsername={prefillUser} />;
+    }
+    return <Landing onSignup={() => setAuthView("signup")} onLogin={() => setAuthView("login")} />;
   }
 
   // 뷰어/판독 새 창: 헤더 없이 전용 페이지만

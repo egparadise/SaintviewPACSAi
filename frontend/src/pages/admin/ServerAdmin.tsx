@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   api,
   type AccountRow,
+  type AdminOverview,
   type BackupJobRow,
   type BackupPolicy,
   type HospitalRow,
@@ -11,6 +12,51 @@ import {
   type ScpStatus,
   type StorageOverview,
 } from "../../api";
+
+// ════════════════════════════ 운영 현황(관리자 감독) ════════════════════════════
+function Dot({ ok }: { ok: boolean }) {
+  return <span style={{ color: ok ? "var(--accent, #7dd3fc)" : "var(--danger, #f87171)" }}>{ok ? "● 정상" : "● 중단"}</span>;
+}
+export function OverviewPanel() {
+  const [ov, setOv] = useState<AdminOverview | null>(null);
+  const [msg, setMsg] = useState("");
+  const load = () => api.adminOverview().then(setOv).catch((e) => setMsg("⚠ " + e.message));
+  useEffect(() => { load(); }, []);
+  return (
+    <Group title="운영 현황 (관리자 감독)" right={<button onClick={load}>새로고침</button>}>
+      {!ov ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
+        <>
+          <div style={{ display: "flex", gap: 16, fontSize: 12.5, flexWrap: "wrap" }}>
+            <span>API <Dot ok={ov.server.api} /></span>
+            <span>DICOM(Orthanc) <Dot ok={ov.server.orthanc} /></span>
+            <span>MPPS 수신 <Dot ok={ov.server.mpps.enabled} /> :{ov.server.mpps.port}</span>
+            <span style={{ color: "var(--text-secondary)" }}>AI: {ov.server.ai_mode}</span>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            병원 {ov.totals.hospitals} · 계정 {ov.totals.accounts} · 장비 {ov.totals.modalities} · 검사 {ov.totals.studies} · 로그 {ov.totals.audit_logs}
+          </div>
+          <table className="grid-table" style={{ fontSize: 12 }}>
+            <thead><tr><th>병원</th><th>코드</th><th>진료과</th><th>계정(활성/전체)</th><th>Client</th><th>Modality</th><th>검사</th><th>결재</th><th>상태</th></tr></thead>
+            <tbody>
+              {ov.hospitals.map((h) => (
+                <tr key={h.id}>
+                  <td>{h.name}</td><td>{h.code}</td><td>{h.departments || "—"}</td>
+                  <td>{h.active_accounts}/{h.accounts}</td>
+                  <td>{h.license_clients || "—"}</td>
+                  <td>{h.modalities}{h.modality_limit ? `/${h.modality_limit}` : ""}</td>
+                  <td>{h.studies}</td>
+                  <td>{h.billing_method === "card" ? "카드" : h.billing_method === "monthly_transfer" ? "월이체" : "—"}</td>
+                  <td>{h.enabled ? "✅" : "🚫"}</td>
+                </tr>
+              ))}
+              {ov.hospitals.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>가입된 병원이 없습니다.</td></tr>}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Group>
+  );
+}
 
 function fmtBytes(n?: number): string {
   if (!n || n <= 0) return "0";

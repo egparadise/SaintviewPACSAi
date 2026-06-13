@@ -725,6 +725,68 @@ def _delete_study_rows(db: Session, study: Study) -> None:
     db.delete(study)
 
 
+@router.get("/overview")
+def admin_overview(db: Session = Depends(get_db),
+                   user: dict = Depends(require_perm("hospitals.manage"))):
+    """관리자 운영 감독 — 병원별 정보·Client(라이선스)·Modality 등록·검사 수 +
+    서버/저장공간/로그 상태 집계 (가입 흐름도의 관리자 페이지)."""
+    from app.dicom.orthanc import OrthancClient
+    from app.models import Study
+
+    hospitals = db.execute(select(Hospital).order_by(Hospital.id)).scalars().all()
+    acc_by_h = dict(db.execute(
+        select(Account.hospital_id, func.count()).group_by(Account.hospital_id)
+    ).all())
+    active_by_h = dict(db.execute(
+        select(Account.hospital_id, func.count()).where(
+            Account.enabled.isnot(False)
+        ).group_by(Account.hospital_id)
+    ).all())
+    mod_by_h = dict(db.execute(
+        select(Modality.hospital_id, func.count()).group_by(Modality.hospital_id)
+    ).all())
+    study_by_h = dict(db.execute(
+        select(Study.hospital_id, func.count()).group_by(Study.hospital_id)
+    ).all())
+    rows = []
+    for h in hospitals:
+        rows.append({
+            "id": h.id, "code": h.code, "name": h.name, "enabled": h.enabled,
+            "departments": h.departments, "phone": h.phone,
+            "accounts": acc_by_h.get(h.id, 0), "active_accounts": active_by_h.get(h.id, 0),
+            "license_clients": h.license_clients,
+            "modalities": mod_by_h.get(h.id, 0), "modality_limit": h.modality_limit,
+            "studies": study_by_h.get(h.id, 0),
+            "billing_method": h.billing_method,
+        })
+    # 서버/저장/로그 상태
+    n_logs = db.execute(select(func.count()).select_from(AuditLog)).scalar() or 0
+    orthanc_alive = False
+    client = OrthancClient()
+    try:
+        orthanc_alive = client.alive()
+    finally:
+        client.close()
+    from app.config import get_settings
+
+    s = get_settings()
+    return {
+        "hospitals": rows,
+        "totals": {
+            "hospitals": len(rows),
+            "accounts": db.execute(select(func.count()).select_from(Account)).scalar() or 0,
+            "modalities": db.execute(select(func.count()).select_from(Modality)).scalar() or 0,
+            "studies": db.execute(select(func.count()).select_from(Study)).scalar() or 0,
+            "audit_logs": n_logs,
+        },
+        "server": {
+            "api": True, "orthanc": orthanc_alive,
+            "mpps": {"enabled": s.mpps_enabled, "port": s.mpps_port},
+            "ai_mode": s.ai_mode,
+        },
+    }
+
+
 @router.post("/storage/purge")
 def purge(body: PurgeBody, db: Session = Depends(get_db),
           user: dict = Depends(require_perm("server.manage"))):

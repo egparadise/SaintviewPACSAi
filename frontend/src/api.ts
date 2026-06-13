@@ -172,6 +172,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
+  // 가입(공개) — 병원 + 초기 관리자 계정 생성
+  signupEnabled: () => req<{ enabled: boolean }>("/api/signup/enabled"),
+  signup: (body: SignupRequest) =>
+    req<{ ok: boolean; hospital_id: number; hospital_code: string; username: string; message: string }>(
+      "/api/signup", { method: "POST", body: JSON.stringify(body) }),
+  adminOverview: () => req<AdminOverview>("/api/admin/overview"),
   worklist: (params: Record<string, string>) =>
     req<{ items: StudyRow[]; total: number }>(
       `/api/worklist?${new URLSearchParams(params)}`,
@@ -380,6 +386,29 @@ export interface StorageOverview {
   } | null;
   disk: { path: string; total?: number; used?: number; free?: number; error?: string };
   retention: { retention_days: number; candidate_studies: number; cutoff_date?: string };
+}
+
+// ── 가입 / 관리자 감독 타입 ──
+export interface SignupRequest {
+  hospital: {
+    name: string; address?: string; departments?: string; phone?: string; fax?: string;
+    homepage?: string; license_clients?: number; modality_limit?: number;
+  };
+  registrant: {
+    name: string; title?: string; sex?: string; birth6?: string; phone?: string;
+    mobile?: string; email?: string; username: string; password: string; password_confirm: string;
+  };
+  billing: { method: string; card_last4?: string };
+}
+export interface OverviewHospital {
+  id: number; code: string; name: string; enabled: boolean; departments: string; phone: string;
+  accounts: number; active_accounts: number; license_clients: number;
+  modalities: number; modality_limit: number; studies: number; billing_method: string;
+}
+export interface AdminOverview {
+  hospitals: OverviewHospital[];
+  totals: { hospitals: number; accounts: number; modalities: number; studies: number; audit_logs: number };
+  server: { api: boolean; orthanc: boolean; mpps: { enabled: boolean; port: number }; ai_mode: string };
 }
 
 // ── 서버 관리 타입 ──
