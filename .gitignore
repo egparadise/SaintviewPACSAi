@@ -15,3 +15,6 @@ deploy/ohif/nginx-prod.conf
 
 # ?ㅻ뜲?댄꽣 ?됯? 耳?댁뒪 (PHI ???먮궡 蹂닿?, 而ㅻ컠 湲덉?)
 harness/eval_cases/real_*.jsonl
+
+# 서버 관리 SCP 설정 생성물(런타임 — 컨테이너에 마운트)
+deploy/orthanc-generated.json

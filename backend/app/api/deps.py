@@ -29,5 +29,19 @@ def admin_user(user: dict = Depends(current_user)) -> dict:
     return user
 
 
+def require_perm(perm: str):
+    """역할 기반 권한 게이트 — app.services.permissions 매트릭스 사용."""
+    from app.services.permissions import has_perm
+
+    def _dep(user: dict = Depends(current_user)) -> dict:
+        if not has_perm(user.get("role", ""), perm):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="이 작업에 대한 권한이 없습니다"
+            )
+        return user
+
+    return _dep
+
+
 DbSession = Depends(get_db)
-__all__ = ["current_user", "admin_user", "get_db", "Session"]
+__all__ = ["current_user", "admin_user", "require_perm", "get_db", "Session"]

@@ -286,7 +286,112 @@ export const api = {
     req<{ ok: boolean; applied: number; errors: string[] }>("/api/admin/dicom-nodes/apply", {
       method: "POST",
     }),
+
+  // ── 서버 관리 1단계: 역할·병원·계정·장비·SCP ──
+  roleCatalog: () => req<RoleCatalog>("/api/admin/roles"),
+  hospitals: () => req<{ items: HospitalRow[] }>("/api/admin/hospitals"),
+  createHospital: (body: Partial<HospitalRow>) =>
+    req<HospitalRow>("/api/admin/hospitals", { method: "POST", body: JSON.stringify(body) }),
+  updateHospital: (id: number, body: Partial<HospitalRow>) =>
+    req<HospitalRow>(`/api/admin/hospitals/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteHospital: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/hospitals/${id}`, { method: "DELETE" }),
+  accounts: () => req<{ items: AccountRow[] }>("/api/admin/accounts"),
+  createAccount: (body: AccountCreateBody) =>
+    req<AccountRow>("/api/admin/accounts", { method: "POST", body: JSON.stringify(body) }),
+  updateAccount: (id: number, body: Partial<AccountCreateBody>) =>
+    req<AccountRow>(`/api/admin/accounts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteAccount: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/accounts/${id}`, { method: "DELETE" }),
+  modalities: () => req<{ items: ModalityRow[] }>("/api/admin/modalities"),
+  createModality: (body: Partial<ModalityRow>) =>
+    req<ModalityRow>("/api/admin/modalities", { method: "POST", body: JSON.stringify(body) }),
+  updateModality: (id: number, body: Partial<ModalityRow>) =>
+    req<ModalityRow>(`/api/admin/modalities/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteModality: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/modalities/${id}`, { method: "DELETE" }),
+  applyModalities: () =>
+    req<{ ok: boolean; applied: number; removed: number; errors: string[]; detail?: string }>(
+      "/api/admin/modalities/apply", { method: "POST" }),
+  scpStatus: () => req<ScpStatus>("/api/admin/scp-status"),
+  scpConfig: (body: { receive_enabled: boolean; registered_only: boolean; check_called_aet: boolean }) =>
+    req<{ ok: boolean; config: ScpConfig; generated_file: string | null; note: string }>(
+      "/api/admin/scp-config", { method: "POST", body: JSON.stringify(body) }),
 };
+
+// ── 서버 관리 타입 ──
+export interface RoleCatalog {
+  roles: { key: string; label: string; perms: string[] }[];
+  permissions: { key: string; label: string }[];
+}
+export interface HospitalRow {
+  id: number;
+  code: string;
+  name: string;
+  ae_title: string;
+  address: string;
+  phone: string;
+  contact: string;
+  max_accounts: number;
+  enforce_isolation: boolean;
+  enabled: boolean;
+  note: string;
+  account_count?: number;
+}
+export interface AccountRow {
+  id: number;
+  username: string;
+  role: string;
+  role_label: string;
+  hospital_id: number | null;
+  hospital_name: string;
+  display_name: string;
+  license_no: string;
+  email: string;
+  enabled: boolean;
+  last_login: string | null;
+}
+export interface AccountCreateBody {
+  username: string;
+  password: string;
+  role: string;
+  hospital_id: number | null;
+  display_name?: string;
+  license_no?: string;
+  email?: string;
+  enabled?: boolean;
+}
+export interface ModalityRow {
+  id: number;
+  name: string;
+  ae_title: string;
+  host: string;
+  port: number;
+  modality_type: string;
+  role: string;        // scu | scp | both
+  manufacturer: string;
+  hospital_id: number | null;
+  hospital_name: string;
+  allow_receive: boolean;
+  enabled: boolean;
+  note: string;
+}
+export interface ScpConfig {
+  receive_enabled: boolean;
+  registered_only: boolean;
+  check_called_aet: boolean;
+}
+export interface ScpStatus {
+  config: ScpConfig;
+  modalities_total: number;
+  modalities_active: number;
+  orthanc: {
+    alive: boolean;
+    aet?: string;
+    dicom_port?: number;
+    registered_modalities?: string[];
+  } | null;
+}
 
 /** S1 자연어 검색 — 적용 전 미리보기(explanation) 필수 */
 export interface NlQueryResult {

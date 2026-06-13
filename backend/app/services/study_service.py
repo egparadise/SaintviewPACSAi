@@ -23,6 +23,7 @@ class WorklistFilter:
     date_to: str = ""
     finding_query: str = ""       # F-2: 소견/임프레션 텍스트 검색
     emergency_only: bool = False
+    hospital_id: int | None = None  # 경량 테넌시 — 소속 병원 검사로 제한(None=전체)
     limit: int = 100
     offset: int = 0
 
@@ -37,6 +38,18 @@ def _op_clause(col, raw: str):
     if v.endswith("%") and not v.startswith("%"):
         return col.like(v)
     return col.like(f"%{v}%")
+
+
+def _resolve_hospital_id(db: Session, source_aet: str) -> int | None:
+    """수신 AET → 등록 장비(Modality)의 소속 병원. 매칭 없으면 None(전역)."""
+    if not source_aet:
+        return None
+    from app.models import Modality
+
+    m = db.execute(
+        select(Modality).where(Modality.ae_title == source_aet.strip().upper())
+    ).scalar_one_or_none()
+    return m.hospital_id if m else None
 
 
 def get_or_create_patient(db: Session, patient_key: str, name: str, birth: str, sex: str) -> Patient:
@@ -91,6 +104,8 @@ def register_study(
         department=department,
         source_aet=source_aet,
         orthanc_id=orthanc_id,
+        # 경량 테넌시: 수신 AET → 등록 장비 → 병원으로 자동 귀속
+        hospital_id=_resolve_hospital_id(db, source_aet),
         status="received",
     )
     db.add(study)
@@ -143,6 +158,8 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         q = q.where(Study.study_date <= f.date_to)
     if f.emergency_only:
         q = q.where(Study.emergency.is_(True))
+    if f.hospital_id is not None:
+        q = q.where(Study.hospital_id == f.hospital_id)
     if f.finding_query:
         # F-2: SR 텍스트 검색 — 최신 리포트 narrative 기준 (단순 LIKE, pg에선 추후 FTS)
         sub = select(Report.study_id).where(Report.narrative_text.like(f"%{f.finding_query}%"))

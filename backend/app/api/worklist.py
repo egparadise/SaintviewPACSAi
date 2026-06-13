@@ -51,11 +51,25 @@ def worklist(
             date_to=date_to,
             finding_query=finding,
             emergency_only=emergency,
+            hospital_id=_scoped_hospital(db, user),
             limit=limit,
             offset=offset,
         ),
     )
     return {"items": items, "total": total}
+
+
+def _scoped_hospital(db: Session, user: dict) -> int | None:
+    """경량 테넌시 — 비관리자 + 소속 병원이 격리(enforce_isolation) 설정이면 자기 병원만."""
+    if user.get("role") == "admin":
+        return None
+    hid = user.get("hid")
+    if not hid:
+        return None
+    from app.models import Hospital
+
+    h = db.get(Hospital, hid)
+    return hid if (h and h.enforce_isolation) else None
 
 
 class NlQueryBody(BaseModel):

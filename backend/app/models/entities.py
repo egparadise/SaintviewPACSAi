@@ -72,6 +72,10 @@ class Study(Base):
     source_aet: Mapped[str] = mapped_column(String(32), default="")   # AETITLE (수신 RemoteAET)
     bookmark: Mapped[bool] = mapped_column(Boolean, default=False)    # BOOKMARK (★)
     orthanc_id: Mapped[str] = mapped_column(String(64), default="")
+    # 경량 테넌시 — 수신 AET→Modality→Hospital로 자동 귀속(없으면 NULL=전역)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
     # 워크플로 상태 (디자인 §1.1 상태 토큰과 1:1)
     status: Mapped[str] = mapped_column(
         String(16), default="received", index=True
@@ -152,7 +156,14 @@ class Account(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     algo: Mapped[str] = mapped_column(String(16), default="argon2")
-    role: Mapped[str] = mapped_column(String(16), default="radiologist")  # radiologist | admin
+    # 역할(권한) — admin | doctor | radiologist | technologist | staff (app.services.permissions.ROLES)
+    role: Mapped[str] = mapped_column(String(16), default="radiologist")
+    # 가입자 병원 소속(경량 테넌시) — NULL=전역(관리자/공용)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # 비활성 계정은 로그인 거부
+    email: Mapped[str] = mapped_column(String(128), default="")
     # 판독 서명(Reading) — 확정 시 리포트에 이름·면허번호가 함께 기록된다
     display_name: Mapped[str] = mapped_column(String(64), default="")
     license_no: Mapped[str] = mapped_column(String(32), default="")
@@ -250,6 +261,47 @@ class Order(Base):
     dicom_study_id: Mapped[str] = mapped_column(String(16), default="")  # DICOM StudyID (0020,0010)
     # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
     status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Hospital(Base):
+    """가입자 병원(다기관) — 경량 테넌시. 계정·검사를 hospital_id로 귀속한다."""
+
+    __tablename__ = "hospitals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # 병원 식별 코드
+    name: Mapped[str] = mapped_column(String(128), default="")
+    ae_title: Mapped[str] = mapped_column(String(32), default="")  # 병원 대표 AET(수신 식별 보조)
+    address: Mapped[str] = mapped_column(String(256), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    contact: Mapped[str] = mapped_column(String(128), default="")  # 담당자
+    max_accounts: Mapped[int] = mapped_column(Integer, default=0)   # 라이선스 계정 수(0=무제한)
+    enforce_isolation: Mapped[bool] = mapped_column(Boolean, default=False)  # 소속 계정은 자기 병원 검사만
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Modality(Base):
+    """등록 장비(SCU/SCP) — Name·AET·IP·Port 관리. 등록 장비만 수신 허용(allow_receive)."""
+
+    __tablename__ = "modalities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # Orthanc modality 이름 = 표시명
+    ae_title: Mapped[str] = mapped_column(String(32), default="", index=True)
+    host: Mapped[str] = mapped_column(String(128), default="")  # IP/호스트
+    port: Mapped[int] = mapped_column(Integer, default=104)
+    modality_type: Mapped[str] = mapped_column(String(16), default="")  # CT|MR|CR|DX|US|...
+    role: Mapped[str] = mapped_column(String(8), default="scu")          # scu | scp | both
+    manufacturer: Mapped[str] = mapped_column(String(64), default="")
+    allow_receive: Mapped[bool] = mapped_column(Boolean, default=True)   # 이 장비로부터 C-STORE 수신 허용
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

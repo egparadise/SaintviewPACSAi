@@ -4,6 +4,8 @@ from app.models.entities import (  # noqa: F401
     Annotation,
     AppSetting,
     AuditLog,
+    Hospital,
+    Modality,
     Order,
     Patient,
     Phrase,

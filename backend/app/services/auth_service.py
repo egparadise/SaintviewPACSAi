@@ -34,6 +34,7 @@ def create_token(account: Account) -> str:
         "sub": account.username,
         "role": account.role,
         "uid": account.id,
+        "hid": account.hospital_id,  # 가입자 병원(경량 테넌시) — None=전역
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
@@ -48,6 +49,11 @@ def authenticate(db: Session, username: str, password: str) -> Account | None:
     account = db.execute(select(Account).where(Account.username == username)).scalar_one_or_none()
     if not account or not verify_password(password, account.password_hash):
         db.add(AuditLog(action="login_failed", target_type="account", target_id=username))
+        db.commit()
+        return None
+    if not account.enabled:
+        db.add(AuditLog(account_id=account.id, action="login_disabled",
+                        target_type="account", target_id=username))
         db.commit()
         return None
     account.last_login = datetime.now(timezone.utc)
