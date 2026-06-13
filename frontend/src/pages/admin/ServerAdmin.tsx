@@ -318,6 +318,13 @@ export function ModalityPanel() {
                 ? <b style={{ color: "var(--accent, #7dd3fc)" }}>가동 · AET {scp.orthanc.aet} · Port {scp.orthanc.dicom_port}</b>
                 : <b style={{ color: "var(--danger, #f87171)" }}>연결 안 됨</b>}</div>
               <div style={{ color: "var(--text-secondary)" }}>등록 장비 {scp.modalities_total}대 · 수신 활성 {scp.modalities_active}대 · Orthanc 반영 {scp.orthanc?.registered_modalities?.length ?? 0}대</div>
+              {scp.mpps && (
+                <div style={{ color: "var(--text-secondary)" }}>
+                  MPPS 수신(수행단계): {scp.mpps.enabled
+                    ? <b style={{ color: "var(--accent, #7dd3fc)" }}>활성 · AET {scp.mpps.aet} · Port {scp.mpps.port}</b>
+                    : "비활성"} — 장비 N-CREATE/N-SET → 오더 상태 자동 갱신
+                </div>
+              )}
             </div>
             <label style={{ display: "flex", gap: 8, fontSize: 12.5, alignItems: "center" }}>
               <input type="checkbox" checked={scp.config.receive_enabled} onChange={(e) => applyScp({ ...scp.config, receive_enabled: e.target.checked })} />

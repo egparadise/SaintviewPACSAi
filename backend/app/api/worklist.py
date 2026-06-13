@@ -392,6 +392,117 @@ def send_gsps(
         client.close()
 
 
+class RoiStatsBody(BaseModel):
+    sop_uid: str
+    kind: str = "rect"            # rect | ellipse | circle
+    points: list[list[float]]    # 0~1 정규화 좌표
+
+
+@router.post("/studies/{study_id}/roi-stats")
+def roi_stats(study_id: int, body: RoiStatsBody, db: Session = Depends(get_db),
+              user: dict = Depends(current_user)):
+    """ROI HU 통계(평균·최소·최대·표준편차·면적) + 기본 W/L — 픽셀 데이터 기반."""
+    import io
+
+    from pydicom import dcmread
+
+    from app.dicom.orthanc import OrthancClient
+    from app.dicom.roi import roi_statistics
+
+    study = db.get(Study, study_id)
+    if not study or not study.orthanc_id:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if len(body.points) < 2:
+        raise HTTPException(status_code=400, detail="ROI 좌표가 부족합니다")
+    client = OrthancClient()
+    try:
+        if not client.alive():
+            raise HTTPException(status_code=503, detail="Orthanc에 연결할 수 없습니다")
+        oid = None
+        for inst in client.study_instances(study.orthanc_id):
+            if inst.get("sop_uid") == body.sop_uid:
+                oid = inst["orthanc_id"]
+                break
+        if not oid:
+            raise HTTPException(status_code=404, detail="해당 영상을 찾을 수 없습니다")
+        try:
+            ds = dcmread(io.BytesIO(client.instance_file(oid)), force=True)
+            arr = ds.pixel_array
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=422, detail=f"픽셀 디코딩 실패: {e}")
+        if getattr(arr, "ndim", 2) != 2:
+            raise HTTPException(status_code=422, detail="그레이스케일 2D 영상만 지원합니다")
+        rows, cols = arr.shape
+        has_rescale = hasattr(ds, "RescaleSlope") or hasattr(ds, "RescaleIntercept")
+        slope = float(getattr(ds, "RescaleSlope", 1) or 1)
+        intercept = float(getattr(ds, "RescaleIntercept", 0) or 0)
+        ps = getattr(ds, "PixelSpacing", None)
+        pixel_spacing = [float(ps[0]), float(ps[1])] if ps else None
+        pts_px = [[p[0] * cols, p[1] * rows] for p in body.points]
+        stats = roi_statistics(arr, slope=slope, intercept=intercept, kind=body.kind,
+                               points_px=pts_px, pixel_spacing=pixel_spacing,
+                               has_rescale=has_rescale)
+        # 드래그 W/L 초기화용 기본 W/L (태그 → 없으면 데이터 범위)
+        wc, ww = _default_wl(ds, arr, slope, intercept)
+        stats["wc"], stats["ww"] = wc, ww
+        return stats
+    finally:
+        client.close()
+
+
+def _default_wl(ds, arr, slope: float, intercept: float):
+    """기본 W/L — WindowCenter/Width 태그 우선, 없으면 HU 데이터 범위."""
+    def _scalar(v):
+        try:
+            return float(v[0]) if hasattr(v, "__len__") and not isinstance(v, str) else float(v)
+        except (TypeError, ValueError):
+            return None
+    wc = _scalar(getattr(ds, "WindowCenter", None))
+    ww = _scalar(getattr(ds, "WindowWidth", None))
+    if wc is not None and ww is not None and ww > 0:
+        return round(wc, 1), round(ww, 1)
+    import numpy as np
+
+    hu = np.asarray(arr, dtype=float) * slope + intercept
+    lo, hi = float(np.percentile(hu, 1)), float(np.percentile(hu, 99))
+    return round((lo + hi) / 2, 1), round(max(hi - lo, 1), 1)
+
+
+@router.get("/studies/{study_id}/gsps")
+def load_gsps(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """검사에 귀속된 GSPS(PR) 객체를 찾아 주석·W/L로 파싱(불러오기 — 타사 PR 표시)."""
+    from app.dicom.gsps import GSPS_SOP_CLASS, parse_gsps_dataset
+    from app.dicom.orthanc import OrthancClient
+    from pydicom import dcmread
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if not study.orthanc_id:
+        return {"items": []}
+    client = OrthancClient()
+    items = []
+    try:
+        if not client.alive():
+            raise HTTPException(status_code=503, detail="Orthanc에 연결할 수 없습니다")
+        for inst in client.study_instances(study.orthanc_id):
+            oid = inst["orthanc_id"]
+            try:
+                if client.instance_meta(oid).get("sop_class_uid") != GSPS_SOP_CLASS:
+                    continue
+                data = client.instance_file(oid)
+                import io as _io
+
+                parsed = parse_gsps_dataset(dcmread(_io.BytesIO(data), force=True))
+                parsed["sop_instance_uid"] = inst.get("sop_uid", "")
+                items.append(parsed)
+            except Exception:  # noqa: BLE001 — 개별 인스턴스 오류는 건너뜀
+                continue
+        return {"items": items}
+    finally:
+        client.close()
+
+
 @router.post("/studies/{study_id}/send-kos")
 def send_kos(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """키이미지 선택을 KOS 표준 객체로 Orthanc에 저장 (F-16)."""

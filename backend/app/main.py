@@ -31,16 +31,29 @@ logger = logging.getLogger("saintview")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    get_settings().validate_for_prod()  # prod 보안 게이트 (§8)
+    settings = get_settings()
+    settings.validate_for_prod()  # prod 보안 게이트 (§8)
     init_db()
     with SessionLocal() as db:
         ensure_default_admin(db)
     stop_event = asyncio.Event()
     worker_task = asyncio.create_task(worker_loop(stop_event))
-    logger.info("Saintview PACS AI 시작 (AI mode=%s)", get_settings().ai_mode)
+    # MPPS SCP 리스너(장비 수행단계 수신 → 오더 상태) — 포트 충돌 등은 비치명적
+    mpps = None
+    if settings.mpps_enabled:
+        try:
+            from app.dicom.mpps_scp import start_mpps_server
+
+            mpps = start_mpps_server(settings.mpps_port, settings.mpps_aet)
+        except Exception:  # noqa: BLE001 — 리스너 실패가 앱 기동을 막지 않도록
+            logger.exception("MPPS SCP 기동 실패 (포트 %d) — 비활성으로 계속", settings.mpps_port)
+    logger.info("Saintview PACS AI 시작 (AI mode=%s)", settings.ai_mode)
     yield
     stop_event.set()
     await worker_task
+    if mpps is not None:
+        _, server = mpps
+        server.shutdown()
 
 
 app = FastAPI(title="Saintview PACS AI", version="0.1.0", lifespan=lifespan)

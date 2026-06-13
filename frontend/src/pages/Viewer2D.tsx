@@ -604,7 +604,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const mode = d.btn === 2 ? "zoom" : d.btn === 1 ? "pan" : mouseMode;
         if (mode === "zoom") return { ...prev, [d.pid]: { ...p, zoom: Math.max(0.2, p.zoom * (1 - dy * 0.005)) } };
         if (mode === "pan") return { ...prev, [d.pid]: { ...p, tx: p.tx + dx, ty: p.ty + dy } };
-        return prev; // wl 모드: /rendered는 프리셋 기반(2D 섹션) — 드래그 W/L은 Cornerstone 경로 복구 후
+        if (mode === "wl") {
+          // 드래그 W/L — 서버 /rendered?window=C,W 라운드트립(가로=Width, 세로=Center)
+          const cur = p.wl ? p.wl.split(",").map(Number) : null;
+          const base = cur && cur.length >= 2 && !Number.isNaN(cur[0])
+            ? [cur[0], cur[1]]
+            : (p.series?.modality === "CT" ? [40, 400] : [128, 256]);
+          const w = Math.max(1, base[1] + dx * 2);
+          const c = base[0] - dy * 2;
+          return { ...prev, [d.pid]: { ...p, wl: `${Math.round(c)},${Math.round(w)}` } };
+        }
+        return prev;
       });
     };
     const up = () => { dragRef.current = null; };
@@ -954,6 +964,32 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   <button title="GSPS 내보내기 — 주석·W/L 표준 저장(Orthanc)" onClick={doGsps}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
                     <ToolBtnInner id="gsps" label="GSPS" />
+                  </button>
+                )}
+                {tbOn("gsps") && (
+                  <button title="타사 PR(GSPS) 불러오기 — 외부 주석을 녹색으로 표시" onClick={async () => {
+                    try {
+                      const r = await api.loadGsps(detail.id);
+                      const ext = r.items.flatMap((it) => it.annotations.map((a) => ({ ...a, source: "external" as const })));
+                      if (ext.length === 0) { alert("불러올 GSPS(PR)가 없습니다"); return; }
+                      // 기존 외부 주석 교체(중복 방지) + 사용자/AI 주석 유지
+                      setAnnos((p) => [...p.filter((x) => x.source !== "external"), ...ext]);
+                    } catch (e) { alert(e instanceof Error ? e.message : "GSPS 불러오기 실패"); }
+                  }} style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="gsps" label="PR↓" />
+                  </button>
+                )}
+                {tbOn("rect") && (
+                  <button title="HU ROI 통계 — 마지막 사각형/타원 ROI의 평균·최소·최대 HU" onClick={async () => {
+                    const roi = [...annos].reverse().find((a) => (a.kind === "rect" || a.kind === "ellipse") && a.sop_uid);
+                    if (!roi) { alert("먼저 사각형 또는 타원 ROI를 그리세요"); return; }
+                    try {
+                      const s = await api.roiStats(detail.id, { sop_uid: roi.sop_uid, kind: roi.kind, points: roi.points });
+                      if (s.error) { alert(s.error); return; }
+                      alert(`HU ROI 통계 (${s.count}px${s.area_mm2 ? `, ${s.area_mm2}mm²` : ""})\n평균 ${s.mean} · 최소 ${s.min} · 최대 ${s.max} · 표준편차 ${s.std} (${s.unit})`);
+                    } catch (e) { alert(e instanceof Error ? e.message : "ROI 통계 실패"); }
+                  }} style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
+                    <ToolBtnInner id="rect" label="HU" />
                   </button>
                 )}
                 {tbOn("del") && (
@@ -1538,7 +1574,8 @@ function TitleMenu({ id, icon, title, items, menu, setMenu }: {
 function AnnoShape({ a, sx, sy, fs }: {
   a: Anno; sx: (v: number) => number; sy: (v: number) => number; fs: number;
 }) {
-  const color = a.source === "ai" ? "#a78bfa" : "#ffd54a";
+  // 보라(#a78bfa)=AI 전용 · 녹색=타사 PR(GSPS 불러오기) · 노랑=사용자
+  const color = a.source === "ai" ? "#a78bfa" : a.source === "external" ? "#67e8a0" : "#ffd54a";
   const sw = fs * 0.08;
   const pts = a.points;
   if (!pts?.length) return null;

@@ -9,6 +9,8 @@ os.environ["SAINTVIEW_DATABASE_URL"] = f"sqlite:///{_tmpdir}/test.db"
 os.environ["SAINTVIEW_AI_MODE"] = "mock"
 os.environ["SAINTVIEW_EMBEDDING_BACKEND"] = "local"
 os.environ["SAINTVIEW_JWT_SECRET"] = "test-secret"
+# 앱 lifespan의 MPPS 리스너는 끄고(포트 충돌 방지), MPPS 테스트는 전용 포트로 직접 띄운다
+os.environ["SAINTVIEW_MPPS_ENABLED"] = "0"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

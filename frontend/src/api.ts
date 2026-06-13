@@ -241,6 +241,12 @@ export const api = {
     req<{ ok: boolean; sop_instance_uid: string }>(`/api/studies/${studyId}/send-gsps`, {
       method: "POST", body: JSON.stringify(body),
     }),
+  /** GSPS 불러오기 — 검사에 귀속된 PR(타사 포함) 주석·W/L 파싱 */
+  loadGsps: (studyId: number) =>
+    req<{ items: GspsItem[] }>(`/api/studies/${studyId}/gsps`),
+  /** ROI HU 통계(드래그 W/L·HU ROI 통계) — points는 0~1 정규화 */
+  roiStats: (studyId: number, body: { sop_uid: string; kind: string; points: number[][] }) =>
+    req<RoiStats>(`/api/studies/${studyId}/roi-stats`, { method: "POST", body: JSON.stringify(body) }),
   orders: (params: Record<string, string> = {}) =>
     req<{ items: OrderRow[] }>(`/api/orders?${new URLSearchParams(params)}`),
   createOrder: (body: Partial<OrderRow>) =>
@@ -442,6 +448,7 @@ export interface ScpStatus {
   config: ScpConfig;
   modalities_total: number;
   modalities_active: number;
+  mpps?: { enabled: boolean; port: number; aet: string };
   orthanc: {
     alive: boolean;
     aet?: string;
@@ -491,9 +498,33 @@ export interface Anno {
   value?: number | null;
   unit?: string;
   text?: string;
-  source?: "user" | "ai";
+  source?: "user" | "ai" | "external";
   confidence?: number | null;
   verified?: boolean;
+}
+
+/** GSPS 불러오기 결과 1건(PR 객체) — annotations는 source="external" */
+export interface GspsItem {
+  sop_instance_uid: string;
+  label: string;
+  creator: string;
+  wc: number | null;
+  ww: number | null;
+  annotations: Anno[];
+}
+
+/** ROI HU 통계 결과 */
+export interface RoiStats {
+  count?: number;
+  mean?: number;
+  min?: number;
+  max?: number;
+  std?: number;
+  unit?: string;
+  area_mm2?: number | null;
+  wc?: number;
+  ww?: number;
+  error?: string;
 }
 
 export interface CtrResult {

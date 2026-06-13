@@ -31,6 +31,10 @@ class Settings:
     ai_auto_generate: bool = os.getenv("SAINTVIEW_AI_AUTO_GENERATE", "1") == "1"
     # MWL (P2) — Orthanc worklists 플러그인 폴더 (compose에서 deploy/worklists 마운트)
     mwl_dir: str = os.getenv("SAINTVIEW_MWL_DIR", "../deploy/worklists")
+    # MPPS SCP — 장비의 N-CREATE/N-SET(수행 단계) 수신 → 오더 상태 갱신
+    mpps_enabled: bool = os.getenv("SAINTVIEW_MPPS_ENABLED", "1") == "1"
+    mpps_port: int = int(os.getenv("SAINTVIEW_MPPS_PORT", "11112"))
+    mpps_aet: str = os.getenv("SAINTVIEW_MPPS_AET", "SAINTVIEW")
     # 임베딩 (D-2)
     embedding_backend: str = os.getenv("SAINTVIEW_EMBEDDING_BACKEND", "local")  # local | voyage
     embedding_dim: int = int(os.getenv("SAINTVIEW_EMBEDDING_DIM", "256"))

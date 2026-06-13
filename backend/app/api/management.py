@@ -466,7 +466,11 @@ def scp_status(db: Session = Depends(get_db),
             Modality.enabled.is_(True), Modality.allow_receive.is_(True)
         )
     ).scalar() or 0
+    from app.config import get_settings
+
+    s = get_settings()
     out = {"config": cfg, "modalities_total": n_mod, "modalities_active": n_active,
+           "mpps": {"enabled": s.mpps_enabled, "port": s.mpps_port, "aet": s.mpps_aet},
            "orthanc": None}
     client = OrthancClient()
     try:

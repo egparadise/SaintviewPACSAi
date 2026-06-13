@@ -192,3 +192,120 @@ def gsps_bytes(ds: Dataset) -> bytes:
     buf = io.BytesIO()
     ds.save_as(buf, write_like_original=False)
     return buf.getvalue()
+
+
+# ──────────────────────────── 불러오기(타사 PR 표시) ────────────────────────────
+def _image_dims(ds) -> dict[str, tuple[int, int]]:
+    """sop_uid → (cols, rows) — PIXEL 좌표 정규화용(DisplayedAreaSelectionSequence)."""
+    dims: dict[str, tuple[int, int]] = {}
+    for a in getattr(ds, "DisplayedAreaSelectionSequence", []) or []:
+        br = list(getattr(a, "DisplayedAreaBottomRightHandCorner", []) or [])
+        if len(br) != 2:
+            continue
+        cols, rows = int(br[0]), int(br[1])
+        for ref in getattr(a, "ReferencedImageSequence", []) or []:
+            sop = str(getattr(ref, "ReferencedSOPInstanceUID", "") or "")
+            if sop and cols > 0 and rows > 0:
+                dims[sop] = (cols, rows)
+    return dims
+
+
+def _norm(pts: list[list[float]], units: str, sop: str, dims: dict) -> list[list[float]]:
+    """좌표를 0~1 정규화 — DISPLAY는 그대로, PIXEL은 이미지 크기로 나눔."""
+    if units != "PIXEL":
+        return pts
+    cd = dims.get(sop)
+    if not cd:
+        return pts  # 크기 미상 — 원좌표 유지(폴백)
+    cols, rows = cd
+    return [[p[0] / cols, p[1] / rows] for p in pts]
+
+
+def _graphic_to_anno(gtype: str, pts: list[list[float]]) -> dict | None:
+    """GSPS GraphicType → 뷰어 주석 kind 매핑(표시용)."""
+    gtype = (gtype or "").upper()
+    if gtype == "ELLIPSE" and len(pts) >= 4:
+        # 장축 양끝(0,1) → bbox 2점
+        (x1, _), (x2, _) = pts[0], pts[1]
+        ys = [p[1] for p in pts]
+        return {"kind": "ellipse", "points": [[min(x1, x2), min(ys)], [max(x1, x2), max(ys)]]}
+    if gtype in ("CIRCLE",) and len(pts) >= 2:
+        (cx, cy), (px, py) = pts[0], pts[1]
+        r = ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+        return {"kind": "ellipse", "points": [[cx - r, cy - r], [cx + r, cy + r]]}
+    if gtype in ("POLYLINE", "INTERPOLATED"):
+        if len(pts) == 2:
+            return {"kind": "length", "points": pts[:2]}
+        if len(pts) == 3:
+            return {"kind": "angle", "points": pts[:3]}
+        if len(pts) in (4, 5):
+            # 닫힌 사각형(축 정렬) 추정 → rect, 아니면 폴리라인을 length로
+            xs = [p[0] for p in pts[:4]]; ys = [p[1] for p in pts[:4]]
+            return {"kind": "rect", "points": [[min(xs), min(ys)], [max(xs), max(ys)]]}
+        return {"kind": "length", "points": pts[:2]} if len(pts) >= 2 else None
+    if gtype == "POINT" and pts:
+        return {"kind": "text", "points": pts[:1]}
+    return None
+
+
+def parse_gsps_dataset(ds) -> dict:
+    """GSPS Dataset → {label, creator, wc, ww, annotations[]} (불러오기·타사 PR 표시).
+
+    좌표는 뷰어 표준인 0~1 정규화로 환산(DISPLAY 그대로 / PIXEL은 이미지 크기로).
+    """
+    dims = _image_dims(ds)
+    wc = ww = None
+    voi = getattr(ds, "SoftcopyVOILUTSequence", None)
+    if voi:
+        v = voi[0]
+
+        def _f(x):
+            return float(x[0]) if isinstance(x, (list,)) or hasattr(x, "__len__") and not isinstance(x, str) else float(x)
+        try:
+            wc = _f(v.WindowCenter)
+            ww = _f(v.WindowWidth)
+        except (AttributeError, ValueError, TypeError):
+            wc = ww = None
+
+    annos: list[dict] = []
+    for item in getattr(ds, "GraphicAnnotationSequence", []) or []:
+        sop = ""
+        ref = getattr(item, "ReferencedImageSequence", None)
+        if ref:
+            sop = str(getattr(ref[0], "ReferencedSOPInstanceUID", "") or "")
+        for g in getattr(item, "GraphicObjectSequence", []) or []:
+            try:
+                n = int(g.NumberOfGraphicPoints)
+                data = [float(x) for x in g.GraphicData]
+                pts = [[data[i * 2], data[i * 2 + 1]] for i in range(n)]
+            except (AttributeError, ValueError, IndexError):
+                continue
+            units = str(getattr(g, "GraphicAnnotationUnits", "DISPLAY") or "DISPLAY").upper()
+            pts = _norm(pts, units, sop, dims)
+            anno = _graphic_to_anno(str(getattr(g, "GraphicType", "")), pts)
+            if anno:
+                anno.update({"sop_uid": sop, "source": "external"})
+                annos.append(anno)
+        for t in getattr(item, "TextObjectSequence", []) or []:
+            anchor = list(getattr(t, "AnchorPoint", []) or [])
+            txt = str(getattr(t, "UnformattedTextValue", "") or "")
+            if len(anchor) == 2:
+                units = str(getattr(t, "AnchorPointAnnotationUnits", "DISPLAY") or "DISPLAY").upper()
+                p = _norm([[float(anchor[0]), float(anchor[1])]], units, sop, dims)
+                annos.append({"kind": "text", "points": p, "text": txt,
+                              "sop_uid": sop, "source": "external"})
+    return {
+        "label": str(getattr(ds, "ContentLabel", "") or ""),
+        "creator": str(getattr(ds, "ContentCreatorName", "") or ""),
+        "wc": wc, "ww": ww, "annotations": annos,
+    }
+
+
+def read_gsps_bytes(data: bytes) -> dict:
+    """GSPS 바이트 → 파싱 결과. GSPS가 아니면 빈 주석."""
+    from pydicom import dcmread
+
+    ds = dcmread(io.BytesIO(data), force=True)
+    if str(getattr(ds, "SOPClassUID", "")) != GSPS_SOP_CLASS:
+        return {"label": "", "creator": "", "wc": None, "ww": None, "annotations": []}
+    return parse_gsps_dataset(ds)
