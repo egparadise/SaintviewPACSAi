@@ -172,6 +172,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
+  // 공개 서버 상태 — 홈(초기) 페이지 연동
+  status: () => req<ServerStatus>("/api/status"),
   // 가입(공개) — 병원 + 초기 관리자 계정 생성
   signupEnabled: () => req<{ enabled: boolean }>("/api/signup/enabled"),
   signup: (body: SignupRequest) =>
@@ -386,6 +388,16 @@ export interface StorageOverview {
   } | null;
   disk: { path: string; total?: number; used?: number; free?: number; error?: string };
   retention: { retention_days: number; candidate_studies: number; cutoff_date?: string };
+}
+
+// ── 공개 서버 상태 ──
+export interface ServerStatus {
+  api: boolean;
+  orthanc: boolean;
+  orthanc_url: string;
+  ai_mode: string;
+  mpps: boolean;
+  version: string;
 }
 
 // ── 가입 / 관리자 감독 타입 ──

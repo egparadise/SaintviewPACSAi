@@ -83,3 +83,28 @@ app.include_router(share.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "ai_mode": get_settings().ai_mode}
+
+
+@app.get("/api/status")
+def status():
+    """공개 서버 상태 — 홈(초기) 페이지 연동용. 민감정보 없이 가동 여부만."""
+    s = get_settings()
+    orthanc_alive = False
+    try:
+        from app.dicom.orthanc import OrthancClient
+
+        client = OrthancClient()
+        try:
+            orthanc_alive = client.alive()
+        finally:
+            client.close()
+    except Exception:  # noqa: BLE001 — 상태 표시용, 실패는 down으로
+        orthanc_alive = False
+    return {
+        "api": True,
+        "orthanc": orthanc_alive,
+        "orthanc_url": s.orthanc_url,
+        "ai_mode": s.ai_mode,
+        "mpps": s.mpps_enabled,
+        "version": app.version,
+    }
