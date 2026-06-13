@@ -13,6 +13,9 @@ import { Signup } from "./pages/Signup";
 const _params = new URLSearchParams(window.location.search);
 const IS_VIEWER_WINDOW = _params.get("viewer") === "2d";
 const IS_REPORT_WINDOW = _params.get("report") === "1";
+// 공개 딥링크: ?signup=1 가입, ?login=1 로그인 (미로그인 시 해당 화면으로 바로 진입)
+const INITIAL_AUTH_VIEW: "landing" | "login" | "signup" =
+  _params.get("signup") === "1" ? "signup" : _params.get("login") === "1" ? "login" : "landing";
 
 function Login({ onLogin, onBack, initialUsername }: {
   onLogin: (user: string, role: string) => void; onBack?: () => void; initialUsername?: string;
@@ -80,7 +83,7 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 미인증 화면 흐름: 홈(landing) → 가입(signup) / 로그인(login)
-  const [authView, setAuthView] = useState<"landing" | "login" | "signup">("landing");
+  const [authView, setAuthView] = useState<"landing" | "login" | "signup">(INITIAL_AUTH_VIEW);
   const [prefillUser, setPrefillUser] = useState("");
 
   if (!user) {
