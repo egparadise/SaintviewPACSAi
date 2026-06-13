@@ -181,10 +181,27 @@ export const api = {
       "/api/signup", { method: "POST", body: JSON.stringify(body) }),
   adminOverview: () => req<AdminOverview>("/api/admin/overview"),
   serverStatusAll: () => req<ServerStatusAll>("/api/admin/server-status"),
-  worklist: (params: Record<string, string>) =>
-    req<{ items: StudyRow[]; total: number }>(
-      `/api/worklist?${new URLSearchParams(params)}`,
-    ),
+  worklist: (params: Record<string, string>) => {
+    // 선택한 병원(병원선택→PACS Viewer 흐름)으로 스코프
+    const hid = localStorage.getItem("sv_active_hospital");
+    const p = { ...params, ...(hid ? { hospital_id: hid } : {}) };
+    return req<{ items: StudyRow[]; total: number }>(`/api/worklist?${new URLSearchParams(p)}`);
+  },
+  // 병원 선택 → 자원관리 → Client 선택 흐름
+  myHospitals: () => req<MyHospitals>("/api/my/hospitals"),
+  hospitalResources: (hid: number) => req<HospitalResources>(`/api/hospitals/${hid}/resources`),
+  clients: (hid: number) => req<{ items: ClientRow[] }>(`/api/hospitals/${hid}/clients`),
+  createClient: (hid: number, body: { name: string; location?: string; enabled?: boolean }) =>
+    req<ClientRow>(`/api/hospitals/${hid}/clients`, { method: "POST", body: JSON.stringify(body) }),
+  updateClient: (hid: number, cid: number, body: { name: string; location?: string; enabled?: boolean }) =>
+    req<ClientRow>(`/api/hospitals/${hid}/clients/${cid}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteClient: (hid: number, cid: number) =>
+    req<{ ok: boolean }>(`/api/hospitals/${hid}/clients/${cid}`, { method: "DELETE" }),
+  enterClient: (hid: number, cid: number) =>
+    req<{ ok: boolean; hospital_id: number; client_id: number; client_name: string }>(
+      `/api/hospitals/${hid}/clients/${cid}/enter`, { method: "POST" }),
+  clientHeartbeat: (hid: number, cid: number) =>
+    req<{ ok: boolean }>(`/api/hospitals/${hid}/clients/${cid}/heartbeat`, { method: "POST" }),
   study: (id: number) => req<StudyDetail>(`/api/studies/${id}`),
   reports: (studyId: number) => req<{ items: Report[] }>(`/api/studies/${studyId}/reports`),
   analyze: (studyId: number) =>
@@ -389,6 +406,28 @@ export interface StorageOverview {
   } | null;
   disk: { path: string; total?: number; used?: number; free?: number; error?: string };
   retention: { retention_days: number; candidate_studies: number; cutoff_date?: string };
+}
+
+// ── 병원 선택 / 자원관리 / Client ──
+export interface MyHospital {
+  id: number; code: string; name: string; departments: string;
+  license_clients: number; clients: number; online_clients: number;
+  studies: number; modality_limit: number;
+}
+export interface MyHospitals {
+  items: MyHospital[]; role: string; is_admin: boolean;
+}
+export interface ClientRow {
+  id: number; hospital_id?: number; name: string; code: string; location: string;
+  enabled: boolean; online: boolean; last_seen: string | null; last_user: string;
+}
+export interface HospitalResources {
+  hospital: { id: number; code: string; name: string; departments: string; address: string; phone: string };
+  image: { studies: number; series: number; instances: number; bytes_estimate: number | null; orthanc_total_bytes: number | null };
+  db: { studies: number; reports: number; annotations: number };
+  clients: { total: number; online: number; license: number; items: ClientRow[] };
+  modalities: { count: number; limit: number };
+  accounts: number;
 }
 
 // ── 공개 서버 상태 ──

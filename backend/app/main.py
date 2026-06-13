@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     admin,
     auth,
+    hospitals,
     management,
     orders,
     phrases,
@@ -73,6 +74,7 @@ app.include_router(reports.router)
 app.include_router(admin.router)
 app.include_router(management.router)
 app.include_router(signup.router)
+app.include_router(hospitals.router)
 app.include_router(settings_api.router)
 app.include_router(orders.router)
 app.include_router(phrases.router)

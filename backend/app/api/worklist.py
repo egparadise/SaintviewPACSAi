@@ -31,6 +31,7 @@ def worklist(
     date_to: str = "",
     finding: str = Query("", description="소견/임프레션 텍스트 검색 (F-2)"),
     emergency: bool = False,
+    hospital_id: int = Query(0, description="선택한 병원으로 스코프(0=자동)"),
     limit: int = Query(100, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -51,7 +52,7 @@ def worklist(
             date_to=date_to,
             finding_query=finding,
             emergency_only=emergency,
-            hospital_id=_scoped_hospital(db, user),
+            hospital_id=_scoped_hospital(db, user, hospital_id),
             limit=limit,
             offset=offset,
         ),
@@ -59,17 +60,19 @@ def worklist(
     return {"items": items, "total": total}
 
 
-def _scoped_hospital(db: Session, user: dict) -> int | None:
-    """경량 테넌시 — 비관리자 + 소속 병원이 격리(enforce_isolation) 설정이면 자기 병원만."""
-    if user.get("role") == "admin":
-        return None
+def _scoped_hospital(db: Session, user: dict, selected: int = 0) -> int | None:
+    """병원 스코프 결정 (병원 선택 → PACS Viewer 흐름):
+    - 시스템 관리자(병원 미소속 admin): 선택 병원으로 필터, 미선택이면 전체.
+    - 병원 소속 사용자: 항상 자기 병원으로 고정(테넌시).
+    - 그 외(레거시 단일테넌시): 전체.
+    """
+    is_sys_admin = user.get("role") == "admin" and not user.get("hid")
     hid = user.get("hid")
-    if not hid:
-        return None
-    from app.models import Hospital
-
-    h = db.get(Hospital, hid)
-    return hid if (h and h.enforce_isolation) else None
+    if is_sys_admin:
+        return selected or None
+    if hid:
+        return hid  # 병원 소속 — 자기 병원 고정
+    return None
 
 
 class NlQueryBody(BaseModel):

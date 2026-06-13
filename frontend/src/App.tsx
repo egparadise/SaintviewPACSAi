@@ -8,6 +8,10 @@ import { ViewerWindow } from "./pages/ViewerWindow";
 import { ReportWindow } from "./pages/ReportWindow";
 import { Landing } from "./pages/Landing";
 import { Signup } from "./pages/Signup";
+import { HospitalSelect } from "./pages/HospitalSelect";
+import { HospitalConsole } from "./pages/HospitalConsole";
+import { useEffect } from "react";
+import type { MyHospital } from "./api";
 
 // 뷰어/판독 새 창 모드 — 워크리스트 없이 전용 페이지
 const _params = new URLSearchParams(window.location.search);
@@ -85,6 +89,23 @@ export default function App() {
   // 미인증 화면 흐름: 홈(landing) → 가입(signup) / 로그인(login)
   const [authView, setAuthView] = useState<"landing" | "login" | "signup">(INITIAL_AUTH_VIEW);
   const [prefillUser, setPrefillUser] = useState("");
+  // 인증 후 흐름: 병원 선택(hospitals) → 자원관리(console) → PACS Viewer(viewer)
+  const [stage, setStage] = useState<"hospitals" | "console" | "viewer">("hospitals");
+  const [hospital, setHospital] = useState<MyHospital | null>(null);
+  const [activeClient, setActiveClient] = useState<{ id: number; name: string } | null>(null);
+
+  // PACS Viewer 진입 중에는 Client online 유지(heartbeat)
+  useEffect(() => {
+    if (stage !== "viewer" || !hospital || !activeClient) return;
+    const t = setInterval(() => { api.clientHeartbeat(hospital.id, activeClient.id).catch(() => {}); }, 120000);
+    return () => clearInterval(t);
+  }, [stage, hospital, activeClient]);
+
+  const goHospitals = () => {
+    localStorage.removeItem("sv_active_hospital");
+    setHospital(null); setActiveClient(null); setStage("hospitals");
+  };
+  const logout = () => { setToken(null); localStorage.removeItem("sv_active_hospital"); setUser(null); goHospitals(); };
 
   if (!user) {
     const doLogin = (name: string, role: string) => {
@@ -106,7 +127,7 @@ export default function App() {
     return <Landing onSignup={() => setAuthView("signup")} onLogin={() => setAuthView("login")} />;
   }
 
-  // 뷰어/판독 새 창: 헤더 없이 전용 페이지만
+  // 뷰어/판독 새 창: 헤더 없이 전용 페이지만 (stage 무관)
   if (IS_VIEWER_WINDOW) {
     return <ViewerWindow />;
   }
@@ -114,9 +135,44 @@ export default function App() {
     return <ReportWindow />;
   }
 
+  const openSettings = () => setSettingsOpen(true);
+  const settingsOverlay = settingsOpen && <SettingsModal role={user.role} onClose={() => setSettingsOpen(false)} />;
+
+  // 1단계: 병원 선택
+  if (stage === "hospitals") {
+    return (
+      <>
+        <HospitalSelect
+          userName={user.name}
+          onLogout={logout}
+          onSettings={openSettings}
+          onSelect={(h) => {
+            localStorage.setItem("sv_active_hospital", String(h.id));
+            setHospital(h); setStage("console");
+          }}
+        />
+        {settingsOverlay}
+      </>
+    );
+  }
+  // 2단계: 병원별 자원관리 → Client 선택
+  if (stage === "console" && hospital) {
+    return (
+      <>
+        <HospitalConsole
+          hospital={hospital}
+          onBack={goHospitals}
+          onLogout={logout}
+          onSettings={openSettings}
+          onEnterViewer={(id, name) => { setActiveClient({ id, name }); setStage("viewer"); }}
+        />
+        {settingsOverlay}
+      </>
+    );
+  }
+  // 3단계: PACS Viewer (선택 병원·Client 스코프)
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* 글로벌 헤더: 워크스페이스 탭 (§2) */}
       <header
         style={{
           display: "flex", alignItems: "center", gap: 8, padding: "0 12px",
@@ -126,6 +182,11 @@ export default function App() {
         <span style={{ fontWeight: 700 }}>
           Saintview <span style={{ color: "var(--ai)" }}>AI</span>
         </span>
+        {hospital && (
+          <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+            🏥 {hospital.name}{activeClient ? ` · ${activeClient.name}` : ""}
+          </span>
+        )}
         <div
           style={{
             background: "var(--accent)", padding: "4px 16px", borderRadius: "4px 4px 0 0",
@@ -135,11 +196,13 @@ export default function App() {
           WORKLIST 1
         </div>
         <div style={{ flex: 1 }} />
+        <button onClick={() => setStage("console")}>← 자원관리</button>
+        <button onClick={goHospitals}>병원 변경</button>
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
           {user.name} [{user.role}]
         </span>
         <button onClick={() => setSettingsOpen(true)}>설정</button>
-        <button onClick={() => { setToken(null); setUser(null); }}>로그아웃</button>
+        <button onClick={logout}>로그아웃</button>
       </header>
 
       {settingsOpen && <SettingsModal role={user.role} onClose={() => setSettingsOpen(false)} />}

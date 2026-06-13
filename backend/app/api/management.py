@@ -36,8 +36,13 @@ class HospitalBody(BaseModel):
     ae_title: str = ""
     address: str = ""
     phone: str = ""
+    fax: str = ""
+    homepage: str = ""
+    departments: str = ""
     contact: str = ""
     max_accounts: int = 0
+    license_clients: int = 0
+    modality_limit: int = 0
     enforce_isolation: bool = False
     enabled: bool = True
     note: str = ""
@@ -46,8 +51,10 @@ class HospitalBody(BaseModel):
 def _hospital_dict(h: Hospital, account_count: int = 0) -> dict:
     return {
         "id": h.id, "code": h.code, "name": h.name, "ae_title": h.ae_title,
-        "address": h.address, "phone": h.phone, "contact": h.contact,
-        "max_accounts": h.max_accounts, "enforce_isolation": h.enforce_isolation,
+        "address": h.address, "phone": h.phone, "fax": h.fax, "homepage": h.homepage,
+        "departments": h.departments, "contact": h.contact,
+        "max_accounts": h.max_accounts, "license_clients": h.license_clients,
+        "modality_limit": h.modality_limit, "enforce_isolation": h.enforce_isolation,
         "enabled": h.enabled, "note": h.note, "account_count": account_count,
         "created_at": h.created_at.isoformat() if h.created_at else None,
     }
@@ -74,9 +81,11 @@ def create_hospital(body: HospitalBody, db: Session = Depends(get_db),
         raise HTTPException(status_code=409, detail="이미 존재하는 병원 코드입니다")
     h = Hospital(
         code=code, name=body.name.strip(), ae_title=body.ae_title.strip().upper(),
-        address=body.address.strip(), phone=body.phone.strip(), contact=body.contact.strip(),
-        max_accounts=max(0, body.max_accounts), enforce_isolation=body.enforce_isolation,
-        enabled=body.enabled, note=body.note.strip(),
+        address=body.address.strip(), phone=body.phone.strip(), fax=body.fax.strip(),
+        homepage=body.homepage.strip(), departments=body.departments.strip(),
+        contact=body.contact.strip(), max_accounts=max(0, body.max_accounts),
+        license_clients=max(0, body.license_clients), modality_limit=max(0, body.modality_limit),
+        enforce_isolation=body.enforce_isolation, enabled=body.enabled, note=body.note.strip(),
     )
     db.add(h)
     db.flush()
@@ -100,8 +109,13 @@ def update_hospital(hid: int, body: HospitalBody, db: Session = Depends(get_db),
     h.ae_title = body.ae_title.strip().upper()
     h.address = body.address.strip()
     h.phone = body.phone.strip()
+    h.fax = body.fax.strip()
+    h.homepage = body.homepage.strip()
+    h.departments = body.departments.strip()
     h.contact = body.contact.strip()
     h.max_accounts = max(0, body.max_accounts)
+    h.license_clients = max(0, body.license_clients)
+    h.modality_limit = max(0, body.modality_limit)
     h.enforce_isolation = body.enforce_isolation
     h.enabled = body.enabled
     h.note = body.note.strip()

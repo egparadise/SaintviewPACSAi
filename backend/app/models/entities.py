@@ -319,6 +319,22 @@ class Modality(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class Client(Base):
+    """병원 Client(뷰어 좌석) — 라이선스 수만큼. 접속 상태(online)는 last_seen으로 판정."""
+
+    __tablename__ = "clients"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int] = mapped_column(ForeignKey("hospitals.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64), default="")        # 좌석/워크스테이션 이름
+    code: Mapped[str] = mapped_column(String(32), default="")        # 식별 코드(자동)
+    location: Mapped[str] = mapped_column(String(128), default="")   # 설치 위치(판독실 등)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_user: Mapped[str] = mapped_column(String(64), default="")   # 마지막 접속 사용자
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class BackupJob(Base):
     """백업 작업 이력 — 설정 기간 데이터 백업 + 압축(JPEG/JPEG2000 등)."""
 
