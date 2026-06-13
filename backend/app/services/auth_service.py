@@ -51,7 +51,8 @@ def authenticate(db: Session, username: str, password: str) -> Account | None:
         db.add(AuditLog(action="login_failed", target_type="account", target_id=username))
         db.commit()
         return None
-    if not account.enabled:
+    # 명시적 비활성(False)만 거부 — 레거시 행의 NULL은 활성으로 간주(컬럼 추가 전 계정 보호)
+    if account.enabled is False:
         db.add(AuditLog(account_id=account.id, action="login_disabled",
                         target_type="account", target_id=username))
         db.commit()
