@@ -71,6 +71,20 @@ def process_once() -> int:
     return processed
 
 
+def scheduled_backup_once() -> None:
+    """스케줄 백업 점검 — 정책 예정 시각 도달 시 1회 실행(저장공간/백업 2단계)."""
+    from app.services.backup_service import maybe_run_scheduled_backup
+
+    with SessionLocal() as db:
+        try:
+            job = maybe_run_scheduled_backup(db)
+            if job is not None:
+                logger.info("스케줄 백업 실행 job=%s status=%s (%d검사/%d인스턴스)",
+                            job.id, job.status, job.study_count, job.instance_count)
+        except Exception:
+            logger.exception("스케줄 백업 점검 오류")
+
+
 async def worker_loop(stop_event: asyncio.Event) -> None:
     logger.info("AI 워커 시작 (폴링 %.1fs, Orthanc 동기화 %d주기)", POLL_INTERVAL_SEC, ORTHANC_SYNC_EVERY)
     tick = 0
@@ -79,6 +93,7 @@ async def worker_loop(stop_event: asyncio.Event) -> None:
             await asyncio.to_thread(process_once)
             if tick % ORTHANC_SYNC_EVERY == 0:
                 await asyncio.to_thread(sync_orthanc_once)
+                await asyncio.to_thread(scheduled_backup_once)
         except Exception:
             logger.exception("워커 루프 오류")
         tick += 1

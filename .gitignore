@@ -18,3 +18,6 @@ harness/eval_cases/real_*.jsonl
 
 # 서버 관리 SCP 설정 생성물(런타임 — 컨테이너에 마운트)
 deploy/orthanc-generated.json
+
+# 백업 출력물(런타임)
+backend/backup/

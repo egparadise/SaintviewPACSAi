@@ -317,7 +317,64 @@ export const api = {
   scpConfig: (body: { receive_enabled: boolean; registered_only: boolean; check_called_aet: boolean }) =>
     req<{ ok: boolean; config: ScpConfig; generated_file: string | null; note: string }>(
       "/api/admin/scp-config", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── 서버 관리 2단계: 저장공간·백업·압축 ──
+  storage: () => req<StorageOverview>("/api/admin/storage"),
+  backupPolicy: () => req<BackupPolicy>("/api/admin/backup/policy"),
+  putBackupPolicy: (body: BackupPolicy) =>
+    req<BackupPolicy>("/api/admin/backup/policy", { method: "PUT", body: JSON.stringify(body) }),
+  backupCompressions: () =>
+    req<{ items: { key: string; label: string }[] }>("/api/admin/backup/compressions"),
+  runBackup: (body: { compression?: string; target_dir?: string; date_from?: string; date_to?: string }) =>
+    req<BackupJobRow>("/api/admin/backup/run", { method: "POST", body: JSON.stringify(body) }),
+  backupJobs: () => req<{ items: BackupJobRow[] }>("/api/admin/backup/jobs"),
+  purgePreview: (retention_days: number) =>
+    req<{ count: number; items: { id: number; study_uid: string; study_date: string; modality: string; study_desc: string }[] }>(
+      "/api/admin/storage/purge-preview", { method: "POST", body: JSON.stringify({ retention_days }) }),
+  purge: (retention_days: number) =>
+    req<{ ok: boolean; deleted: number; orthanc_removed: number }>(
+      "/api/admin/storage/purge", { method: "POST", body: JSON.stringify({ retention_days, confirm: true }) }),
 };
+
+// ── 저장공간/백업 타입 ──
+export interface BackupPolicy {
+  enabled: boolean;
+  schedule_time: string;   // HH:MM
+  retention_days: number;  // 0=무제한
+  compression: string;     // backup_service.TRANSFER_SYNTAX 키
+  target_dir: string;
+}
+export interface BackupJobRow {
+  id: number;
+  kind: string;            // manual | scheduled
+  status: string;          // queued | running | done | failed
+  compression: string;
+  target_dir: string;
+  date_from: string;
+  date_to: string;
+  study_count: number;
+  instance_count: number;
+  total_bytes: number;
+  error: string;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+}
+export interface StorageOverview {
+  policy: BackupPolicy;
+  db: { studies: number };
+  orthanc: {
+    alive: boolean;
+    studies?: number;
+    series?: number;
+    instances?: number;
+    disk_size?: number;
+    uncompressed_size?: number;
+    error?: string;
+  } | null;
+  disk: { path: string; total?: number; used?: number; free?: number; error?: string };
+  retention: { retention_days: number; candidate_studies: number; cutoff_date?: string };
+}
 
 // ── 서버 관리 타입 ──
 export interface RoleCatalog {

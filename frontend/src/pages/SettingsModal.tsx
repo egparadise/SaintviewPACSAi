@@ -5,7 +5,7 @@ import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseE
 import { GridPicker } from "../lib/GridPicker";
 import { DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { ToolIcon } from "../lib/toolIcons";
-import { HospitalsPanel, ModalityPanel, UsersPanel } from "./admin/ServerAdmin";
+import { HospitalsPanel, ModalityPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
 import {
   FolderEditModal,
   FolderTreeEditor,
@@ -31,6 +31,7 @@ const TREE: { key: string; label: string; admin?: boolean }[] = [
   { key: "hospitals", label: "병원 관리", admin: true },
   { key: "users", label: "사용자 관리", admin: true },
   { key: "modality", label: "장비·수신 (Modality)", admin: true },
+  { key: "storage", label: "저장·백업 (Storage)", admin: true },
   { key: "network", label: "네트워크 (DICOM)" },
   { key: "servernet", label: "서버 네트워크" },
   { key: "worklist", label: "워크리스트" },
@@ -362,6 +363,7 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
             {page === "hospitals" && isAdmin && <HospitalsPanel />}
             {page === "users" && isAdmin && <UsersPanel />}
             {page === "modality" && isAdmin && <ModalityPanel />}
+            {page === "storage" && isAdmin && <StoragePanel />}
 
             {page === "network" && (
               <>

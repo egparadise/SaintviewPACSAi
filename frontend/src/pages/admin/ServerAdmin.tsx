@@ -3,11 +3,22 @@ import { useEffect, useState } from "react";
 import {
   api,
   type AccountRow,
+  type BackupJobRow,
+  type BackupPolicy,
   type HospitalRow,
   type ModalityRow,
   type RoleCatalog,
   type ScpStatus,
+  type StorageOverview,
 } from "../../api";
+
+function fmtBytes(n?: number): string {
+  if (!n || n <= 0) return "0";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let v = n, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+}
 
 // ── 공통 소형 UI ──
 function Group({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
@@ -326,6 +337,149 @@ export function ModalityPanel() {
             </div>
           </>
         ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>상태 확인 중…</div>}
+      </Group>
+    </div>
+  );
+}
+
+// ════════════════════════════ 저장공간 / 백업 / 압축 ════════════════════════════
+const STATUS_COLOR: Record<string, string> = {
+  done: "var(--accent, #7dd3fc)", failed: "var(--danger, #f87171)",
+  running: "#fbbf24", queued: "var(--text-secondary)",
+};
+export function StoragePanel() {
+  const [ov, setOv] = useState<StorageOverview | null>(null);
+  const [policy, setPolicy] = useState<BackupPolicy | null>(null);
+  const [comps, setComps] = useState<{ key: string; label: string }[]>([]);
+  const [jobs, setJobs] = useState<BackupJobRow[]>([]);
+  const [runComp, setRunComp] = useState("");
+  const [runFrom, setRunFrom] = useState("");
+  const [runTo, setRunTo] = useState("");
+  const [msg, setMsg] = useState("");
+  const loadOv = () => api.storage().then(setOv).catch((e) => setMsg("⚠ " + e.message));
+  const loadJobs = () => api.backupJobs().then((r) => setJobs(r.items)).catch(() => {});
+  useEffect(() => {
+    loadOv(); loadJobs();
+    api.backupPolicy().then((p) => { setPolicy(p); setRunComp(p.compression); }).catch(() => {});
+    api.backupCompressions().then((r) => setComps(r.items)).catch(() => {});
+  }, []);
+
+  const savePolicy = async () => {
+    if (!policy) return;
+    try { const p = await api.putBackupPolicy(policy); setPolicy(p); setMsg("백업 정책 저장됨"); loadOv(); }
+    catch (e) { setMsg("⚠ " + (e as Error).message); }
+  };
+  const run = async () => {
+    try {
+      const j = await api.runBackup({ compression: runComp, date_from: runFrom, date_to: runTo });
+      setMsg(`백업 작업 #${j.id} 시작 (${j.status}) — 잠시 후 새로고침`);
+      setTimeout(loadJobs, 1500);
+    } catch (e) { setMsg("⚠ " + (e as Error).message); }
+  };
+  const purge = async () => {
+    const rd = policy?.retention_days ?? 0;
+    if (rd <= 0) { setMsg("⚠ 보존 기간(retention_days)을 1 이상으로 설정하세요"); return; }
+    try {
+      const prev = await api.purgePreview(rd);
+      if (prev.count === 0) { setMsg("보존 기간 초과 검사가 없습니다"); return; }
+      if (!confirm(`보존 기간 ${rd}일 초과 검사 ${prev.count}건을 영구 삭제합니다.\n(Orthanc + DB에서 제거 — 되돌릴 수 없습니다)\n먼저 백업했는지 확인하세요. 계속할까요?`)) return;
+      const r = await api.purge(rd);
+      setMsg(`삭제 완료: DB ${r.deleted}건 · Orthanc ${r.orthanc_removed}건`);
+      loadOv();
+    } catch (e) { setMsg("⚠ " + (e as Error).message); }
+  };
+
+  const o = ov?.orthanc;
+  const d = ov?.disk;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Group title="저장공간 현황" right={<button onClick={loadOv}>새로고침</button>}>
+        {ov ? (
+          <table className="grid-table" style={{ fontSize: 12 }}>
+            <tbody>
+              <tr><td>DICOM 저장소(Orthanc)</td><td>{o?.alive
+                ? `검사 ${o.studies ?? 0} · 시리즈 ${o.series ?? 0} · 인스턴스 ${o.instances ?? 0}`
+                : <span style={{ color: "var(--danger, #f87171)" }}>연결 안 됨</span>}</td></tr>
+              <tr><td>디스크 사용(압축/원본)</td><td>{o?.alive ? `${fmtBytes(o.disk_size)} / ${fmtBytes(o.uncompressed_size)}` : "—"}</td></tr>
+              <tr><td>DB 검사 수</td><td>{ov.db.studies}</td></tr>
+              <tr><td>백업 대상 디스크</td><td>{d?.error ? <span style={{ color: "var(--danger, #f87171)" }}>{d.error}</span>
+                : `${d?.path} — 여유 ${fmtBytes(d?.free)} / 전체 ${fmtBytes(d?.total)}`}</td></tr>
+              <tr><td>보존 정책 후보</td><td>{ov.retention.retention_days > 0
+                ? `${ov.retention.candidate_studies}건 (${ov.retention.cutoff_date} 이전, ${ov.retention.retention_days}일)`
+                : "미적용 (보존 기간 0)"}</td></tr>
+            </tbody>
+          </table>
+        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>확인 중…</div>}
+        <Msg text={msg} />
+      </Group>
+
+      <Group title="백업 정책 (스케줄·보존·압축)">
+        {policy && (
+          <>
+            <Field label="자동 백업"><input type="checkbox" checked={policy.enabled} onChange={(e) => setPolicy({ ...policy, enabled: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>매일 예정 시각에 스케줄 백업</span></Field>
+            <Field label="예정 시각"><input style={{ ...inp, flex: "none", width: 90 }} type="time" value={policy.schedule_time} onChange={(e) => setPolicy({ ...policy, schedule_time: e.target.value })} /></Field>
+            <Field label="보존 기간"><input style={{ ...inp, flex: "none", width: 80 }} type="number" min={0} value={policy.retention_days} onChange={(e) => setPolicy({ ...policy, retention_days: Number(e.target.value) })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>일 (0=무제한, 초과분은 수동 삭제 대상)</span></Field>
+            <Field label="압축 포맷">
+              <select style={inp} value={policy.compression} onChange={(e) => setPolicy({ ...policy, compression: e.target.value })}>
+                {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="백업 경로"><input style={inp} placeholder="비우면 backend/backup" value={policy.target_dir} onChange={(e) => setPolicy({ ...policy, target_dir: e.target.value })} /></Field>
+            <div><button onClick={savePolicy}>정책 저장</button></div>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+              들어오는 DICOM은 원본 그대로 보관하고, 백업 시 선택한 포맷(JPEG/JPEG2000/무손실)으로 변환합니다.
+              Orthanc에 압축 코덱 플러그인이 없으면 원본으로 폴백 저장하고 작업 기록에 표시합니다.
+            </div>
+          </>
+        )}
+      </Group>
+
+      <Group title="수동 백업 실행" right={<button onClick={run}>백업 시작</button>}>
+        <Field label="압축">
+          <select style={inp} value={runComp} onChange={(e) => setRunComp(e.target.value)}>
+            {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </Field>
+        <Field label="검사일 범위">
+          <input style={{ ...inp, flex: "none", width: 110 }} placeholder="YYYYMMDD" value={runFrom} onChange={(e) => setRunFrom(e.target.value)} />
+          <span>~</span>
+          <input style={{ ...inp, flex: "none", width: 110 }} placeholder="YYYYMMDD" value={runTo} onChange={(e) => setRunTo(e.target.value)} />
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>비우면 전체</span>
+        </Field>
+      </Group>
+
+      <Group title="백업 이력" right={<button onClick={loadJobs}>새로고침</button>}>
+        <table className="grid-table" style={{ fontSize: 11.5 }}>
+          <thead><tr><th>#</th><th>유형</th><th>상태</th><th>압축</th><th>검사</th><th>인스턴스</th><th>용량</th><th>완료</th></tr></thead>
+          <tbody>
+            {jobs.map((j) => (
+              <tr key={j.id} title={j.error}>
+                <td>{j.id}</td><td>{j.kind === "scheduled" ? "스케줄" : "수동"}</td>
+                <td style={{ color: STATUS_COLOR[j.status] }}>{j.status}{j.error ? " ⚠" : ""}</td>
+                <td>{j.compression}</td><td>{j.study_count}</td><td>{j.instance_count}</td>
+                <td>{fmtBytes(j.total_bytes)}</td>
+                <td>{j.finished_at ? j.finished_at.replace("T", " ").slice(0, 19) : "—"}</td>
+              </tr>
+            ))}
+            {jobs.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>백업 이력이 없습니다.</td></tr>}
+          </tbody>
+        </table>
+      </Group>
+
+      <Group title="보존 정책 — 기간 초과 검사 삭제 (파괴적)">
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          백업 정책의 보존 기간({policy?.retention_days ?? 0}일)을 초과한 검사를 Orthanc·DB에서 영구 삭제합니다.
+          미리보기 후 확인 절차를 거치며, 자동 삭제는 하지 않습니다.
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={async () => {
+            const rd = policy?.retention_days ?? 0;
+            if (rd <= 0) { setMsg("⚠ 보존 기간을 1 이상으로 설정하세요"); return; }
+            try { const p = await api.purgePreview(rd); setMsg(`삭제 후보 ${p.count}건 (${rd}일 초과)`); }
+            catch (e) { setMsg("⚠ " + (e as Error).message); }
+          }}>미리보기</button>
+          <button onClick={purge} style={{ color: "var(--danger, #f87171)" }}>초과분 삭제…</button>
+        </div>
       </Group>
     </div>
   );

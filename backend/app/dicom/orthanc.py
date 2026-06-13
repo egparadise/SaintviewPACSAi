@@ -123,6 +123,23 @@ class OrthancClient:
         out.sort(key=lambda x: x["instance_number"])
         return out
 
+    def instance_file(self, orthanc_instance_id: str, transcode: str | None = None) -> bytes:
+        """인스턴스 DICOM 파일 — transcode 지정 시 해당 전송구문으로 변환(백업 압축).
+
+        ⚠ 압축 코덱 플러그인이 없으면 Orthanc가 원본을 반환하거나 422를 내므로
+        호출부(backup_service)에서 폴백을 처리한다.
+        """
+        params = {"transcode": transcode} if transcode else None
+        r = self._client.get(f"/instances/{orthanc_instance_id}/file", params=params)
+        r.raise_for_status()
+        return r.content
+
+    def statistics(self) -> dict:
+        """Orthanc 저장 통계 — 디스크 사용량·검사/인스턴스 수(저장공간 관리)."""
+        r = self._client.get("/statistics")
+        r.raise_for_status()
+        return r.json()
+
     def instance_meta(self, orthanc_instance_id: str) -> dict:
         """SOPClassUID·SeriesUID 등 — KOS 참조 무결성용."""
         r = self._client.get(f"/instances/{orthanc_instance_id}/tags?simplify")

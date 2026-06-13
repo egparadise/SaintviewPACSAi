@@ -305,6 +305,28 @@ class Modality(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class BackupJob(Base):
+    """백업 작업 이력 — 설정 기간 데이터 백업 + 압축(JPEG/JPEG2000 등)."""
+
+    __tablename__ = "backup_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="manual")   # manual | scheduled
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    # queued | running | done | failed
+    compression: Mapped[str] = mapped_column(String(24), default="none")  # backup_service.TRANSFER_SYNTAX 키
+    target_dir: Mapped[str] = mapped_column(String(512), default="")
+    date_from: Mapped[str] = mapped_column(String(8), default="")  # YYYYMMDD (검사일 범위)
+    date_to: Mapped[str] = mapped_column(String(8), default="")
+    study_count: Mapped[int] = mapped_column(Integer, default=0)
+    instance_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class AppSetting(Base):
     """설정 — 화면분석 §5.7 교훈 5: scope 오버라이드(global → source → user)."""
 

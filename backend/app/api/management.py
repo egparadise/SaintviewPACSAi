@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, require_perm
 from app.db import get_db
-from app.models import Account, AuditLog, Hospital, Modality, Study
+from app.models import Account, AuditLog, BackupJob, Hospital, Modality, Study
 from app.services.auth_service import hash_password
 from app.services.permissions import ROLES, role_catalog
 from app.services.settings_service import get_setting, set_setting
@@ -555,3 +555,201 @@ def scp_config(body: ScpConfigBody, db: Session = Depends(get_db),
             f"(현재 Orthanc 기본 AET={s.orthanc_url})"
         ),
     }
+
+
+# ════════════════════════════════ 저장공간 / 백업 / 압축 ════════════════════════════════
+def _job_dict(j: BackupJob) -> dict:
+    return {
+        "id": j.id, "kind": j.kind, "status": j.status, "compression": j.compression,
+        "target_dir": j.target_dir, "date_from": j.date_from, "date_to": j.date_to,
+        "study_count": j.study_count, "instance_count": j.instance_count,
+        "total_bytes": j.total_bytes, "error": j.error,
+        "started_at": j.started_at.isoformat() if j.started_at else None,
+        "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        "created_at": j.created_at.isoformat() if j.created_at else None,
+    }
+
+
+@router.get("/storage")
+def storage(db: Session = Depends(get_db), user: dict = Depends(require_perm("server.manage"))):
+    """저장공간 현황 — Orthanc 디스크 사용량 + DB 카운트 + 백업 디스크 여유 + 보존 후보."""
+    from app.services.backup_service import storage_overview
+
+    return storage_overview(db)
+
+
+@router.get("/backup/compressions")
+def backup_compressions(user: dict = Depends(require_perm("server.manage"))):
+    from app.services.backup_service import COMPRESSION_LABELS
+
+    return {"items": [{"key": k, "label": v} for k, v in COMPRESSION_LABELS.items()]}
+
+
+@router.get("/backup/policy")
+def backup_policy_get(db: Session = Depends(get_db),
+                      user: dict = Depends(require_perm("server.manage"))):
+    from app.services.backup_service import get_policy
+
+    return get_policy(db)
+
+
+class BackupPolicyBody(BaseModel):
+    enabled: bool = False
+    schedule_time: str = "02:00"
+    retention_days: int = 0
+    compression: str = "none"
+    target_dir: str = ""
+
+
+@router.put("/backup/policy")
+def backup_policy_put(body: BackupPolicyBody, db: Session = Depends(get_db),
+                      user: dict = Depends(require_perm("server.manage"))):
+    from app.services.backup_service import set_policy
+
+    saved = set_policy(db, body.model_dump())
+    db.add(AuditLog(account_id=user.get("uid"), action="backup_policy",
+                    target_type="setting", target_id="backup.policy", detail=saved))
+    db.commit()
+    return saved
+
+
+class BackupRunBody(BaseModel):
+    compression: str = ""        # 비우면 정책값
+    target_dir: str = ""         # 비우면 정책값
+    date_from: str = ""
+    date_to: str = ""
+
+
+def _run_job_in_thread(job_id: int) -> None:
+    from app.db import SessionLocal
+    from app.services.backup_service import run_backup_job
+
+    with SessionLocal() as db:
+        try:
+            run_backup_job(db, job_id)
+        except Exception:  # noqa: BLE001 — 작업 상태에 기록됨
+            pass
+
+
+@router.post("/backup/run")
+def backup_run(body: BackupRunBody, background: BackgroundTasks, db: Session = Depends(get_db),
+               user: dict = Depends(require_perm("server.manage"))):
+    """수동 백업 실행 — 작업을 생성하고 응답 후 백그라운드로 처리(자체 세션)."""
+    from app.services.backup_service import TRANSFER_SYNTAX, get_policy
+
+    policy = get_policy(db)
+    comp = body.compression or policy.get("compression", "none")
+    if comp not in TRANSFER_SYNTAX:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 압축 포맷: {comp}")
+    job = BackupJob(
+        kind="manual", status="queued", compression=comp,
+        target_dir=body.target_dir or policy.get("target_dir", ""),
+        date_from=body.date_from.strip(), date_to=body.date_to.strip(),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    db.add(AuditLog(account_id=user.get("uid"), action="backup_run",
+                    target_type="backup_job", target_id=str(job.id),
+                    detail={"compression": comp}))
+    db.commit()
+    background.add_task(_run_job_in_thread, job.id)
+    return _job_dict(job)
+
+
+@router.get("/backup/jobs")
+def backup_jobs(limit: int = 30, db: Session = Depends(get_db),
+                user: dict = Depends(require_perm("server.manage"))):
+    rows = db.execute(
+        select(BackupJob).order_by(BackupJob.id.desc()).limit(limit)
+    ).scalars().all()
+    return {"items": [_job_dict(j) for j in rows]}
+
+
+@router.get("/backup/jobs/{job_id}")
+def backup_job_detail(job_id: int, db: Session = Depends(get_db),
+                      user: dict = Depends(require_perm("server.manage"))):
+    j = db.get(BackupJob, job_id)
+    if not j:
+        raise HTTPException(status_code=404, detail="백업 작업을 찾을 수 없습니다")
+    return _job_dict(j)
+
+
+class PurgeBody(BaseModel):
+    retention_days: int
+    confirm: bool = False
+
+
+@router.post("/storage/purge-preview")
+def purge_preview(body: PurgeBody, db: Session = Depends(get_db),
+                  user: dict = Depends(require_perm("server.manage"))):
+    """보존 기간 초과 검사 미리보기(삭제 안 함)."""
+    from app.services.backup_service import retention_candidates
+
+    cands = retention_candidates(db, body.retention_days)
+    return {
+        "count": len(cands),
+        "items": [
+            {"id": s.id, "study_uid": s.study_uid, "study_date": s.study_date,
+             "modality": s.modality, "study_desc": s.study_desc}
+            for s in cands[:200]
+        ],
+    }
+
+
+def _delete_study_rows(db: Session, study: Study) -> None:
+    """검사 + 종속 행(리포트·임베딩·시리즈·주석·AI잡) 정리."""
+    from sqlalchemy import delete
+
+    from app.models import AiJob, Annotation, Report, ReportEmbedding, Series
+
+    report_ids = [r for (r,) in db.execute(
+        select(Report.id).where(Report.study_id == study.id)
+    ).all()]
+    if report_ids:
+        db.execute(delete(ReportEmbedding).where(ReportEmbedding.report_id.in_(report_ids)))
+    db.execute(delete(Report).where(Report.study_id == study.id))
+    db.execute(delete(Series).where(Series.study_id == study.id))
+    db.execute(delete(Annotation).where(Annotation.study_id == study.id))
+    db.execute(delete(AiJob).where(AiJob.study_id == study.id))
+    db.delete(study)
+
+
+@router.post("/storage/purge")
+def purge(body: PurgeBody, db: Session = Depends(get_db),
+          user: dict = Depends(require_perm("server.manage"))):
+    """보존 기간 초과 검사 삭제 — confirm=true 필수(파괴적). Orthanc + DB에서 제거.
+
+    ⚠ 운영 정책: 삭제 전 백업을 먼저 수행할 것. 자동 삭제는 하지 않는다(관리자 수동 실행).
+    """
+    from app.dicom.orthanc import OrthancClient
+    from app.services.backup_service import retention_candidates
+
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="삭제 확인(confirm=true)이 필요합니다")
+    if body.retention_days <= 0:
+        raise HTTPException(status_code=400, detail="보존 기간(retention_days)은 1 이상이어야 합니다")
+    cands = retention_candidates(db, body.retention_days)
+    client = OrthancClient()
+    orthanc_alive = client.alive()
+    deleted = 0
+    orthanc_removed = 0
+    try:
+        for s in cands:
+            if orthanc_alive and s.orthanc_id:
+                try:
+                    r = client._client.delete(f"/studies/{s.orthanc_id}")
+                    if r.status_code in (200, 204):
+                        orthanc_removed += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            _delete_study_rows(db, s)
+            deleted += 1
+        db.add(AuditLog(account_id=user.get("uid"), action="storage_purge",
+                        target_type="study", target_id=f"{deleted}건",
+                        detail={"retention_days": body.retention_days,
+                                "deleted": deleted, "orthanc_removed": orthanc_removed}))
+        db.commit()
+    finally:
+        client.close()
+    return {"ok": True, "deleted": deleted, "orthanc_removed": orthanc_removed}

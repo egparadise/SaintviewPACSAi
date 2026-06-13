@@ -17,7 +17,9 @@ def _make_engine():
     settings = get_settings()
     kwargs = {}
     if settings.database_url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        # check_same_thread=False: 워커/백업 스레드 공유. timeout: 동시 쓰기(백업 스레드)
+        # 시 즉시 OperationalError 대신 락 대기(운영 Postgres는 무관).
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     return create_engine(settings.database_url, **kwargs)
 
 
