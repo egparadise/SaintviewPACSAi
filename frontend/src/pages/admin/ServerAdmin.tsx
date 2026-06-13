@@ -10,8 +10,68 @@ import {
   type ModalityRow,
   type RoleCatalog,
   type ScpStatus,
+  type ServerStatusAll,
   type StorageOverview,
 } from "../../api";
+
+const KIND_ICON: Record<string, string> = {
+  api: "🖥️", orthanc: "🩻", ohif: "👁️", db: "🗄️", appdb: "🗃️", mpps: "📡",
+};
+
+// ════════════════════════════ 메인 Server 페이지(통합 관리) ════════════════════════════
+export function ServerPanel() {
+  const [st, setSt] = useState<ServerStatusAll | null>(null);
+  const [msg, setMsg] = useState("");
+  const [at, setAt] = useState("");
+  const load = () => api.serverStatusAll()
+    .then((s) => { setSt(s); setAt(new Date().toLocaleTimeString()); setMsg(""); })
+    .catch((e) => setMsg("⚠ " + e.message));
+  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
+
+  return (
+    <Group title="메인 서버 — 통합 상태 / 관리"
+           right={<>
+             {st && <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+               {st.healthy}/{st.total} 정상 · {at}</span>}
+             <button onClick={load}>새로고침</button>
+           </>}>
+      {!st ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
+        <table className="grid-table" style={{ fontSize: 12.5 }}>
+          <thead><tr><th>서비스</th><th>주소</th><th>상태</th><th>관리</th></tr></thead>
+          <tbody>
+            {st.services.map((sv) => (
+              <tr key={sv.name}>
+                <td style={{ whiteSpace: "nowrap" }}>{KIND_ICON[sv.kind] ?? "•"} {sv.name}</td>
+                <td>
+                  {sv.url.startsWith("http")
+                    ? <a href={sv.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent, #7dd3fc)" }}>{sv.url}</a>
+                    : <code style={{ fontSize: 12 }}>{sv.url}</code>}
+                </td>
+                <td>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%",
+                                   background: sv.ok ? "#34d399" : "#f87171" }} />
+                    <span style={{ color: sv.ok ? undefined : "var(--danger, #f87171)" }}>{sv.detail}</span>
+                  </span>
+                </td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {sv.manage
+                    ? <button onClick={() => window.open(sv.manage, "_blank")}>열기 ↗</button>
+                    : <span style={{ color: "var(--text-secondary)" }}>—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Msg text={msg} />
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+        모든 인프라(API·DICOM 서버·뷰어·DB·MPPS 수신)를 한 화면에서 감시합니다(10초 자동 갱신).
+        세부 관리는 좌측 탭 — 병원/사용자/장비·수신/저장·백업/서버 네트워크(Ping·DICOM Echo·DB 테스트).
+      </div>
+    </Group>
+  );
+}
 
 // ════════════════════════════ 운영 현황(관리자 감독) ════════════════════════════
 function Dot({ ok }: { ok: boolean }) {

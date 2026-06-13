@@ -23,6 +23,11 @@ class Settings:
     jwt_expire_minutes: int = int(os.getenv("SAINTVIEW_JWT_EXPIRE_MINUTES", "480"))
     # Orthanc (D-3)
     orthanc_url: str = os.getenv("SAINTVIEW_ORTHANC_URL", "http://localhost:8042")
+    # 메인 서버 페이지 — 통합 상태/관리용 외부 서비스 주소
+    ohif_url: str = os.getenv("SAINTVIEW_OHIF_URL", "http://localhost:3000")
+    api_url: str = os.getenv("SAINTVIEW_API_URL", "http://localhost:8000")
+    pg_host: str = os.getenv("SAINTVIEW_PG_HOST", "localhost")
+    pg_port: int = int(os.getenv("SAINTVIEW_PG_PORT", "5433"))
     orthanc_user: str = os.getenv("SAINTVIEW_ORTHANC_USER", "saintview")
     orthanc_password: str = os.getenv("SAINTVIEW_ORTHANC_PASSWORD", "saintview_dev")
     # AI (CLAUDE.md §4)

@@ -180,6 +180,7 @@ export const api = {
     req<{ ok: boolean; hospital_id: number; hospital_code: string; username: string; message: string }>(
       "/api/signup", { method: "POST", body: JSON.stringify(body) }),
   adminOverview: () => req<AdminOverview>("/api/admin/overview"),
+  serverStatusAll: () => req<ServerStatusAll>("/api/admin/server-status"),
   worklist: (params: Record<string, string>) =>
     req<{ items: StudyRow[]; total: number }>(
       `/api/worklist?${new URLSearchParams(params)}`,
@@ -398,6 +399,21 @@ export interface ServerStatus {
   ai_mode: string;
   mpps: boolean;
   version: string;
+}
+
+// ── 메인 서버 페이지(통합 상태) ──
+export interface ServiceStatus {
+  name: string;
+  url: string;
+  kind: string;       // api | orthanc | ohif | db | appdb | mpps
+  ok: boolean;
+  detail: string;
+  manage?: string;    // 관리 UI 링크(있으면)
+}
+export interface ServerStatusAll {
+  services: ServiceStatus[];
+  healthy: number;
+  total: number;
 }
 
 // ── 가입 / 관리자 감독 타입 ──

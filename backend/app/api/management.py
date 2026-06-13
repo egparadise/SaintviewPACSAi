@@ -725,6 +725,92 @@ def _delete_study_rows(db: Session, study: Study) -> None:
     db.delete(study)
 
 
+def _tcp_ok(host: str, port: int, timeout: float = 1.5) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _http_ok(url: str, timeout: float = 2.0) -> tuple[bool, str]:
+    import httpx
+
+    try:
+        r = httpx.get(url, timeout=timeout, follow_redirects=True)
+        return (r.status_code < 500, f"HTTP {r.status_code}")
+    except httpx.HTTPError as e:
+        return (False, f"연결 실패: {str(e)[:60]}")
+
+
+@router.get("/server-status")
+def server_status_all(db: Session = Depends(get_db),
+                      user: dict = Depends(require_perm("server.manage"))):
+    """메인 서버 페이지 — 모든 인프라 서비스(API·Orthanc·OHIF·PostgreSQL·MPPS) 통합 상태."""
+    from urllib.parse import urlparse
+
+    from app.config import get_settings
+    from app.dicom.orthanc import OrthancClient
+
+    s = get_settings()
+    services: list[dict] = []
+
+    # 1) 백엔드 API (자기 자신)
+    services.append({"name": "백엔드 API", "url": s.api_url, "kind": "api", "ok": True,
+                     "detail": f"status ok · AI {s.ai_mode}", "manage": s.api_url + "/docs"})
+
+    # 2) DICOM 서버(Orthanc)
+    client = OrthancClient()
+    try:
+        if client.alive():
+            info = client._client.get("/system").json()
+            cnt = len(client._client.get("/studies").json())
+            services.append({"name": "DICOM 서버(Orthanc)", "url": s.orthanc_url, "kind": "orthanc",
+                             "ok": True, "manage": s.orthanc_url,
+                             "detail": f"v{info.get('Version','?')} · AET {info.get('DicomAet')} · "
+                                       f"DICOM {info.get('DicomPort')} · 검사 {cnt}"})
+        else:
+            services.append({"name": "DICOM 서버(Orthanc)", "url": s.orthanc_url, "kind": "orthanc",
+                             "ok": False, "detail": "연결 안 됨", "manage": s.orthanc_url})
+    finally:
+        client.close()
+
+    # 3) OHIF 뷰어
+    ohif_ok, ohif_detail = _http_ok(s.ohif_url)
+    services.append({"name": "OHIF 뷰어", "url": s.ohif_url, "kind": "ohif",
+                     "ok": ohif_ok, "detail": ohif_detail, "manage": s.ohif_url})
+
+    # 4) PostgreSQL (docker) — TCP 점검
+    pg_ok = _tcp_ok(s.pg_host, s.pg_port)
+    services.append({"name": "PostgreSQL", "url": f"{s.pg_host}:{s.pg_port}", "kind": "db",
+                     "ok": pg_ok, "detail": "Up" if pg_ok else "연결 안 됨"})
+
+    # 5) 애플리케이션 DB (현재 엔진) — SELECT 1
+    try:
+        from sqlalchemy import text
+
+        db.execute(text("SELECT 1"))
+        dialect = db.bind.dialect.name if db.bind else "?"
+        url = s.database_url
+        masked = url.split("@")[-1] if "@" in url else urlparse(url).path or dialect
+        services.append({"name": "애플리케이션 DB", "url": f"{dialect}", "kind": "appdb",
+                         "ok": True, "detail": f"SELECT 1 OK · {masked[:40]}"})
+    except Exception as e:  # noqa: BLE001
+        services.append({"name": "애플리케이션 DB", "url": "?", "kind": "appdb",
+                         "ok": False, "detail": str(e)[:80]})
+
+    # 6) MPPS 수신(DIMSE)
+    mpps_ok = _tcp_ok("127.0.0.1", s.mpps_port) if s.mpps_enabled else False
+    services.append({"name": "MPPS 수신(DIMSE)", "url": f"0.0.0.0:{s.mpps_port}", "kind": "mpps",
+                     "ok": mpps_ok,
+                     "detail": "LISTENING" if mpps_ok else ("비활성(설정)" if not s.mpps_enabled else "리스너 없음")})
+
+    healthy = sum(1 for x in services if x["ok"])
+    return {"services": services, "healthy": healthy, "total": len(services)}
+
+
 @router.get("/overview")
 def admin_overview(db: Session = Depends(get_db),
                    user: dict = Depends(require_perm("hospitals.manage"))):
