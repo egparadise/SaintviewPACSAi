@@ -26,33 +26,45 @@ interface ModeProfile {
   viewer?: Record<string, unknown>;
 }
 
-const TREE: { key: string; label: string; admin?: boolean }[] = [
-  { key: "env", label: "환경 (Environment)" },
-  { key: "server", label: "서버 (Server)", admin: true },
-  { key: "overview", label: "운영 현황 (감독)", admin: true },
-  { key: "hospitals", label: "병원 관리", admin: true },
-  { key: "users", label: "사용자 관리", admin: true },
-  { key: "modality", label: "장비·수신 (Modality)", admin: true },
-  { key: "storage", label: "저장·백업 (Storage)", admin: true },
-  { key: "network", label: "네트워크 (DICOM)" },
-  { key: "servernet", label: "서버 네트워크" },
-  { key: "worklist", label: "워크리스트" },
-  { key: "report", label: "리포트" },
-  { key: "reading", label: "판독 (Reading)" },
-  { key: "viewer", label: "뷰어" },
-  { key: "monitor", label: "모니터 (Display)" },
-  { key: "policy", label: "정책 (Policy)" },
-  { key: "hp", label: "행잉 (HP)" },
-  { key: "pdf", label: "판독서 PDF", admin: true },
-  { key: "ai", label: "AI 정책", admin: true },
+// 설정 스코프(단계별 분리): system(병원선택 화면) · hospital(자원관리 화면) · viewer(PACS Viewer)
+export type SettingsScope = "system" | "hospital" | "viewer";
+const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope }[] = [
+  // 시스템 — 서버 운영(시스템 관리자)
+  { key: "server", label: "서버 (Server)", admin: true, scope: "system" },
+  { key: "overview", label: "운영 현황 (감독)", admin: true, scope: "system" },
+  { key: "hospitals", label: "병원 관리", admin: true, scope: "system" },
+  { key: "users", label: "사용자 관리", admin: true, scope: "system" },
+  { key: "storage", label: "저장·백업 (Storage)", admin: true, scope: "system" },
+  { key: "servernet", label: "서버 네트워크", admin: true, scope: "system" },
+  // 병원 — 병원별 배치 구성
+  { key: "modality", label: "장비·수신 (Modality)", admin: true, scope: "hospital" },
+  { key: "network", label: "네트워크 (DICOM)", scope: "hospital" },
+  { key: "pdf", label: "판독서 PDF", admin: true, scope: "hospital" },
+  { key: "ai", label: "AI 정책", admin: true, scope: "hospital" },
+  // 뷰어 — 사용자/판독 환경
+  { key: "env", label: "환경 (Environment)", scope: "viewer" },
+  { key: "worklist", label: "워크리스트", scope: "viewer" },
+  { key: "report", label: "리포트", scope: "viewer" },
+  { key: "reading", label: "판독 (Reading)", scope: "viewer" },
+  { key: "viewer", label: "뷰어", scope: "viewer" },
+  { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
+  { key: "policy", label: "정책 (Policy)", scope: "viewer" },
+  { key: "hp", label: "행잉 (HP)", scope: "viewer" },
 ];
+const SCOPE_TITLE: Record<SettingsScope, string> = {
+  system: "시스템 설정", hospital: "병원 설정", viewer: "뷰어 설정",
+};
 
 /** SCP/SCU 장비 노드 (dicom.nodes — AE Title/IP/Port, 추가·삭제·확장 가능) */
 interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: string; ip: string; port: number }
 
-export function SettingsModal({ role, onClose }: { role: string; onClose: () => void }) {
+export function SettingsModal({ role, onClose, scope = "viewer" }: {
+  role: string; onClose: () => void; scope?: SettingsScope;
+}) {
   const isAdmin = role === "admin";
-  const [page, setPage] = useState<string>("env");
+  // 현재 스코프에서 보이는 탭만 (단계별 분리)
+  const visibleTabs = TREE.filter((t) => t.scope === scope && (!t.admin || isAdmin));
+  const [page, setPage] = useState<string>(visibleTabs[0]?.key ?? "");
   const [saved, setSaved] = useState("");
 
   // ── 상태 (페이지별) ──
@@ -260,13 +272,16 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
         width: 860, height: 580, display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
         <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", background: "var(--bg-elevated)" }}>
-          <b>Setting options</b>
+          <b>{SCOPE_TITLE[scope]}</b>
+          <span style={{ marginLeft: 8, fontSize: 11.5, color: "var(--text-secondary)" }}>
+            {scope === "system" ? "서버 운영" : scope === "hospital" ? "병원별 배치 구성" : "사용자·판독 환경"}
+          </span>
           <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
         </div>
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
           {/* 좌측 트리 (INFINITT 패턴) */}
           <div style={{ width: 190, borderRight: "1px solid var(--border)", padding: 8, background: "var(--bg-canvas)", flexShrink: 0 }}>
-            {TREE.filter((t) => !t.admin || isAdmin).map((t) => (
+            {visibleTabs.map((t) => (
               <div key={t.key} onClick={() => setPage(t.key)}
                    style={{
                      padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, marginBottom: 2,
@@ -279,6 +294,11 @@ export function SettingsModal({ role, onClose }: { role: string; onClose: () => 
           </div>
           {/* 우측 페이지 */}
           <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+            {visibleTabs.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                이 설정에 접근할 권한이 없습니다.
+              </div>
+            )}
             {page === "env" && (
               <>
                 <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">

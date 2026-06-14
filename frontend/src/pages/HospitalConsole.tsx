@@ -53,7 +53,7 @@ export function HospitalConsole({ hospital, onEnterViewer, onBack, onLogout, onS
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>· 자원관리</span>
         <div style={{ flex: 1 }} />
         <button onClick={load}>새로고침</button>
-        <button onClick={onSettings}>설정</button>
+        <button onClick={onSettings}>병원 설정</button>
         <button onClick={onLogout}>로그아웃</button>
       </header>
 

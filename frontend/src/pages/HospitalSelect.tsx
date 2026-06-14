@@ -21,7 +21,7 @@ export function HospitalSelect({ userName, onSelect, onLogout, onSettings }: {
         <span style={{ color: "var(--text-secondary)", fontSize: 12.5 }}>· 병원 선택</span>
         <div style={{ flex: 1 }} />
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{userName}{isAdmin ? " [시스템 관리자]" : ""}</span>
-        <button onClick={onSettings}>설정</button>
+        {isAdmin && <button onClick={onSettings}>시스템 설정</button>}
         <button onClick={() => { setToken(null); onLogout(); }}>로그아웃</button>
       </header>
 

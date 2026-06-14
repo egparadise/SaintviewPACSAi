@@ -3,7 +3,7 @@ import { useState } from "react";
 import "./theme.css";
 import { hasToken, setToken, api } from "./api";
 import { Worklist } from "./pages/Worklist";
-import { SettingsModal } from "./pages/SettingsModal";
+import { SettingsModal, type SettingsScope } from "./pages/SettingsModal";
 import { ViewerWindow } from "./pages/ViewerWindow";
 import { ReportWindow } from "./pages/ReportWindow";
 import { Landing } from "./pages/Landing";
@@ -85,7 +85,8 @@ export default function App() {
         }
       : null,
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 설정 스코프(단계별 분리): system(병원선택) · hospital(자원관리) · viewer(뷰어). null=닫힘
+  const [settingsScope, setSettingsScope] = useState<SettingsScope | null>(null);
   // 미인증 화면 흐름: 홈(landing) → 가입(signup) / 로그인(login)
   const [authView, setAuthView] = useState<"landing" | "login" | "signup">(INITIAL_AUTH_VIEW);
   const [prefillUser, setPrefillUser] = useState("");
@@ -135,17 +136,18 @@ export default function App() {
     return <ReportWindow />;
   }
 
-  const openSettings = () => setSettingsOpen(true);
-  const settingsOverlay = settingsOpen && <SettingsModal role={user.role} onClose={() => setSettingsOpen(false)} />;
+  const settingsOverlay = settingsScope && (
+    <SettingsModal role={user.role} scope={settingsScope} onClose={() => setSettingsScope(null)} />
+  );
 
-  // 1단계: 병원 선택
+  // 1단계: 병원 선택 — 시스템 설정
   if (stage === "hospitals") {
     return (
       <>
         <HospitalSelect
           userName={user.name}
           onLogout={logout}
-          onSettings={openSettings}
+          onSettings={() => setSettingsScope("system")}
           onSelect={(h) => {
             localStorage.setItem("sv_active_hospital", String(h.id));
             setHospital(h); setStage("console");
@@ -163,7 +165,7 @@ export default function App() {
           hospital={hospital}
           onBack={goHospitals}
           onLogout={logout}
-          onSettings={openSettings}
+          onSettings={() => setSettingsScope("hospital")}
           onEnterViewer={(id, name) => { setActiveClient({ id, name }); setStage("viewer"); }}
         />
         {settingsOverlay}
@@ -201,11 +203,11 @@ export default function App() {
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
           {user.name} [{user.role}]
         </span>
-        <button onClick={() => setSettingsOpen(true)}>설정</button>
+        <button onClick={() => setSettingsScope("viewer")}>설정</button>
         <button onClick={logout}>로그아웃</button>
       </header>
 
-      {settingsOpen && <SettingsModal role={user.role} onClose={() => setSettingsOpen(false)} />}
+      {settingsOverlay}
 
       <main style={{ flex: 1, minHeight: 0 }}>
         <Worklist />
