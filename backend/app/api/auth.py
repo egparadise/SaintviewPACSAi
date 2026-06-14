@@ -20,14 +20,48 @@ class LoginResponse(BaseModel):
     token: str
     username: str
     role: str
+    hospital_id: int | None = None
+    hospital_name: str = ""
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    """관리자/서버 운영 로그인 (홈 페이지 Login) — 관리 콘솔용."""
     account = authenticate(db, body.username, body.password)
     if not account:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
-    return LoginResponse(token=create_token(account), username=account.username, role=account.role)
+    return LoginResponse(token=create_token(account), username=account.username, role=account.role,
+                         hospital_id=account.hospital_id)
+
+
+class ClientLoginRequest(BaseModel):
+    hospital_id: str   # 병원 ID = 병원 코드
+    username: str       # 개별 ID
+    password: str
+
+
+@router.post("/client-login", response_model=LoginResponse)
+def client_login(body: ClientLoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    """Saintview PACS AI Client 뷰어 로그인 — 병원 ID + 개별 ID + Password.
+
+    병원 ID로 병원을 식별하고, 해당 병원 소속 계정만 그 병원 PACS Viewer에 로그인된다.
+    """
+    from sqlalchemy import select
+
+    from app.models import Hospital
+
+    code = body.hospital_id.strip()
+    hospital = db.execute(select(Hospital).where(Hospital.code == code)).scalar_one_or_none()
+    if not hospital or not hospital.enabled:
+        raise HTTPException(status_code=401, detail="병원 ID가 올바르지 않거나 비활성 병원입니다")
+    account = authenticate(db, body.username, body.password)
+    if not account:
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+    # 해당 병원 소속만 그 병원 뷰어에 로그인 (시스템 관리자는 병원 미소속 → 거부)
+    if account.hospital_id != hospital.id:
+        raise HTTPException(status_code=403, detail="이 병원에 소속된 계정이 아닙니다")
+    return LoginResponse(token=create_token(account), username=account.username, role=account.role,
+                         hospital_id=hospital.id, hospital_name=hospital.name)
 
 
 class ProfileBody(BaseModel):

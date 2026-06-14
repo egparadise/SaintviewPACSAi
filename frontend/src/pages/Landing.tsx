@@ -24,7 +24,9 @@ function StatusPill({ ok, label, sub }: { ok: boolean; label: string; sub?: stri
   );
 }
 
-export function Landing({ onSignup, onLogin }: { onSignup: () => void; onLogin: () => void }) {
+export function Landing({ onSignup, onAdminLogin, onClientLogin }: {
+  onSignup: () => void; onAdminLogin: () => void; onClientLogin: () => void;
+}) {
   const [canSignup, setCanSignup] = useState(true);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [statusErr, setStatusErr] = useState(false);
@@ -48,13 +50,14 @@ export function Landing({ onSignup, onLogin }: { onSignup: () => void; onLogin: 
           <div style={{ color: "var(--text-secondary)", marginTop: 8, fontSize: 14 }}>
             웹 기반 PACS + AI 판독 보조 플랫폼 — DICOM 수신·보관·조회와 Structured Report 초안 생성
           </div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
-            <button className="primary" style={{ padding: "10px 28px", fontSize: 14 }}
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
+            <button className="primary" style={{ padding: "10px 24px", fontSize: 14 }}
                     onClick={onSignup} disabled={!canSignup}
                     title={canSignup ? "" : "현재 온라인 가입이 비활성화되어 있습니다"}>
               병원 가입
             </button>
-            <button style={{ padding: "10px 28px", fontSize: 14 }} onClick={onLogin}>로그인</button>
+            <button style={{ padding: "10px 24px", fontSize: 14 }} onClick={onClientLogin}>Client 뷰어 접속</button>
+            <button style={{ padding: "10px 24px", fontSize: 14 }} onClick={onAdminLogin}>관리자 로그인</button>
           </div>
           {!canSignup && (
             <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 6 }}>

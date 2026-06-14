@@ -323,16 +323,19 @@ const EMPTY_MOD: Partial<ModalityRow> = {
   name: "", ae_title: "", host: "", port: 104, modality_type: "CT", role: "scu",
   manufacturer: "", hospital_id: null, allow_receive: true, enabled: true, note: "",
 };
-export function ModalityPanel() {
+export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
   const [items, setItems] = useState<ModalityRow[]>([]);
   const [hosps, setHosps] = useState<HospitalRow[]>([]);
   const [form, setForm] = useState<Partial<ModalityRow> | null>(null);
   const [editId, setEditId] = useState<number | null>(null);
   const [scp, setScp] = useState<ScpStatus | null>(null);
   const [msg, setMsg] = useState("");
-  const load = () => api.modalities().then((r) => setItems(r.items)).catch((e) => setMsg("⚠ " + e.message));
+  // hospitalId 지정 시 그 병원 장비만(병원 설정 노드)
+  const load = () => api.modalities()
+    .then((r) => setItems(hospitalId ? r.items.filter((m) => m.hospital_id === hospitalId) : r.items))
+    .catch((e) => setMsg("⚠ " + e.message));
   const loadScp = () => api.scpStatus().then(setScp).catch(() => {});
-  useEffect(() => { load(); loadScp(); api.hospitals().then((r) => setHosps(r.items)).catch(() => {}); }, []);
+  useEffect(() => { load(); loadScp(); api.hospitals().then((r) => setHosps(r.items)).catch(() => {}); }, [hospitalId]);
 
   const save = async () => {
     if (!form) return;
@@ -360,7 +363,7 @@ export function ModalityPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Group title="등록 장비 (SCU / SCP)" right={<>
-        <button onClick={() => { setForm({ ...EMPTY_MOD }); setEditId(null); }}>＋ 추가</button>
+        <button onClick={() => { setForm({ ...EMPTY_MOD, hospital_id: hospitalId ?? null }); setEditId(null); }}>＋ 추가</button>
         <button onClick={apply}>Orthanc 반영</button>
       </>}>
         <table className="grid-table" style={{ fontSize: 12 }}>

@@ -168,9 +168,15 @@ export interface SrJson {
 // ---- 호출 ----
 export const api = {
   login: (username: string, password: string) =>
-    req<{ token: string; username: string; role: string }>("/api/auth/login", {
+    req<LoginResp>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    }),
+  // Client 뷰어 로그인 — 병원 ID + 개별 ID + Password
+  clientLogin: (hospital_id: string, username: string, password: string) =>
+    req<LoginResp>("/api/auth/client-login", {
+      method: "POST",
+      body: JSON.stringify({ hospital_id, username, password }),
     }),
   // 공개 서버 상태 — 홈(초기) 페이지 연동
   status: () => req<ServerStatus>("/api/status"),
@@ -408,6 +414,11 @@ export interface StorageOverview {
   retention: { retention_days: number; candidate_studies: number; cutoff_date?: string };
 }
 
+export interface LoginResp {
+  token: string; username: string; role: string;
+  hospital_id: number | null; hospital_name?: string;
+}
+
 // ── 병원 선택 / 자원관리 / Client ──
 export interface MyHospital {
   id: number; code: string; name: string; departments: string;
@@ -490,8 +501,13 @@ export interface HospitalRow {
   ae_title: string;
   address: string;
   phone: string;
+  fax: string;
+  homepage: string;
+  departments: string;
   contact: string;
   max_accounts: number;
+  license_clients: number;
+  modality_limit: number;
   enforce_isolation: boolean;
   enabled: boolean;
   note: string;

@@ -41,6 +41,33 @@ def test_client_lifecycle_and_enter(client, auth_headers):
     assert "image" in body and "db" in body and "modalities" in body
 
 
+def test_client_viewer_3field_login(client, auth_headers):
+    """Client 뷰어 로그인 — 병원 ID + 개별 ID + Password."""
+    hid = _mk_hospital(client, auth_headers, "CLILOGIN", "클라병원")
+    # 병원 소속 사용자 생성
+    code = client.get("/api/admin/hospitals", headers=auth_headers).json()["items"]
+    hcode = next(h["code"] for h in code if h["id"] == hid)
+    client.post("/api/admin/accounts", headers=auth_headers, json={
+        "username": "drkim", "password": "viewer12345", "role": "radiologist", "hospital_id": hid,
+    })
+    # 올바른 3필드 → 성공
+    ok = client.post("/api/auth/client-login",
+                     json={"hospital_id": hcode, "username": "drkim", "password": "viewer12345"})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["hospital_id"] == hid and ok.json()["hospital_name"] == "클라병원"
+    # 잘못된 병원 ID → 401
+    assert client.post("/api/auth/client-login",
+                       json={"hospital_id": "NOPE", "username": "drkim", "password": "viewer12345"}).status_code == 401
+    # 다른 병원 코드로 로그인(계정은 CLILOGIN 소속) → 403
+    other = _mk_hospital(client, auth_headers, "OTHERH", "다른병원")
+    ocode = next(h["code"] for h in client.get("/api/admin/hospitals", headers=auth_headers).json()["items"] if h["id"] == other)
+    assert client.post("/api/auth/client-login",
+                       json={"hospital_id": ocode, "username": "drkim", "password": "viewer12345"}).status_code == 403
+    # 시스템 관리자(병원 미소속)는 client-login 거부
+    assert client.post("/api/auth/client-login",
+                       json={"hospital_id": hcode, "username": "admin", "password": "admin1234"}).status_code == 403
+
+
 def test_hospital_user_tenancy_isolation(client, auth_headers):
     # 두 병원 + 각각 소속 admin
     h1 = _mk_hospital(client, auth_headers, "TEN1", "테넌트1")
