@@ -291,6 +291,12 @@ class Hospital(Base):
     # 결재(가입) — 카드 전체번호 저장 금지, 마지막 4자리만
     billing_method: Mapped[str] = mapped_column(String(24), default="")  # monthly_transfer | card
     billing_card_last4: Mapped[str] = mapped_column(String(4), default="")
+    # 병원별 DICOM 네트워크 — 병원마다 포트가 달라야(서버가 병원을 구분)
+    server_host: Mapped[str] = mapped_column(String(128), default="")    # 서버 IP/호스트(공유)
+    scp_aet: Mapped[str] = mapped_column(String(32), default="")         # Modality 수신 Called AE
+    scp_port: Mapped[int] = mapped_column(Integer, default=0)            # Modality C-STORE 수신 포트(병원별 상이)
+    qr_aet: Mapped[str] = mapped_column(String(32), default="")          # Client Viewer 조회(Q/R) AE
+    qr_port: Mapped[int] = mapped_column(Integer, default=0)             # Client Viewer 접속 포트(병원별 상이)
     enforce_isolation: Mapped[bool] = mapped_column(Boolean, default=False)  # 소속 계정은 자기 병원 검사만
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str] = mapped_column(Text, default="")

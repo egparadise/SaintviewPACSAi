@@ -1,6 +1,7 @@
 // 홈 — PACS 소개 및 가입 진입 (가입 흐름도: Home → 가입/로그인)
+// ⚠ 서버 상태(API·DICOM·MPPS)는 공개 첫 화면이 아니라 관리자 콘솔(서버 페이지)에서 표시한다.
 import { useEffect, useState } from "react";
-import { api, type ServerStatus } from "../api";
+import { api } from "../api";
 
 const FEATURES = [
   ["🏥 멀티 병원(테넌시)", "병원별 가입·계정·데이터 귀속. 격리 설정으로 자기 병원 검사만 조회."],
@@ -11,32 +12,12 @@ const FEATURES = [
   ["🔐 역할 권한", "관리자·의사·영상의학과·방사선사·기타 — 권한 매트릭스."],
 ];
 
-function StatusPill({ ok, label, sub }: { ok: boolean; label: string; sub?: string }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5,
-                   background: "var(--bg-canvas)", border: "1px solid var(--border)",
-                   borderRadius: 20, padding: "5px 12px" }}>
-      <span style={{ width: 8, height: 8, borderRadius: "50%",
-                     background: ok ? "#34d399" : "#f87171",
-                     boxShadow: ok ? "0 0 6px #34d399" : "none" }} />
-      <b>{label}</b>{ok ? " 정상" : " 중단"}{sub && <span style={{ color: "var(--text-secondary)" }}>· {sub}</span>}
-    </span>
-  );
-}
-
 export function Landing({ onSignup, onAdminLogin, onClientLogin }: {
   onSignup: () => void; onAdminLogin: () => void; onClientLogin: () => void;
 }) {
   const [canSignup, setCanSignup] = useState(true);
-  const [status, setStatus] = useState<ServerStatus | null>(null);
-  const [statusErr, setStatusErr] = useState(false);
-  const loadStatus = () => api.status().then((s) => { setStatus(s); setStatusErr(false); })
-    .catch(() => { setStatus(null); setStatusErr(true); });
   useEffect(() => {
     api.signupEnabled().then((r) => setCanSignup(r.enabled)).catch(() => {});
-    loadStatus();
-    const t = setInterval(loadStatus, 10000);  // 10초마다 서버 상태 갱신
-    return () => clearInterval(t);
   }, []);
 
   return (
@@ -64,24 +45,6 @@ export function Landing({ onSignup, onAdminLogin, onClientLogin }: {
               현재 온라인 가입이 비활성화되어 있습니다 — 관리자에게 문의하세요.
             </div>
           )}
-          {/* 라이브 서버 상태 — 초기 페이지가 실 서버(API·DICOM)와 연동 구동 */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}>
-            {status ? (
-              <>
-                <StatusPill ok={status.api} label="API 서버" />
-                <StatusPill ok={status.orthanc} label="DICOM 서버(Orthanc)" sub={status.orthanc_url} />
-                <StatusPill ok={status.mpps} label="MPPS 수신" />
-                <span style={{ display: "inline-flex", alignItems: "center", fontSize: 12, color: "var(--text-secondary)",
-                               border: "1px solid var(--border)", borderRadius: 20, padding: "5px 12px" }}>
-                  AI {status.ai_mode} · v{status.version}
-                </span>
-              </>
-            ) : statusErr ? (
-              <StatusPill ok={false} label="API 서버" sub="연결 안 됨" />
-            ) : (
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>서버 상태 확인 중…</span>
-            )}
-          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>

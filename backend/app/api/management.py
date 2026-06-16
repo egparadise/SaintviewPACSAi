@@ -46,6 +46,12 @@ class HospitalBody(BaseModel):
     enforce_isolation: bool = False
     enabled: bool = True
     note: str = ""
+    # 병원별 DICOM 네트워크
+    server_host: str = ""
+    scp_aet: str = ""
+    scp_port: int = 0
+    qr_aet: str = ""
+    qr_port: int = 0
 
 
 def _hospital_dict(h: Hospital, account_count: int = 0) -> dict:
@@ -56,6 +62,8 @@ def _hospital_dict(h: Hospital, account_count: int = 0) -> dict:
         "max_accounts": h.max_accounts, "license_clients": h.license_clients,
         "modality_limit": h.modality_limit, "enforce_isolation": h.enforce_isolation,
         "enabled": h.enabled, "note": h.note, "account_count": account_count,
+        "server_host": h.server_host, "scp_aet": h.scp_aet, "scp_port": h.scp_port,
+        "qr_aet": h.qr_aet, "qr_port": h.qr_port,
         "created_at": h.created_at.isoformat() if h.created_at else None,
     }
 
@@ -86,9 +94,14 @@ def create_hospital(body: HospitalBody, db: Session = Depends(get_db),
         contact=body.contact.strip(), max_accounts=max(0, body.max_accounts),
         license_clients=max(0, body.license_clients), modality_limit=max(0, body.modality_limit),
         enforce_isolation=body.enforce_isolation, enabled=body.enabled, note=body.note.strip(),
+        server_host=body.server_host.strip(), scp_aet=body.scp_aet.strip().upper(),
+        scp_port=body.scp_port, qr_aet=body.qr_aet.strip().upper(), qr_port=body.qr_port,
     )
     db.add(h)
     db.flush()
+    from app.services.hospital_net import assign_hospital_dicom
+
+    assign_hospital_dicom(h)  # 병원별 포트/AET 자동 배정(미설정 시)
     db.add(AuditLog(account_id=user.get("uid"), action="hospital_create",
                     target_type="hospital", target_id=str(h.id), detail={"code": code}))
     db.commit()
@@ -119,10 +132,30 @@ def update_hospital(hid: int, body: HospitalBody, db: Session = Depends(get_db),
     h.enforce_isolation = body.enforce_isolation
     h.enabled = body.enabled
     h.note = body.note.strip()
+    h.server_host = body.server_host.strip()
+    h.scp_aet = body.scp_aet.strip().upper()
+    h.scp_port = body.scp_port
+    h.qr_aet = body.qr_aet.strip().upper()
+    h.qr_port = body.qr_port
     db.add(AuditLog(account_id=user.get("uid"), action="hospital_update",
                     target_type="hospital", target_id=str(hid)))
     db.commit()
     return _hospital_dict(h)
+
+
+@router.post("/hospitals/{hid}/net-test")
+def hospital_net_test(hid: int, db: Session = Depends(get_db),
+                      user: dict = Depends(require_perm("hospitals.manage"))):
+    """병원 DICOM 네트워크 연결 점검 — 수신(SCP)·조회(Q/R) 엔드포인트 TCP+C-ECHO."""
+    from app.services.hospital_net import test_endpoint
+
+    h = db.get(Hospital, hid)
+    if not h:
+        raise HTTPException(status_code=404, detail="병원을 찾을 수 없습니다")
+    return {
+        "scp": test_endpoint(h.server_host, h.scp_port, h.scp_aet),
+        "qr": test_endpoint(h.server_host, h.qr_port, h.qr_aet),
+    }
 
 
 @router.delete("/hospitals/{hid}")

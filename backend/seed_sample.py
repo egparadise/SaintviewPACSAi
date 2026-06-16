@@ -47,6 +47,11 @@ def main() -> None:
             print(f"병원 생성: {h.code} ({h.name})")
         else:
             print(f"병원 존재: {h.code} ({h.name})")
+        from app.services.hospital_net import assign_hospital_dicom
+
+        h.server_host = h.server_host or "localhost"
+        assign_hospital_dicom(h)  # 병원별 DICOM 포트/AET 배정
+        print(f"  DICOM: 수신(SCP) {h.scp_aet}@{h.server_host}:{h.scp_port} · 조회(Q/R) {h.qr_aet}:{h.qr_port}")
 
         for u, role, name, title in [
             ("sample_admin", "admin", "샘플관리자", "전산관리자"),

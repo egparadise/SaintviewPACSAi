@@ -97,6 +97,9 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
     )
     db.add(hospital)
     db.flush()
+    from app.services.hospital_net import assign_hospital_dicom
+
+    assign_hospital_dicom(hospital)  # 병원별 DICOM 포트/AET 자동 배정
     admin = Account(
         username=r.username.strip(), password_hash=hash_password(r.password),
         role="admin",  # 초기 가입자 = admin (요청 사양)

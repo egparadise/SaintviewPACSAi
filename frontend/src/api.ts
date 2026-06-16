@@ -334,6 +334,8 @@ export const api = {
     req<HospitalRow>(`/api/admin/hospitals/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteHospital: (id: number) =>
     req<{ ok: boolean }>(`/api/admin/hospitals/${id}`, { method: "DELETE" }),
+  hospitalNetTest: (id: number) =>
+    req<HospitalNetResult>(`/api/admin/hospitals/${id}/net-test`, { method: "POST" }),
   accounts: () => req<{ items: AccountRow[] }>("/api/admin/accounts"),
   createAccount: (body: AccountCreateBody) =>
     req<AccountRow>("/api/admin/accounts", { method: "POST", body: JSON.stringify(body) }),
@@ -512,7 +514,18 @@ export interface HospitalRow {
   enabled: boolean;
   note: string;
   account_count?: number;
+  // 병원별 DICOM 네트워크
+  server_host: string;
+  scp_aet: string;
+  scp_port: number;
+  qr_aet: string;
+  qr_port: number;
 }
+export interface EndpointTest {
+  host: string; port: number; aet: string;
+  tcp: boolean | null; echo: boolean | null; detail?: string;
+}
+export interface HospitalNetResult { scp: EndpointTest; qr: EndpointTest }
 export interface AccountRow {
   id: number;
   username: string;

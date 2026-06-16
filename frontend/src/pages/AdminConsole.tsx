@@ -2,7 +2,8 @@
 // 구조도: 서버 Storage/Database · 등록 병원 → 병원별(정보/Client/Modality/Storage/Database)
 import { useEffect, useState } from "react";
 import {
-  api, setToken, type ClientRow, type HospitalResources, type HospitalRow, type ServerStatusAll,
+  api, setToken, type ClientRow, type HospitalNetResult, type HospitalResources,
+  type HospitalRow, type ServerStatusAll,
 } from "../api";
 import {
   HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel,
@@ -39,13 +40,24 @@ function ServerDatabaseView() {
 function HospitalInfoView({ hid }: { hid: number }) {
   const [h, setH] = useState<HospitalRow | null>(null);
   const [msg, setMsg] = useState("");
+  const [net, setNet] = useState<HospitalNetResult | null>(null);
   const load = () => api.hospitals().then((r) => setH(r.items.find((x) => x.id === hid) ?? null)).catch(() => {});
-  useEffect(() => { load(); }, [hid]);
+  useEffect(() => { load(); setNet(null); }, [hid]);
   const f = (k: keyof HospitalRow, v: unknown) => setH((p) => p ? { ...p, [k]: v } as HospitalRow : p);
   const save = async () => {
     if (!h) return;
     try { await api.updateHospital(hid, h); setMsg("저장됨"); } catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
+  const test = async () => {
+    if (!h) return;
+    try { await api.updateHospital(hid, h); setNet(await api.hospitalNetTest(hid)); }
+    catch (e) { setMsg("⚠ " + (e as Error).message); }
+  };
+  const epLabel = (e: { tcp: boolean | null; echo: boolean | null; detail?: string }) =>
+    e.tcp === null ? "미설정"
+      : !e.tcp ? `🔴 TCP 실패 ${e.detail ? `(${e.detail})` : ""}`
+        : e.echo === null ? "🟢 TCP 연결됨"
+          : e.echo ? "🟢 C-ECHO 성공" : `🟠 TCP OK · C-ECHO 실패 ${e.detail ? `(${e.detail})` : ""}`;
   if (!h) return <div style={card}>불러오는 중…</div>;
   const row = (label: string, node: React.ReactNode) => (
     <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
@@ -64,6 +76,31 @@ function HospitalInfoView({ hid }: { hid: number }) {
       {row("License(Client 수)", <input style={{ ...inp, flex: "none", width: 90 }} type="number" min={0} value={h.license_clients} onChange={(e) => f("license_clients", Number(e.target.value))} />)}
       {row("Modality 수", <input style={{ ...inp, flex: "none", width: 90 }} type="number" min={0} value={h.modality_limit} onChange={(e) => f("modality_limit", Number(e.target.value))} />)}
       {row("데이터 격리", <input type="checkbox" checked={!!h.enforce_isolation} onChange={(e) => f("enforce_isolation", e.target.checked)} />)}
+
+      {/* 병원별 DICOM 네트워크 — 포트는 병원마다 달라야 함 */}
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>📡 DICOM 네트워크 (병원별 — 포트 상이)</div>
+        {row("서버 호스트/IP", <input style={inp} value={h.server_host} onChange={(e) => f("server_host", e.target.value)} placeholder="예: 10.0.0.5 또는 pacs.hospital.kr" />)}
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", margin: "6px 0 4px" }}>① Modality 수신(SCP) — 장비가 C-STORE로 영상 전송</div>
+        {row("수신 AE Title", <input style={inp} value={h.scp_aet} onChange={(e) => f("scp_aet", e.target.value)} />)}
+        {row("수신 Port", <input style={{ ...inp, flex: "none", width: 110 }} type="number" value={h.scp_port} onChange={(e) => f("scp_port", Number(e.target.value))} />)}
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", margin: "6px 0 4px" }}>② Client Viewer 조회(Q/R) — 뷰어가 영상 조회/수신</div>
+        {row("조회 AE Title", <input style={inp} value={h.qr_aet} onChange={(e) => f("qr_aet", e.target.value)} />)}
+        {row("조회 Port", <input style={{ ...inp, flex: "none", width: 110 }} type="number" value={h.qr_port} onChange={(e) => f("qr_port", Number(e.target.value))} />)}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+          <button onClick={test}>저장 + 연결 테스트</button>
+          {net && (
+            <span style={{ fontSize: 12 }}>
+              수신: {epLabel(net.scp)} &nbsp;|&nbsp; 조회: {epLabel(net.qr)}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 6 }}>
+          포트는 병원마다 자동 배정(상이)됩니다. ⚠ 단일 Orthanc는 DICOM 포트가 하나라, 실제 병원별 포트 리스닝은
+          병원별 Orthanc 인스턴스 또는 DICOM 라우터 배치가 필요합니다(여기서는 구성·연결 점검).
+        </div>
+      </div>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button className="primary" onClick={save}>저장</button>
         <span style={{ fontSize: 12, color: "var(--accent,#7dd3fc)" }}>{msg}</span>
