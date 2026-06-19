@@ -336,6 +336,8 @@ export const api = {
     req<{ ok: boolean }>(`/api/admin/hospitals/${id}`, { method: "DELETE" }),
   hospitalNetTest: (id: number) =>
     req<HospitalNetResult>(`/api/admin/hospitals/${id}/net-test`, { method: "POST" }),
+  claimStudies: (id: number) =>
+    req<{ ok: boolean; assigned: number }>(`/api/admin/hospitals/${id}/claim-studies`, { method: "POST" }),
   accounts: () => req<{ items: AccountRow[] }>("/api/admin/accounts"),
   createAccount: (body: AccountCreateBody) =>
     req<AccountRow>("/api/admin/accounts", { method: "POST", body: JSON.stringify(body) }),

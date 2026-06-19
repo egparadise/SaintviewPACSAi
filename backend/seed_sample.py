@@ -71,6 +71,15 @@ def main() -> None:
                               location="판독실", enabled=True))
                 print(f"  Client 좌석 생성: {seat}")
 
+        # 미배정(NULL) 검사를 샘플병원에 귀속 — Client 뷰어(병원 스코프)에서 보이도록
+        from app.models import Study
+
+        orphans = db.execute(select(Study).where(Study.hospital_id.is_(None))).scalars().all()
+        for s in orphans:
+            s.hospital_id = h.id
+        if orphans:
+            print(f"  미배정 검사 {len(orphans)}건 → {h.code} 귀속")
+
         mod = db.execute(select(Modality).where(Modality.name == "SAMPLE_CT")).scalar_one_or_none()
         if not mod:
             db.add(Modality(name="SAMPLE_CT", ae_title="SAMPLECT", host="192.168.0.100", port=104,

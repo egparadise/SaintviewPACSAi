@@ -143,6 +143,27 @@ def update_hospital(hid: int, body: HospitalBody, db: Session = Depends(get_db),
     return _hospital_dict(h)
 
 
+@router.post("/hospitals/{hid}/claim-studies")
+def claim_studies(hid: int, db: Session = Depends(get_db),
+                  user: dict = Depends(require_perm("hospitals.manage"))):
+    """미배정(hospital_id NULL) 검사를 이 병원에 일괄 귀속 — Client 뷰어에서 보이도록.
+
+    수신 AET가 등록 장비와 매칭되지 않아 병원이 비어있는 검사를 운영자가 배정한다.
+    """
+    from app.models import Study
+
+    h = db.get(Hospital, hid)
+    if not h:
+        raise HTTPException(status_code=404, detail="병원을 찾을 수 없습니다")
+    orphans = db.execute(select(Study).where(Study.hospital_id.is_(None))).scalars().all()
+    for s in orphans:
+        s.hospital_id = hid
+    db.add(AuditLog(account_id=user.get("uid"), action="claim_studies",
+                    target_type="hospital", target_id=str(hid), detail={"count": len(orphans)}))
+    db.commit()
+    return {"ok": True, "assigned": len(orphans)}
+
+
 @router.post("/hospitals/{hid}/net-test")
 def hospital_net_test(hid: int, db: Session = Depends(get_db),
                       user: dict = Depends(require_perm("hospitals.manage"))):

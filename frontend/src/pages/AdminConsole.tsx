@@ -101,6 +101,18 @@ function HospitalInfoView({ hid }: { hid: number }) {
         </div>
       </div>
 
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 6 }}>🩻 검사 배정</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 6 }}>
+          수신 AET가 등록 장비와 매칭되지 않아 병원이 비어있는(미배정) 검사를 이 병원에 귀속합니다.
+          (Client 뷰어는 로그인한 병원의 검사만 표시하므로, 미배정 검사는 배정해야 보입니다.)
+        </div>
+        <button onClick={async () => {
+          try { const r = await api.claimStudies(hid); setMsg(`미배정 검사 ${r.assigned}건을 이 병원에 배정했습니다`); }
+          catch (e) { setMsg("⚠ " + (e as Error).message); }
+        }}>미배정 검사 이 병원에 배정</button>
+      </div>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button className="primary" onClick={save}>저장</button>
         <span style={{ fontSize: 12, color: "var(--accent,#7dd3fc)" }}>{msg}</span>
