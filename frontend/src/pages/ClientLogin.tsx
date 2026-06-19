@@ -10,8 +10,8 @@ const inp: React.CSSProperties = {
 export function ClientLogin({ onLogin, onBack }: {
   onLogin: (r: LoginResp) => void; onBack?: () => void;
 }) {
-  const [hospitalId, setHospitalId] = useState("");
-  const [username, setUsername] = useState("");
+  const [hospitalId, setHospitalId] = useState("SAMPLE01");
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(localStorage.getItem("sv_remember") === "1");
   const [error, setError] = useState("");

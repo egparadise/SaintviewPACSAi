@@ -28,13 +28,14 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_token(account: Account) -> str:
+def create_token(account: Account, hospital_id: int | None = None) -> str:
     settings = get_settings()
     payload = {
         "sub": account.username,
         "role": account.role,
         "uid": account.id,
-        "hid": account.hospital_id,  # 가입자 병원(경량 테넌시) — None=전역
+        # 가입자 병원(경량 테넌시). hospital_id 인자가 있으면 그 병원으로(시스템 관리자의 Client 뷰어 접속)
+        "hid": hospital_id if hospital_id is not None else account.hospital_id,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)

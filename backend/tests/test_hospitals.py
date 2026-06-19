@@ -63,9 +63,11 @@ def test_client_viewer_3field_login(client, auth_headers):
     ocode = next(h["code"] for h in client.get("/api/admin/hospitals", headers=auth_headers).json()["items"] if h["id"] == other)
     assert client.post("/api/auth/client-login",
                        json={"hospital_id": ocode, "username": "drkim", "password": "viewer12345"}).status_code == 403
-    # 시스템 관리자(병원 미소속)는 client-login 거부
-    assert client.post("/api/auth/client-login",
-                       json={"hospital_id": hcode, "username": "admin", "password": "admin1234"}).status_code == 403
+    # 시스템 관리자(병원 미소속 admin)는 어느 병원이든 Client 뷰어 접속 가능(운영/지원)
+    sysadm = client.post("/api/auth/client-login",
+                         json={"hospital_id": hcode, "username": "admin", "password": "admin1234"})
+    assert sysadm.status_code == 200, sysadm.text
+    assert sysadm.json()["hospital_id"] == hid  # 토큰이 그 병원으로 스코프
 
 
 def test_hospital_user_tenancy_isolation(client, auth_headers):

@@ -57,10 +57,13 @@ def client_login(body: ClientLoginRequest, db: Session = Depends(get_db)) -> Log
     account = authenticate(db, body.username, body.password)
     if not account:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
-    # 해당 병원 소속만 그 병원 뷰어에 로그인 (시스템 관리자는 병원 미소속 → 거부)
-    if account.hospital_id != hospital.id:
+    # 시스템 관리자(병원 미소속 admin)는 어느 병원이든 접속 가능(운영/지원).
+    # 그 외에는 자기 소속 병원만.
+    is_system_admin = account.role == "admin" and not account.hospital_id
+    if not is_system_admin and account.hospital_id != hospital.id:
         raise HTTPException(status_code=403, detail="이 병원에 소속된 계정이 아닙니다")
-    return LoginResponse(token=create_token(account), username=account.username, role=account.role,
+    return LoginResponse(token=create_token(account, hospital_id=hospital.id),
+                         username=account.username, role=account.role,
                          hospital_id=hospital.id, hospital_name=hospital.name)
 
 
