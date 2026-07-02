@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { VIEWER_BASE, api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
-import { DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
+import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { ToolIcon } from "../lib/toolIcons";
 import { HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
 import {
@@ -75,6 +75,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [hangingCT, setHangingCT] = useState("default");
   const [hangingMR, setHangingMR] = useState("default");
+  // 선택 뷰어 — Client Viewer 레지스트리(TY Viewer=현행 Viewer2D, Infi Viewer=개발 중)
+  const [clientViewer, setClientViewer] = useState(DEFAULT_CLIENT_VIEWER);
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
   const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
@@ -169,6 +171,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       const h = v.hanging ?? {};
       setHangingCT(h.CT ?? "default");
       setHangingMR(h.MR ?? "default");
+      const cv = (v as { client_viewer?: string }).client_viewer;
+      if (cv && CLIENT_VIEWERS.some((x) => x.id === cv)) setClientViewer(cv);
       if (v.paletteSide) setPaletteSide(v.paletteSide);
       if (v.thumbSide) setThumbSide(v.thumbSide);
       if (v.thumbSize) setThumbSize(v.thumbSize);
@@ -249,6 +253,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       ...curV,
       hanging: { CT: hangingCT, MR: hangingMR },
       hanging2d: { CT: h2dCT, MR: h2dMR },
+      client_viewer: clientViewer,
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
@@ -870,6 +875,22 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </>
             )}
 
+            {page === "viewer" && (
+              <Group title="선택 뷰어 (Client Viewer)">
+                <Row label="사용할 뷰어">
+                  <select value={clientViewer} onChange={(e) => setClientViewer(e.target.value)}>
+                    {CLIENT_VIEWERS.map((v) => (
+                      <option key={v.id} value={v.id} disabled={!v.available}>
+                        {v.label}{v.available ? "" : " (개발 중)"}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
+                    {CLIENT_VIEWERS.find((v) => v.id === clientViewer)?.desc}
+                  </span>
+                </Row>
+              </Group>
+            )}
             {page === "viewer" && (
               <Group title="행잉 프로토콜 (F-18)">
                 {([["CT", hangingCT, setHangingCT], ["MR", hangingMR, setHangingMR]] as const).map(([m, v, set]) => (

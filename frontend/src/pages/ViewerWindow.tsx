@@ -2,8 +2,13 @@
 // Study Open 옵션(Add/Stack/Key/With Open)을 URL 파라미터로 전달받아 Viewer2D를 전체 화면으로 띄운다.
 import { Suspense, lazy, useEffect, useState } from "react";
 import { api, ensureToken, type StudyDetail } from "../api";
+import { DEFAULT_CLIENT_VIEWER } from "../lib/viewerConfig";
 
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
+const ViewerInfi = lazy(() => import("./ViewerInfi").then((m) => ({ default: m.ViewerInfi })));
+
+// 선택 뷰어(설정>뷰어) → 컴포넌트. 미등록 id는 TY Viewer(Viewer2D)로 폴백
+const VIEWER_COMPONENTS: Record<string, typeof Viewer2D> = { ty: Viewer2D, infi: ViewerInfi };
 
 export function ViewerWindow() {
   const params = new URLSearchParams(window.location.search);
@@ -18,12 +23,17 @@ export function ViewerWindow() {
   const [addDetail, setAddDetail] = useState<StudyDetail | null>(null);
   const [stackDetail, setStackDetail] = useState<StudyDetail | null>(null);
   const [err, setErr] = useState("");
+  const [viewerId, setViewerId] = useState(DEFAULT_CLIENT_VIEWER);
 
   useEffect(() => {
     if (!studyId) { setErr("study 파라미터가 없습니다"); return; }
     // 타 포트(타 출처) 뷰어: opener에서 토큰 핸드셰이크 후 로드
     void ensureToken().then((ok) => {
       if (!ok) { setErr("인증 토큰을 받지 못했습니다"); return; }
+      api.getSetting("viewer.prefs").then((r) => {
+        const id = (r.value as { client_viewer?: string }).client_viewer;
+        if (id) setViewerId(id);
+      }).catch(() => {});
       api.study(studyId).then((d) => {
         setDetail(d);
         document.title = `Saintview Viewer — ${d.modality} ${d.patient_name} ${d.study_date}`;
@@ -47,13 +57,14 @@ export function ViewerWindow() {
       </div>
     );
   }
+  const ViewerComp = VIEWER_COMPONENTS[viewerId] ?? Viewer2D;
   return (
     <Suspense fallback={
       <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>
         뷰어 로딩…
       </div>
     }>
-      <Viewer2D detail={detail}
+      <ViewerComp detail={detail}
                 addDetail={addDetail}
                 stackDetail={stackDetail}
                 keySops={keySops.length ? keySops : undefined}

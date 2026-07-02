@@ -1,5 +1,14 @@
 // 뷰어 설정 공용 정의 — Viewer2D와 SettingsModal이 함께 사용 (경량, cornerstone 미포함)
 
+/** Client 뷰어 레지스트리 — Setting>뷰어>선택 뷰어.
+ *  현행 자체 뷰어(Viewer2D) = TY Viewer. 신규 뷰어는 여기 등록 + ViewerWindow의 컴포넌트 맵에 연결.
+ *  available=false 면 설정 콤보에서 비활성(개발 중) 표시. */
+export const CLIENT_VIEWERS: { id: string; label: string; desc: string; available: boolean }[] = [
+  { id: "ty", label: "TY Viewer", desc: "자체 Client 뷰어 (현행 — 세로 팔레트·2단 썸네일)", available: true },
+  { id: "infi", label: "Infi Viewer", desc: "INFINITT 스타일 뷰어 (개발 중)", available: false },
+];
+export const DEFAULT_CLIENT_VIEWER = "ty";
+
 /** 행잉 프로토콜 규칙 (Setting>행잉(HP)) — 장비×부위×Projection → Series/Image layout·W/L */
 export interface HpRule {
   id: string;
