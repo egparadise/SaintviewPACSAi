@@ -266,12 +266,25 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         auto_generate: autoGenerate, vision, stt_engine: sttEngine, stt_model: sttModel,
       }, "global");
     }
-    setSaved("저장됨 — 워크리스트 새로고침 시 적용");
+    setSaved("저장됨 — 왼쪽 ⟳ Refresh를 누르면 즉시 적용·확인됩니다");
     setTimeout(() => setSaved(""), 2500);
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 100 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+      {/* 설정 창 왼쪽 Refresh — 저장 후 전체 새로고침으로 적용값을 즉시 확인 */}
+      <button title="모든 설정을 저장하고 화면을 새로고침 — 적용된 값을 바로 확인합니다"
+              onClick={async () => { await save(); window.location.reload(); }}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                padding: "14px 10px", fontSize: 12, borderRadius: 8, cursor: "pointer",
+                background: "var(--accent)", color: "#fff", border: "1px solid var(--accent)",
+              }}>
+        <span style={{ fontSize: 20, lineHeight: 1 }}>⟳</span>
+        <span>Refresh</span>
+        <span style={{ fontSize: 10.5, opacity: 0.85 }}>저장+적용</span>
+      </button>
       <div style={{
         background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
         width: 860, height: 580, display: "flex", flexDirection: "column", overflow: "hidden",
@@ -319,10 +332,24 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       const prof = modeProfiles[m];
                       if (!prof) return;
                       const cur = (await api.getSetting("worklist.prefs")).value;
-                      await api.putSetting("worklist.prefs", { ...cur, ...(prof.worklist ?? {}) }, "user");
+                      const wl = { ...cur, ...(prof.worklist ?? {}) } as Record<string, unknown>;
+                      await api.putSetting("worklist.prefs", wl, "user");
                       const curv = (await api.getSetting("viewer.prefs")).value;
-                      await api.putSetting("viewer.prefs", { ...curv, ...(prof.viewer ?? {}) }, "user");
-                      setSaved(`'${prof.label ?? m}' 모드 적용 — 새로고침 시 반영`);
+                      const vw = { ...curv, ...(prof.viewer ?? {}) } as Record<string, unknown>;
+                      await api.putSetting("viewer.prefs", vw, "user");
+                      // 설정 창 상태를 프로파일 값으로 즉시 동기화 — 이후 OK(저장)가 옛 값으로 덮어쓰지 않도록
+                      const wlc = wl.columns as string[] | undefined;
+                      if (wlc?.length) setColumns(wlc.filter((c) => COLUMN_DEFS[c]));
+                      const wlf = wl.find_fields as string[] | undefined;
+                      if (wlf?.length) setFindFields(wlf.filter((c) => FIND_FIELDS[c]));
+                      if (wl.dbl_action) setDblAction(wl.dbl_action as "viewer2d" | "ohif");
+                      if (vw.paletteSide) setPaletteSide(vw.paletteSide as "left" | "top" | "right");
+                      if (vw.thumbSide) setThumbSide(vw.thumbSide as "left" | "bottom" | "right");
+                      if (vw.thumbSize) setThumbSize(vw.thumbSize as number);
+                      if (vw.thumbMode) setThumbMode(vw.thumbMode as "series" | "all");
+                      const cvw = vw.client_viewer as string | undefined;
+                      if (cvw && CLIENT_VIEWERS.some((x) => x.id === cvw)) setClientViewer(cvw);
+                      setSaved(`'${prof.label ?? m}' 모드 적용 — 왼쪽 ⟳ Refresh로 즉시 확인`);
                     }}>적용</button>
                     {isAdmin && (
                       <button title="현재 워크리스트·뷰어 레이아웃(컬럼·검색필드·팔레트/썸네일 배치·선택 뷰어)을 선택한 프로파일에 저장 (전역)"
@@ -1324,6 +1351,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
           <button className="primary" onClick={save}>OK (저장)</button>
           <button onClick={onClose}>Cancel</button>
         </div>
+      </div>
       </div>
     </div>
   );
