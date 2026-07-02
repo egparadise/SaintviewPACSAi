@@ -324,10 +324,35 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       await api.putSetting("viewer.prefs", { ...curv, ...(prof.viewer ?? {}) }, "user");
                       setSaved(`'${prof.label ?? m}' 모드 적용 — 새로고침 시 반영`);
                     }}>적용</button>
+                    {isAdmin && (
+                      <button title="현재 워크리스트·뷰어 레이아웃(컬럼·검색필드·팔레트/썸네일 배치·선택 뷰어)을 선택한 프로파일에 저장 (전역)"
+                              onClick={async () => {
+                        const m = (document.getElementById("sv-mode") as HTMLSelectElement).value;
+                        const prof = modeProfiles[m];
+                        if (!prof) { alert("저장할 프로파일을 먼저 선택하세요"); return; }
+                        if (!confirm(`현재 화면 구성을 '${prof.label ?? m}' 프로파일에 저장할까요? (전역 — 모든 사용자에게 적용)`)) return;
+                        const wl = (await api.getSetting("worklist.prefs")).value as Record<string, unknown>;
+                        const vw = (await api.getSetting("viewer.prefs")).value as Record<string, unknown>;
+                        const pick = (src: Record<string, unknown>, keys: string[]) =>
+                          Object.fromEntries(keys.filter((k) => src[k] !== undefined).map((k) => [k, src[k]]));
+                        const next = {
+                          ...modeProfiles,
+                          [m]: {
+                            ...prof,
+                            worklist: { ...(prof.worklist ?? {}), ...pick(wl, ["columns", "find_fields", "dbl_action"]) },
+                            viewer: { ...(prof.viewer ?? {}), ...pick(vw, ["client_viewer", "paletteSide", "thumbSide", "thumbMode", "thumbSize", "reportDock"]) },
+                          },
+                        };
+                        await api.putSetting("mode.profiles", { profiles: next }, "global");
+                        setModeProfiles(next);
+                        setModeJson(JSON.stringify({ profiles: next }, null, 2));
+                        setSaved(`현재 화면 구성을 '${prof.label ?? m}' 프로파일에 저장했습니다 (전역)`);
+                      }}>현재 화면을 프로파일에 저장</button>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
-                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드.
+                    Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭·선택 뷰어)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
+                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>TY</b>=현행 자체 뷰어 레이아웃 · <b>infi</b>=신규 뷰어(개발 중) 레이아웃 저장소.
                   </div>
                   {isAdmin && (
                     <details>

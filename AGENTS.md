@@ -1,6 +1,6 @@
-# CLAUDE.md — Saintview PACS AI 개발 가이드
+# AGENTS.md — Saintview PACS AI 개발 가이드
 
-> 이 파일은 Claude(Code/Cowork)가 Saintview PACS AI를 개발할 때 따르는 **단일 진실 공급원(SSOT)** 이다.
+> 이 파일은 Codex(Code/Cowork)가 Saintview PACS AI를 개발할 때 따르는 **단일 진실 공급원(SSOT)** 이다.
 > 제품 설계는 `docs/DESIGN_SaintviewPACSai_설계.md` 참조. 모든 작업은 설계 문서의 결정(§0)과 로드맵(§11)을 따른다.
 > 상용 PACS 기능 벤치마크는 `docs/ANALYSIS_INFINITT_PiViewSTAR_분석.md` 참조(기능 정의·UX 원칙·DICOM 적합성 목표의 근거).
 > 프론트엔드 화면·컴포넌트 작업 시: 기능-화면 매핑은 `docs/UI_ANALYSIS_PiViewSTAR_화면분석.md`(존 모델), **시각 디자인·레이아웃·컴포넌트 구조는 `docs/UI_DESIGN_Saintview_화면디자인.md`가 최종 기준**(디자인 토큰 §1, 워크리스트 5구역 §3, 뷰어 §4, 구현 순서 §5). 보라(#a78bfa)는 AI 생성물 전용 색 — 다른 용도 사용 금지.
@@ -17,26 +17,26 @@
 |---|---|
 | 백엔드 | Python 3.11+ / FastAPI / SQLAlchemy / Alembic |
 | 프론트엔드 | React + OHIF Viewer (Cornerstone3D), DICOMweb 연동 |
-| LLM | Claude API `claude-opus-4-8`, adaptive thinking, structured outputs(`output_config.format`), 프롬프트 캐싱, 대량 백필은 Batches API |
+| LLM | Codex API `Codex-opus-4-8`, adaptive thinking, structured outputs(`output_config.format`), 프롬프트 캐싱, 대량 백필은 Batches API |
 | DICOM | Orthanc(권장, PoC로 확정) + pydicom/highdicom |
 | DB | PostgreSQL + pgvector 권장 (설계 §3.3, 미확정 D-1) |
 | 배포 | docker-compose (deploy/) |
 
 ## 3. 절대 규칙
 
-1. **PHI 게이트:** Claude API로 나가는 모든 텍스트·이미지는 `rag/deid.py` 비식별화 계층을 통과해야 한다. 우회 호출 금지. 로그에 환자명/등록번호 출력 금지.
+1. **PHI 게이트:** Codex API로 나가는 모든 텍스트·이미지는 `rag/deid.py` 비식별화 계층을 통과해야 한다. 우회 호출 금지. 로그에 환자명/등록번호 출력 금지.
 2. **초안 포지셔닝:** AI 산출물은 어디서나 "초안(draft)"으로 표기. 확정(finalize)은 사용자 행위로만 가능.
-3. **LLM 추상화:** Claude 호출은 `rag/generate.py` 단일 진입점 경유(온프레미스 폴백 R-2 대비).
+3. **LLM 추상화:** Codex 호출은 `rag/generate.py` 단일 진입점 경유(온프레미스 폴백 R-2 대비).
 4. **시크릿:** API 키·DB 자격증명은 환경변수로만. 코드/커밋에 평문 금지.
 5. **하네스 우선:** S0 하네스(합성 DICOM 스모크 + RAG 평가셋) 없이 코어 기능 구현 금지. RAG 프롬프트/모델 변경 시 평가 하네스 회귀 확인 후 머지.
 6. **계층 의존성:** `frontend → api → services → repositories`. API 라우터에 도메인 로직 금지, services에서 DB 직접 SQL 금지(repository 경유).
 
-## 4. Claude API 사용 규칙
+## 4. Codex API 사용 규칙
 
 ```python
 # rag/generate.py 표준 호출 형태
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="Codex-opus-4-8",
     max_tokens=16000,
     thinking={"type": "adaptive"},
     output_config={
@@ -94,8 +94,8 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
 - [x] 하네스: `harness/smoke_dicom_pipeline.py` **SMOKE PASS**(DICOM→Orthanc→QIDO→Postgres 동기화→AI 초안), `harness/eval_rag.py` **EVAL PASS**(스키마 5/5·critical 2/2·PHI 1/1)
 - [x] 프론트엔드: Vite+React+TS, 디자인 토큰(theme.css), 로그인+워크리스트(필터바·StudyGrid·Related Exams·AI 리포트 패널·확정 흐름). 빌드 통과
 - [x] **2차 구현 완료(2026-06-11)**: OHIF 뷰어 통합(compose `ohif` 서비스 + nginx `/dicom-web` 프록시, View&Draft 더블클릭/버튼 연동) · Orthanc 자동 동기화 워커(변경 피드 폴링, seq 영속화) · Alembic 초기 마이그레이션(`bc8a938bfda7`, 신규 DB 검증) · **PDF 출력**(한글 CID 폰트, 사이트 템플릿 `pdf.template`, AI 초안 경고) · **F-22 일괄 검토**(critical 자동 제외 + batch-finalize + 모달). **pytest 20/20**
-- [x] **live AI 모드 검증 완료(2026-06-11)**: `claude-opus-4-8` 실호출 — 구조화 출력 100% 유효, prior UID 반영(프롬프트 보정 1fa52e2), **환각 억제 확인**(근거 없는 케이스에서 "자료 부족, 재판독 필요"로 응답). 서버 전구간 E2E(업로드→자동 감지→live 초안) PASS. 비용 ≈ \$0.02/건, 11~23s. 키는 `backend/.env`(gitignore) — **절대 커밋 금지**
-- [x] **3차 구현(2026-06-11)**: **DICOM SR 출력**(Basic Text SR, 동일 StudyUID 귀속 → `send-sr`로 Orthanc 저장, live 검증: 검사 시리즈 [CT, SR] 확인) · **설정 API+화면**(화이트리스트 키, 사용자/관리자 scope, PDF 템플릿·AI 정책 GUI) · **F-11 vision**(Orthanc preview→Claude vision, `ai.policy.vision` opt-in, "[영상 참고 관찰]" 구분 규칙) · **F-20 품질 통계**(`/api/admin/ai-quality`: 수용률·수정률·critical 변경, 설정 화면 표시). **pytest 24/24**
+- [x] **live AI 모드 검증 완료(2026-06-11)**: `Codex-opus-4-8` 실호출 — 구조화 출력 100% 유효, prior UID 반영(프롬프트 보정 1fa52e2), **환각 억제 확인**(근거 없는 케이스에서 "자료 부족, 재판독 필요"로 응답). 서버 전구간 E2E(업로드→자동 감지→live 초안) PASS. 비용 ≈ \$0.02/건, 11~23s. 키는 `backend/.env`(gitignore) — **절대 커밋 금지**
+- [x] **3차 구현(2026-06-11)**: **DICOM SR 출력**(Basic Text SR, 동일 StudyUID 귀속 → `send-sr`로 Orthanc 저장, live 검증: 검사 시리즈 [CT, SR] 확인) · **설정 API+화면**(화이트리스트 키, 사용자/관리자 scope, PDF 템플릿·AI 정책 GUI) · **F-11 vision**(Orthanc preview→Codex vision, `ai.policy.vision` opt-in, "[영상 참고 관찰]" 구분 규칙) · **F-20 품질 통계**(`/api/admin/ai-quality`: 수용률·수정률·critical 변경, 설정 화면 표시). **pytest 24/24**
 - [x] **4차 구현(2026-06-11)**: **F-16 키이미지/KOS**(선택 UI→KOS 88.59 생성→Orthanc, live: [CT,KO] 확인, PDF 자동 첨부) · **F-18 행잉 매핑**(viewer.prefs: 모달리티→default/mpr, OHIF URL 연동) · **사용자 환경설정 적용**(자동갱신 주기·기본 필터) · **이미지 가드**(vision 전송 전 상·하단 10% 번인 마스킹) · **FHIR DiagnosticReport**(format=fhir, AI 확장 표시). 마이그레이션 c1d2e3f4. **pytest 28/28**
 - [x] **5차 구현(2026-06-11)**: **Cornerstone3D 내장 3D 뷰어**(`pages/Viewer3D.tsx` — wadors 볼륨, MPR 3면+MIP slab, 프리뷰 실증: 팬텀 구체·결절 정확 렌더. ⚠ vite는 `viteCommonjs`+`optimizeDeps.exclude` 필수) · 뷰어 아이콘(`saintview-viewer.svg`) · **Slicer devtools**(`devtools/slicer/` — pull·MPR/MIP 교차검증·분할 프로토타입) · **실데이터 평가**(`harness/eval_cases/` JSONL+`--judge` LLM 채점, live 기준선: 환각 0건) · **배포 보안**(prod 게이트·change-password·compose.prod·README_PILOT). **pytest 31/31**
 - [x] **6차(95371cc)**: OHIF 검은화면 수정(app-config 필수키 extensions/modes 누락) · 워크리스트 5구역 전면 재구축(과거검사/비교세트/상용구/리포트 메타테이블/오더/컨텍스트메뉴) · INFINITT식 설정 트리(컬럼 듀얼리스트·Orthanc 연결테스트)
@@ -129,8 +129,7 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
 - [x] **37차(2026-06-13) — 가입·홈 기본 구조**: PACS 서버 진입 흐름을 **홈(소개·가입) → 가입 → 로그인 → 병원별 페이지**로 구성 · **공개 가입**(`POST /api/signup` — 병원 정보(이름·주소·진료과·연락처·fax·홈페이지)·License(Client 뷰어 수)·연결 Modality 수·가입자 등록(이름·직책·성별·주민번호 앞6자리·전화·휴대폰·이메일·ID·PW확인·계정 admin default)·결재(월별이체/카드 — **카드 마지막 4자리만 저장**) → Hospital+초기 admin Account 생성, `signup_enabled` 플래그) · **관리자 운영 감독**(`GET /api/admin/overview` — 병원별 정보·Client(라이선스)·Modality 등록 수·검사 수·결재 + 서버/Orthanc/MPPS·저장·로그 상태 집계, 설정>운영 현황(감독) 패널) · **프론트**(`pages/Landing.tsx` 소개+가입/로그인, `pages/Signup.tsx` 가입 폼, App 라우팅 landing/login/signup, OverviewPanel) · Hospital(fax·homepage·departments·license_clients·modality_limit·billing) + Account(title·sex·birth6·phone·mobile) 컬럼. 마이그레이션 d3a4b5c6e7f8. **pytest 92/92**. live E2E(가입→로그인→감독) 검증 · **로그인 회귀 수정**(레거시 NULL enabled, 65fc12c)
 - [x] **38차(2026-06-14) — 로그인 후 흐름 전면 재설계 + 메인 서버/병원 자원관리**: **메인 Server 페이지**(`/api/admin/server-status` — API·Orthanc(8042)·OHIF·PostgreSQL·앱DB·MPPS 6종 HTTP/TCP 점검 + 관리 링크, 설정>서버(Server) 탭 10초 갱신) · 홈 공개 상태(`/api/status`) · **로그인 후 흐름 재구성**(기존 로그인→바로 뷰어 ❌ → **로그인 → 병원 목록 → 병원 선택 → 병원별 자원관리(영상 용량·DB 용량·클라이언트 수·접속 상태) → Client(좌석) 선택 → 해당 병원 PACS Viewer 진입**) · **Client 모델**(병원 좌석, last_seen online, 라이선스 한도) + `/api/my/hospitals`·`/api/hospitals/{id}/resources`·clients CRUD+enter/heartbeat · **테넌시 강화**(시스템 관리자=전체, 병원 소속=자기 병원, worklist 선택 병원 스코프) · 프론트 `HospitalSelect`·`HospitalConsole`·App 3단 stage. 마이그레이션 e4b5c6d7f8a9. **pytest 95/95**, live E2E 검증
 - [x] **39~40차(2026-06-14)**: **관리자 콘솔 좌측 트리**(`AdminConsole` — 서버 상태/Storage/Database·운영현황·사용자 + 등록 병원→병원별 정보/Client/Modality/Storage/Database) · **Client 뷰어 3필드 로그인**(`/api/auth/client-login` — 병원 ID(코드)+개별 ID+PW, 소속 계정만·시스템관리자 거부) · **샘플 시드**(`seed_sample.py` — SAMPLE01 병원+계정3종(sample_admin/sample_dr/sample_rt, PW sample1234)+좌석+장비) · **병원별 DICOM 네트워크**(Hospital에 server_host·scp_aet/port·qr_aet/port, 병원별 포트 자동 배정(SCP 11200+id·QR 11600+id 상이), 병원 정보에서 편집 + `POST /api/admin/hospitals/{id}/net-test`(TCP+C-ECHO) 연결 점검 — ⚠ 단일 Orthanc 한계로 실제 병원별 포트 리스닝은 병원별 인스턴스/라우터 필요) · **상태바 위치 이동**(공개 Landing에서 제거 → 관리자 콘솔 서버 페이지에만). 마이그레이션 f5b6c7d8e9a0. **pytest 96/96**
-- [x] **41차(2026-07-02)**: **모드 프로파일 ↔ Client 뷰어 정렬** — 기본 4종 재구성: `ubpacs`→**`ty`(TY — 현행 자체 뷰어 레이아웃)**, `infinitt`→**`infi`(신규 뷰어 개발 중 — 레이아웃 저장소)**. 프로파일 viewer에 `client_viewer` 포함(적용 시 뷰어 구현까지 전환 — CLIENT_VIEWERS 레지스트리와 짝) · **설정>환경 [현재 화면을 프로파일에 저장]**(관리자 — worklist.prefs 컬럼/검색필드/더블클릭 + viewer.prefs 배치/썸네일/선택 뷰어를 선택 프로파일에 캡처, mode.profiles 전역 저장 — 신규 infi 뷰어 레이아웃을 여기에 채우는 동선) · **Client 로그인 장애 수정**(실행 중 백엔드는 Postgres인데 샘플 병원 시드가 SQLite에만 — seed_sample.py는 서버가 보는 DB에 실행할 것). **pytest 96/96**
-- [ ] 남은 것(차기): Infi Viewer 본 구현(ViewerInfi 스캐폴드 → 실제 레이아웃) · 병원별 DICOM 포트 실제 리스닝 인프라(병원별 Orthanc/DICOM 라우터) · Client 좌석 접속 실시간 연동 · 가입 결재 실연동 · Cornerstone 스택 렌더 · OCR 현장 튜닝
+- [ ] 남은 것(차기): 병원별 DICOM 포트 실제 리스닝 인프라(병원별 Orthanc/DICOM 라우터) · Client 좌석 접속 실시간 연동 · 가입 결재 실연동 · Cornerstone 스택 렌더 · OCR 현장 튜닝
 - 실행: `docker compose -f deploy/docker-compose.yml up -d` (db+orthanc+**OHIF:3000**) → `cd backend && py -3.11 -m uvicorn app.main:app` → `cd frontend && npm run dev` (admin/admin1234, 운영 전 변경). DB 스키마는 `alembic upgrade head`
 - **작업 마무리 규칙:** 코드 작업이 끝나면(커밋 후) 항상 백엔드(uvicorn:8000)·프론트엔드(vite:5173)를 재실행해 변경이 반영된 상태로 마친다. 재실행 후 `/api/health`와 5173 응답을 확인할 것. ⚠ `backend/.env`가 `AI_MODE=live`이므로 하네스·일괄 테스트는 `SAINTVIEW_AI_MODE=mock` 강제 후 실행(실 API 비용).
 

@@ -118,12 +118,13 @@ def test_report_merge_guards(client, auth_headers):
 
 
 def test_mode_profiles_defaults_and_admin_edit(client, auth_headers):
-    # 설정이 없으면 기본 4종 노출
+    # 설정이 없으면 기본 4종 노출 (ty=현행 자체 뷰어, infi=신규 뷰어 레이아웃 저장소)
     r = client.get("/api/settings/mode.profiles", headers=auth_headers)
     assert r.status_code == 200
     profs = r.json()["value"]["profiles"]
-    assert set(profs) >= {"saintvidw", "infinitt", "ubpacs", "sonic"}
-    assert profs["infinitt"]["viewer"]["paletteSide"] == "top"
+    assert set(profs) >= {"saintvidw", "ty", "infi", "sonic"}
+    assert profs["ty"]["viewer"]["client_viewer"] == "ty"
+    assert profs["infi"]["viewer"]["client_viewer"] == "infi"
 
     # user scope 저장 거부(전역 전용)
     assert client.put("/api/settings/mode.profiles", headers=auth_headers,
