@@ -393,6 +393,22 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
           <span>{m || "(없음)"}</span><span style={{ fontSize: 11 }}>{n}</span>
         </div>
       ))}
+      {/* INFINITT Guide ⑦ Favorites — 저장된 검색 바로가기(★저장) 원클릭 적용 */}
+      <div style={{
+        fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
+        padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
+      }}>
+        Favorites
+      </div>
+      {(JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]") as { label: string }[]).map((s) => (
+        <div key={s.label}
+             onClick={() => window.dispatchEvent(new CustomEvent("sv-apply-shortcut", { detail: s }))}
+             title="저장된 검색조건 적용 (툴바 ★저장으로 등록)"
+             style={{ padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+                      color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          ⭐ {s.label}
+        </div>
+      ))}
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
         padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,

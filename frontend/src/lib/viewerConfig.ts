@@ -5,7 +5,7 @@
  *  available=false 면 설정 콤보에서 비활성(개발 중) 표시. */
 export const CLIENT_VIEWERS: { id: string; label: string; desc: string; available: boolean }[] = [
   { id: "ty", label: "TY Viewer", desc: "자체 Client 뷰어 (현행 — 세로 팔레트·2단 썸네일)", available: true },
-  { id: "infi", label: "In Viewer", desc: "INFINITT 스타일 뷰어 — 구성 등록 완료(lib/infiConfig.ts, 분석: docs/ANALYSIS_INFINITT_파일정밀분석.md), 화면 개발 중", available: false },
+  { id: "infi", label: "In Viewer", desc: "INFINITT 스타일 뷰어 v1 — 세로 툴바·격자 1x1~4x4·우드래그 W/L·Auto Sync·Combine Series (User Guide 기반)", available: true },
 ];
 export const DEFAULT_CLIENT_VIEWER = "ty";
 
