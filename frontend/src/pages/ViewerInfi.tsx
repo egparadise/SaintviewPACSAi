@@ -157,6 +157,10 @@ export function ViewerInfi({ detail, onClose }: {
   // 과거검사(Related Exam) 시리즈 — Sync With Other Exams 용 (클릭 시 로드)
   const [priorSeries, setPriorSeries] = useState<{ uid: string; label: string; s: SeriesNode }[]>([]);
   const [priorLoaded, setPriorLoaded] = useState<Set<number>>(new Set());
+  // 검사 누적(원본 Exam 탭) — 워크리스트가 sv_viewer 창을 재사용해 URL 교체하므로,
+  // 열린 검사 id 를 localStorage 에 누적하고 각 검사를 오른쪽 페인으로 배치한다
+  const [exams, setExams] = useState<{ d: StudyDetail; series: SeriesNode[] }[]>([]);
+  const [activeExam, setActiveExam] = useState(0);
   const [sLayout, setSLayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
   const [panes, setPanes] = useState<Pane[]>([initPane()]);
   const [active, setActive] = useState(0);
@@ -177,27 +181,62 @@ export function ViewerInfi({ detail, onClose }: {
   const [pend, setPend] = useState<{ sop: string; pts: { x: number; y: number }[] } | null>(null);
   const drag = useRef<{ x: number; y: number; btn: number; pane: number } | null>(null);
 
-  const wlPresets = detail.modality === "MR" ? IN_WL_PRESETS_MR : IN_WL_PRESETS_CT;
   const tilesOf = (p?: Pane) => (p ? p.il.r * p.il.c : 1);
 
-  const loadSeries = useCallback(() => {
-    api.seriesTree(detail.id).then((r) => {
-      setSeries(r.series);
-      setPanes((ps) => {
-        if (ps[0]?.series) return ps;
-        const next = [...ps];
-        next[0] = { ...initPane(detail.study_uid), series: r.series[0] ?? null };
-        return next;
-      });
-      const first = r.series[0];
-      if (first && ["CT", "MR"].includes(first.modality) && first.instances.length >= 9) {
-        // 기본 행잉: 첫 페인 Image Layout 3x3 (원본 CT 화면)
-        setPanes((ps) => ps.map((p, k) =>
-          k === 0 && p.il.r * p.il.c === 1 ? { ...p, il: { r: 3, c: 3 } } : p));
-      }
+  const EXAMS_KEY = "sv_infi_exams";
+  useEffect(() => {
+    let ids: number[] = [];
+    try { ids = JSON.parse(localStorage.getItem(EXAMS_KEY) ?? "[]"); } catch { /* 초기화 */ }
+    if (!ids.includes(detail.id)) ids.push(detail.id);
+    localStorage.setItem(EXAMS_KEY, JSON.stringify(ids));
+    Promise.all(ids.map(async (id) => {
+      const d = id === detail.id ? detail : await api.study(id);
+      const t = await api.seriesTree(id);
+      return { d, series: t.series };
+    })).then((list) => {
+      setExams(list);
+      const ai = Math.max(0, list.findIndex((e) => e.d.id === detail.id));
+      setActiveExam(ai);
+      setSeries(list[ai]?.series ?? []);
+      // 새 검사는 오른쪽으로 — 검사 수만큼 Series 페인 확장, 각 페인에 각 검사의 첫 시리즈
+      const n = Math.max(1, list.length);
+      const c = Math.min(n, 4), r = Math.ceil(n / c);
+      setSLayout({ r, c });
+      setPanes(Array.from({ length: r * c }, (_, i) => {
+        const ex = list[i];
+        const p = ex ? { ...initPane(ex.d.study_uid), series: ex.series[0] ?? null } : initPane();
+        if (ex && list.length === 1 && ["CT", "MR"].includes(ex.d.modality)
+            && (ex.series[0]?.instances.length ?? 0) >= 9) {
+          p.il = { r: 3, c: 3 };   // 단독 CT/MR 기본 행잉 (원본)
+        }
+        return p;
+      }));
+      setActive(ai);
     }).catch(() => {});
-  }, [detail.id]);
-  useEffect(loadSeries, [loadSeries]);
+  }, [detail]);
+  // Refresh Exam — 활성 검사 시리즈 재로드
+  const loadSeries = () => {
+    const ex = exams[activeExam];
+    if (!ex) return;
+    api.seriesTree(ex.d.id).then((t) => {
+      setSeries(t.series);
+      setExams((es) => es.map((e, i) => (i === activeExam ? { ...e, series: t.series } : e)));
+    }).catch(() => {});
+  };
+  // 검사 닫기 — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
+  const closeExam = (i: number) => {
+    const remain = exams.filter((_, k) => k !== i).map((e) => e.d.id);
+    localStorage.setItem(EXAMS_KEY, JSON.stringify(remain));
+    if (!remain.length) {
+      gotoWorklist();
+      window.close();
+      onClose();
+    } else {
+      location.search = `?viewer=2d&study=${remain[remain.length - 1]}`;
+    }
+  };
+  const curD = exams[activeExam]?.d ?? detail;
+  const wlPresets = curD.modality === "MR" ? IN_WL_PRESETS_MR : IN_WL_PRESETS_CT;
 
   const applySLayout = (l: { r: number; c: number }) => {
     setSLayout(l);
@@ -342,9 +381,9 @@ export function ViewerInfi({ detail, onClose }: {
     const all: InstanceNode[] = series.flatMap((s) => s.instances);
     if (!all.length) return;
     upd(active, {
-      series: { series_uid: series[0].series_uid, modality: detail.modality,
+      series: { series_uid: series[0].series_uid, modality: curD.modality,
                 series_desc: `[Combine] ${series.length} series`, series_number: 0, instances: all },
-      index: 0,
+      index: 0, studyUid: curD.study_uid,
     });
   };
 
@@ -352,7 +391,7 @@ export function ViewerInfi({ detail, onClose }: {
   const nav = async (dir: number) => {
     try {
       const r = await api.worklist({});
-      const idx = r.items.findIndex((it) => it.id === detail.id);
+      const idx = r.items.findIndex((it) => it.id === curD.id);
       const nxt = idx >= 0 ? r.items[idx + dir] : undefined;
       if (nxt) location.search = `?viewer=2d&study=${nxt.id}`;
       else say(dir < 0 ? "워크리스트에 위 검사가 없습니다" : "워크리스트에 아래 검사가 없습니다");
@@ -366,8 +405,8 @@ export function ViewerInfi({ detail, onClose }: {
   // Report 버튼(§3.1) — 현재 검사 판독 도크
   useEffect(() => {
     if (!reportDock) return;
-    api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => setReport(null));
-  }, [reportDock, detail.id]);
+    api.reports(curD.id).then((r) => setReport(r.items[0] ?? null)).catch(() => setReport(null));
+  }, [reportDock, curD.id]);
 
   const paneIdxs = maximized !== null ? [maximized] : panes.map((_, i) => i);
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
@@ -378,7 +417,7 @@ export function ViewerInfi({ detail, onClose }: {
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
       <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
       {series.map((s) => (
-        <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: detail.study_uid })}
+        <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: curD.study_uid })}
              title={`Se${s.series_number} · ${s.series_desc}`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
                       border: panes[active]?.series?.series_uid === s.series_uid
@@ -391,7 +430,7 @@ export function ViewerInfi({ detail, onClose }: {
           </div>
         </div>
       ))}
-      {(detail.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
+      {(curD.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
         <button key={re.id} onClick={() => loadPrior(re.id, re.study_uid, re.study_date)}
                 title={`과거검사 열기 — ${re.modality} ${re.study_desc}`}
                 style={{ fontSize: 10, color: "#facc15" }}>
@@ -453,22 +492,36 @@ export function ViewerInfi({ detail, onClose }: {
           ◈ Saintview <span style={{ color: "var(--accent)" }}>In Viewer</span>
         </b>
         <span style={{ lineHeight: 1.2 }}>
-          <span style={{ color: "#facc15" }}>{detail.patient_key}</span>{" "}
-          <span style={{ color: "#4ade80" }}>{detail.patient_name}</span>{" "}
-          <span>[{detail.sex}]</span>
+          <span style={{ color: "#facc15" }}>{curD.patient_key}</span>{" "}
+          <span style={{ color: "#4ade80" }}>{curD.patient_name}</span>{" "}
+          <span>[{curD.sex}]</span>
         </span>
-        <span title="현재 열린 검사(Exam 탭)"
-              style={{ border: "1px solid var(--accent)", borderRadius: 4, padding: "1px 8px",
-                       background: "var(--bg-elevated)", fontSize: 10.5, lineHeight: 1.25 }}>
-          {detail.modality}(Original)<br />{detail.study_date} {(detail.study_desc ?? "").slice(0, 20)}
-        </span>
+        {/* Exam 탭 — 연 검사들이 오른쪽으로 누적. 클릭=활성 전환, ✕=그 검사만 닫기 */}
+        {exams.map((e, i) => (
+          <span key={e.d.id} title={`${e.d.patient_name} · ${e.d.study_desc}`}
+                onClick={() => {
+                  setActiveExam(i);
+                  setSeries(e.series);
+                  const pi = panes.findIndex((p) => p.studyUid === e.d.study_uid);
+                  if (pi >= 0) setActive(pi);
+                }}
+                style={{ border: `1px solid ${i === activeExam ? "var(--accent)" : "var(--border)"}`,
+                         borderRadius: 4, padding: "1px 8px", cursor: "pointer",
+                         background: i === activeExam ? "var(--bg-elevated)" : "transparent",
+                         fontSize: 10.5, lineHeight: 1.25 }}>
+            {e.d.modality}(Original) {e.d.patient_name}<br />
+            {e.d.study_date} {(e.d.study_desc ?? "").slice(0, 14)}
+            <span onClick={(ev) => { ev.stopPropagation(); closeExam(i); }}
+                  title="이 검사 닫기" style={{ marginLeft: 6, color: "var(--stat-emergency)" }}>✕</span>
+          </span>
+        ))}
       </div>
 
       {/* ── 정보바 ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 10px",
                     background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)", fontSize: 12, flexShrink: 0 }}>
         <span style={{ color: "#4ade80" }}>
-          Examined, {detail.study_date}, {detail.patient_name}, {detail.patient_key}
+          Examined, {curD.study_date}, {curD.patient_name}, {curD.patient_key}
         </span>
         <span style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 10 }}>
           Series
@@ -565,8 +618,10 @@ export function ViewerInfi({ detail, onClose }: {
             {closeMenu && (
               <div style={{ position: "absolute", left: 0, top: "105%", zIndex: 30, background: "var(--bg-elevated)",
                             border: "1px solid var(--border)", borderRadius: 4, minWidth: 150, fontSize: 11.5 }}>
-                {[["현재 검사 닫기", () => { gotoWorklist(); onClose(); }],
-                  ["모든 검사 닫기", () => { gotoWorklist(); window.close(); }]].map(([label, fn]) => (
+                {[["현재 검사 닫기", () => closeExam(activeExam)],
+                  ["모든 검사 닫기", () => {
+                    localStorage.removeItem(EXAMS_KEY); gotoWorklist(); window.close(); onClose();
+                  }]].map(([label, fn]) => (
                   <div key={label as string} onClick={fn as () => void}
                        style={{ padding: "5px 8px", cursor: "pointer" }}>{label as string}</div>
                 ))}
@@ -633,9 +688,11 @@ export function ViewerInfi({ detail, onClose }: {
                              measureClick(e, e.currentTarget, p, inst);
                            }
                          }}>
-                      {p.series && inst ? (
+                      {p.series && inst ? (() => {
+                        const pd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+                        return (
                         <>
-                          <img src={instUrl(p.studyUid || detail.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
+                          <img src={instUrl(p.studyUid || pd.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
                                style={{ position: "absolute", inset: 0, width: "100%", height: "100%",
                                         objectFit: "contain",
                                         transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
@@ -644,12 +701,13 @@ export function ViewerInfi({ detail, onClose }: {
                                     annos={annos[inst.sop_uid] ?? []}
                                     pend={pend?.sop === inst.sop_uid ? pend.pts : []}
                                     scout={scoutFor(inst, p.series.series_uid)} />
-                          <div style={ovl("tl")}>{detail.patient_name}<br />{detail.patient_key}</div>
-                          <div style={ovl("tr")}>{detail.modality} {detail.study_date}</div>
+                          <div style={ovl("tl")}>{pd.patient_name}<br />{pd.patient_key}</div>
+                          <div style={ovl("tr")}>{pd.modality} {pd.study_date}</div>
                           <div style={ovl("bl")}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
                           <div style={ovl("br")}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
                         </>
-                      ) : p.series ? null : (
+                        );
+                      })() : p.series ? null : (
                         <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12 }}>
                           상단 썸네일에서 시리즈 선택
                         </div>
@@ -686,7 +744,7 @@ export function ViewerInfi({ detail, onClose }: {
           <div style={{ width: 280, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
                         padding: 10, overflowY: "auto", fontSize: 12, flexShrink: 0 }}>
             <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>
-              Report — {detail.modality} {detail.study_date}
+              Report — {curD.modality} {curD.study_date}
             </div>
             {report ? (
               <>
