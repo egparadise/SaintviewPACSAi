@@ -2164,6 +2164,15 @@ export function Worklist() {
 
   const emergencyCount = useMemo(() => items.filter((i) => i.emergency).length, [items]);
 
+  // In 모드 워크리스트 배치 — 선택 뷰어(viewer.prefs.client_viewer)=infi 면 INFINITT 원본 7구역 배치,
+  // ty 면 현행(TY) 배치 유지. 설정 저장/⟳Refresh 시 refreshKey 로 즉시 재적용.
+  const [infiMode, setInfiMode] = useState(false);
+  useEffect(() => {
+    api.getSetting("viewer.prefs").then((r) => {
+      setInfiMode((r.value as { client_viewer?: string }).client_viewer === "infi");
+    }).catch(() => {});
+  }, [refreshKey]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
       {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환 */}
@@ -2202,7 +2211,49 @@ export function Worklist() {
         </div>
       )}
 
-      {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 — 좌우 스플리터 */}
+      {/* ── In 모드 배치 (INFINITT Worklist 원본 7구역): 좌열=⑦Search Filter+⑤Preview,
+             우열=③Study Grid→④Related Exam→⑥Report. ①툴바/②검색콤보는 상단 공용 ── */}
+      {infiMode && (
+        <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 3, padding: 3 }}>
+          <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", gap: 3, flexShrink: 0, minHeight: 0 }}>
+            <div style={{ flex: 1.1, minHeight: 0, overflow: "auto", display: "flex" }}>
+              <SearchRail width={sizes.railW} active={datePreset}
+                          mods={modCounts} activeMod={filters.modality ?? ""}
+                          onMod={(m) => setFilters((f) => ({ ...f, modality: m }))}
+                          onPick={(key, from) => {
+                            setDatePreset(key);
+                            setFilters((f) => ({ ...f, tree_from: from, date_from_iso: "", date_to_iso: "" }));
+                          }} tree={
+                <FolderTreeEditor nodes={treeNodes} onChange={onTreeChange}
+                                  selectedId={selNodeId} onSelect={applyFolder} applyHint />
+              } />
+            </div>
+            {/* ⑤ Preview — 선택 검사 미리보기 (원본 좌하단 흑배경) */}
+            <div style={{ flex: 1, minHeight: 0, background: "#000", border: "1px solid var(--border)",
+                          borderRadius: 4, overflow: "hidden", display: "flex" }}>
+              <ThumbnailPanel detail={selected} onOpen={() => void doAction("viewdraft")} />
+            </div>
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 2.2, minHeight: 0, display: "flex" }}>
+              <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
+                         onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
+                         onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
+            </div>
+            <div style={{ height: 108, flexShrink: 0, display: "flex" }}>
+              <PriorStudiesGrid detail={selected}
+                                onAddCompare={(e) => setCompareSet((prev) =>
+                                  prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+            </div>
+            <div style={{ flex: 1.6, minHeight: 0, display: "flex" }}>
+              <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} onNav={navPatient} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 — 좌우 스플리터 (TY 배치) */}
+      {!infiMode && (
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
         <SearchRail width={sizes.railW} active={datePreset}
                     mods={modCounts} activeMod={filters.modality ?? ""}
@@ -2220,13 +2271,14 @@ export function Worklist() {
                    onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                    onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
       </div>
+      )}
 
       {/* 하단1 (UBPACS p.8): Order | Related Study List-1 | Related Study List-2 — 드래그 재배치 + 상하 스플리터 */}
-      {panelOrder.d.some((k) => panelsOn[k]) && (
+      {!infiMode && panelOrder.d.some((k) => panelsOn[k]) && (
         <Splitter dir="h" onEnd={persistSizes}
                   onDrag={(dy) => setSizes((s) => ({ ...s, dH: clampSz(s.dH - dy, 80, 420) }))} />
       )}
-      {panelOrder.d.some((k) => panelsOn[k]) && (
+      {!infiMode && panelOrder.d.some((k) => panelsOn[k]) && (
         <div style={{ display: "flex", gap: 3, height: sizes.dH, padding: "3px 3px 0", flexShrink: 0 }}>
           {panelOrder.d.filter((k) => panelsOn[k]).map((k) => (
             <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
@@ -2246,11 +2298,11 @@ export function Worklist() {
       )}
 
       {/* 하단2 (UBPACS p.8): Thumbnail | Reference(상용구) | Comment+MEMO | Report — 드래그 재배치 + 스플리터 */}
-      {panelOrder.e.some((k) => panelsOn[k]) && (
+      {!infiMode && panelOrder.e.some((k) => panelsOn[k]) && (
         <Splitter dir="h" onEnd={persistSizes}
                   onDrag={(dy) => setSizes((s) => ({ ...s, eH: clampSz(s.eH - dy, 140, 640) }))} />
       )}
-      {panelOrder.e.some((k) => panelsOn[k]) && (
+      {!infiMode && panelOrder.e.some((k) => panelsOn[k]) && (
         <div style={{ display: "flex", gap: 3, height: sizes.eH, flexShrink: 0, padding: 3 }}>
           {(() => {
             const arr = panelOrder.e.filter((k) => panelsOn[k]);
