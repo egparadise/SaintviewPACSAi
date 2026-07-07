@@ -11,16 +11,53 @@ import { IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } fr
 
 interface Pane {
   series: SeriesNode | null;
+  studyUid: string;          // 페인의 검사 소속 — Sync With Other Exams 판별(과거검사 비교)
   index: number;
   zoom: number; tx: number; ty: number; rot: number;
   flipH: boolean; flipV: boolean; invert: boolean;
   wl: string;
   fx: "" | "sharpen" | "smooth" | "pseudo";   // p.13 필터(Sharpens/Average/Pseudo)
 }
-const initPane = (): Pane => ({
-  series: null, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
+const initPane = (studyUid = ""): Pane => ({
+  series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
   flipH: false, flipV: false, invert: false, wl: "", fx: "",
 });
+
+/* ── Scout line 기하 — DICOM ImagePosition/Orientation 으로 소스 이미지의 절단선을
+      타깃 이미지 픽셀좌표에 투영 (§3.3 ④⑤ Scout Line / All Lines) ── */
+type V3 = number[];
+const vsub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vdot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vcross = (a: V3, b: V3): V3 =>
+  [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+interface Geom { pos: V3; row: V3; col: V3; rs: number; cs: number; n: V3; rows: number; cols: number }
+function geomOf(inst: InstanceNode): Geom | null {
+  if (inst.position?.length !== 3 || inst.orientation?.length !== 6 || inst.pixel_spacing?.length !== 2) return null;
+  const row = inst.orientation.slice(0, 3), col = inst.orientation.slice(3, 6);
+  return { pos: inst.position, row, col, rs: inst.pixel_spacing[0], cs: inst.pixel_spacing[1],
+           n: vcross(row, col), rows: inst.rows || 1, cols: inst.cols || 1 };
+}
+/** 소스 평면(src)의 이미지 사각형을 타깃(tgt) 픽셀좌표에 투영 → 절단선 세그먼트. 평행 평면이면 null */
+function scoutSegment(src: Geom, tgt: Geom): { x1: number; y1: number; x2: number; y2: number } | null {
+  const nA = Math.hypot(...src.n), nB = Math.hypot(...tgt.n);
+  if (Math.abs(vdot(src.n, tgt.n) / (nA * nB)) > 0.98) return null;   // 평행 → 절단선 없음
+  const corner = (r: number, c: number): V3 => [
+    src.pos[0] + src.row[0] * src.cs * c + src.col[0] * src.rs * r,
+    src.pos[1] + src.row[1] * src.cs * c + src.col[1] * src.rs * r,
+    src.pos[2] + src.row[2] * src.cs * c + src.col[2] * src.rs * r,
+  ];
+  const pts = [corner(0, 0), corner(0, src.cols - 1), corner(src.rows - 1, 0), corner(src.rows - 1, src.cols - 1)]
+    .map((q) => {
+      const d = vsub(q, tgt.pos);
+      return { x: vdot(d, tgt.row) / tgt.cs, y: vdot(d, tgt.col) / tgt.rs };
+    });
+  let best: [number, number] = [0, 1], bd = -1;
+  for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+    const d = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y);
+    if (d > bd) { bd = d; best = [i, j]; }
+  }
+  return { x1: pts[best[0]].x, y1: pts[best[0]].y, x2: pts[best[1]].x, y2: pts[best[1]].y };
+}
 
 function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string): string {
   const q = wl ? `?window=${wl},linear` : "";
@@ -107,6 +144,9 @@ export function ViewerInfi({ detail, onClose }: {
   withOpen?: { mode: "add" | "stack"; ids: number[] } | null;
 }) {
   const [series, setSeries] = useState<SeriesNode[]>([]);
+  // 과거검사(Related Exam) 시리즈 — Sync With Other Exams 용 (클릭 시 로드)
+  const [priorSeries, setPriorSeries] = useState<{ uid: string; label: string; s: SeriesNode }[]>([]);
+  const [priorLoaded, setPriorLoaded] = useState<Set<number>>(new Set());
   const [sLayout, setSLayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
   const [iLayout, setILayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
   const [panes, setPanes] = useState<Pane[]>([initPane()]);
@@ -116,7 +156,9 @@ export function ViewerInfi({ detail, onClose }: {
   const [cine, setCine] = useState(false);
   const [closeMenu, setCloseMenu] = useState(false);
   const [wlPanel, setWlPanel] = useState(false);
-  const [xlink, setXlink] = useState<Record<string, boolean>>({ auto_sync: true });
+  // §3.3 Crosslink 5기능 — 전부 동작: crosslink=마스터, auto_sync=같은 검사, sync_other=다른 검사(과거),
+  // scout=활성 페인 현재 이미지 절단선, all_lines=활성 시리즈 전체 절단선
+  const [xlink, setXlink] = useState<Record<string, boolean>>({ crosslink: true, auto_sync: true, scout: true });
   const [toast, setToast] = useState("");
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
   const [annos, setAnnos] = useState<Record<string, Anno2[]>>({});
@@ -132,7 +174,7 @@ export function ViewerInfi({ detail, onClose }: {
       setPanes((ps) => {
         if (ps[0]?.series) return ps;
         const next = [...ps];
-        next[0] = { ...initPane(), series: r.series[0] ?? null };
+        next[0] = { ...initPane(detail.study_uid), series: r.series[0] ?? null };
         return next;
       });
       const first = r.series[0];
@@ -147,7 +189,15 @@ export function ViewerInfi({ detail, onClose }: {
     setSLayout(l);
     setMaximized(null);
     setPanes((ps) => Array.from({ length: l.r * l.c }, (_, i) =>
-      ps[i] ?? { ...initPane(), series: series[i % Math.max(series.length, 1)] ?? null }));
+      ps[i] ?? { ...initPane(detail.study_uid), series: series[i % Math.max(series.length, 1)] ?? null }));
+  };
+  // 과거검사 시리즈 로드 (Related Exam 버튼)
+  const loadPrior = (reId: number, uid: string, label: string) => {
+    if (priorLoaded.has(reId)) return;
+    api.seriesTree(reId).then((r) => {
+      setPriorLoaded((s) => new Set(s).add(reId));
+      setPriorSeries((ps) => [...ps, ...r.series.map((s) => ({ uid, label, s }))]);
+    }).catch(() => {});
   };
   const upd = useCallback((i: number, patch: Partial<Pane>) => {
     setPanes((ps) => ps.map((p, k) => (k === i ? { ...p, ...patch } : p)));
@@ -155,12 +205,14 @@ export function ViewerInfi({ detail, onClose }: {
 
   const scroll = useCallback((i: number, delta: number) => {
     setPanes((ps) => ps.map((p, k) => {
-      const target = k === i || (xlink.auto_sync && p.series);
-      if (!target || !p.series) return p;
+      // §3.3: crosslink 마스터 ON 일 때 — auto_sync=같은 검사 페인, sync_other=다른 검사(과거) 페인 동기
+      const sameExam = p.studyUid === ps[i]?.studyUid;
+      const linked = xlink.crosslink && ((xlink.auto_sync && sameExam) || (xlink.sync_other && !sameExam));
+      if (!(k === i || (linked && p.series)) || !p.series) return p;
       const max = Math.max(0, p.series.instances.length - 1);
       return { ...p, index: Math.min(max, Math.max(0, p.index + delta)) };
     }));
-  }, [xlink.auto_sync]);
+  }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
 
   useEffect(() => {
     if (!cine) return;
@@ -206,7 +258,7 @@ export function ViewerInfi({ detail, onClose }: {
         const inst = p.series?.instances[p.index];
         if (p.series && inst) {
           const a = document.createElement("a");
-          a.href = instUrl(detail.study_uid, p.series, inst, p.wl);
+          a.href = instUrl(p.studyUid || detail.study_uid, p.series, inst, p.wl);
           a.download = "capture.png"; a.click();
         }
         break;
@@ -282,6 +334,26 @@ export function ViewerInfi({ detail, onClose }: {
   const paneIdxs = maximized !== null ? [maximized] : panes.map((_, i) => i);
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
 
+  // §3.3 ④⑤ Scout lines — 활성 페인 시리즈의 절단선을 다른 시리즈 타일에 투영
+  // (scout=현재 이미지 1선, all_lines=시리즈 전체. 같은 시리즈·평행 평면은 제외)
+  const scoutFor = (tileInst: InstanceNode, tileSeriesUid: string) => {
+    if (!xlink.scout && !xlink.all_lines) return [];
+    const act = panes[active];
+    if (!act?.series || act.series.series_uid === tileSeriesUid) return [];
+    const tg = geomOf(tileInst);
+    if (!tg) return [];
+    const srcs = xlink.all_lines ? act.series.instances
+      : act.series.instances[act.index] ? [act.series.instances[act.index]] : [];
+    const out: { x1: number; y1: number; x2: number; y2: number; current: boolean }[] = [];
+    srcs.forEach((si, k) => {
+      const sg = geomOf(si);
+      if (!sg) return;
+      const seg = scoutSegment(sg, tg);
+      if (seg) out.push({ ...seg, current: xlink.all_lines ? k === act.index : true });
+    });
+    return out;
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#000", color: "var(--text-secondary)" }}
          onContextMenu={(e) => e.preventDefault()} onMouseUp={endDrag} onMouseLeave={endDrag}>
@@ -298,7 +370,7 @@ export function ViewerInfi({ detail, onClose }: {
         <b style={{ color: "var(--text-primary)", fontSize: 12, flexShrink: 0 }}>In Viewer</b>
         <button onClick={combine} title="Combine Series" style={{ fontSize: 11, flexShrink: 0 }}>Combine</button>
         {series.map((s) => (
-          <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0 })}
+          <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: detail.study_uid })}
                title={`Se${s.series_number} · ${s.series_desc}`}
                style={{ flexShrink: 0, width: 76, cursor: "pointer", textAlign: "center", fontSize: 10,
                         border: panes[active]?.series?.series_uid === s.series_uid
@@ -308,6 +380,29 @@ export function ViewerInfi({ detail, onClose }: {
             )}
             <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
               {s.series_number}/{s.instances.length}
+            </div>
+          </div>
+        ))}
+        {/* 과거검사(Related Exam) — 클릭 로드 후 노란 테두리 썸네일, Sync With Other Exams 대상 */}
+        {(detail.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
+          <button key={re.id} onClick={() => loadPrior(re.id, re.study_uid, re.study_date)}
+                  title={`과거검사 열기 — ${re.modality} ${re.study_desc}`}
+                  style={{ fontSize: 10.5, flexShrink: 0, color: "#facc15" }}>
+            +{re.study_date} {re.modality}
+          </button>
+        ))}
+        {priorSeries.map((e) => (
+          <div key={`${e.uid}-${e.s.series_uid}`}
+               onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
+               title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}`}
+               style={{ flexShrink: 0, width: 76, cursor: "pointer", textAlign: "center", fontSize: 10,
+                        border: panes[active]?.series?.series_uid === e.s.series_uid
+                          ? "2px solid #facc15" : "1px solid #854d0e", borderRadius: 3, background: "#000" }}>
+            {e.s.instances[0] && (
+              <img src={e.s.instances[0].preview_url} alt="" style={{ width: "100%", height: 56, objectFit: "cover", display: "block" }} />
+            )}
+            <div style={{ color: "#facc15", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+              P·{e.label.slice(4)}
             </div>
           </div>
         ))}
@@ -352,9 +447,10 @@ export function ViewerInfi({ detail, onClose }: {
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
         <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
           {IN_CROSSLINK_MODES.map((m) => (
-            <label key={m.key} title={m.desc + (m.key === "auto_sync" ? "" : " (개발 예정)")}
-                   style={{ display: "flex", gap: 3, alignItems: "center", opacity: m.key === "auto_sync" ? 1 : 0.5 }}>
-              <input type="checkbox" checked={!!xlink[m.key]} disabled={m.key !== "auto_sync"}
+            <label key={m.key} title={m.desc}
+                   style={{ display: "flex", gap: 3, alignItems: "center",
+                            opacity: m.key === "crosslink" || xlink.crosslink || ["scout", "all_lines"].includes(m.key) ? 1 : 0.45 }}>
+              <input type="checkbox" checked={!!xlink[m.key]}
                      onChange={(e) => setXlink((x) => ({ ...x, [m.key]: e.target.checked }))} />
               {m.label}
             </label>
@@ -424,14 +520,15 @@ export function ViewerInfi({ detail, onClose }: {
                          }}>
                       {p.series && inst ? (
                         <>
-                          <img src={instUrl(detail.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
+                          <img src={instUrl(p.studyUid || detail.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
                                style={{ position: "absolute", inset: 0, width: "100%", height: "100%",
                                         objectFit: "contain",
                                         transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
                                         filter: paneFilter(p), userSelect: "none" }} />
                           <TileAnno inst={inst} pane={p}
                                     annos={annos[inst.sop_uid] ?? []}
-                                    pend={pend?.sop === inst.sop_uid ? pend.pts : []} />
+                                    pend={pend?.sop === inst.sop_uid ? pend.pts : []}
+                                    scout={scoutFor(inst, p.series.series_uid)} />
                           <div style={ovl("tl")}>{detail.patient_name}<br />{detail.patient_key}</div>
                           <div style={ovl("tr")}>{detail.modality} {detail.study_date}</div>
                           <div style={ovl("bl")}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
@@ -474,8 +571,9 @@ export function ViewerInfi({ detail, onClose }: {
 }
 
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
-function TileAnno({ inst, pane, annos, pend }: {
+function TileAnno({ inst, pane, annos, pend, scout = [] }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
+  scout?: { x1: number; y1: number; x2: number; y2: number; current: boolean }[];
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const [dim, setDim] = useState({ w: 0, h: 0 });
@@ -486,7 +584,7 @@ function TileAnno({ inst, pane, annos, pend }: {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  if (!annos.length && !pend.length) return <svg ref={ref} style={svgStyle} />;
+  if (!annos.length && !pend.length && !scout.length) return <svg ref={ref} style={svgStyle} />;
 
   const s0 = Math.min(dim.w / (inst.cols || 1), dim.h / (inst.rows || 1));
   const s = s0 * pane.zoom;
@@ -506,6 +604,14 @@ function TileAnno({ inst, pane, annos, pend }: {
 
   return (
     <svg ref={ref} style={svgStyle}>
+      {/* Scout lines — 현재 이미지 선은 진한 노랑, All Lines 는 가는 파랑 */}
+      {scout.map((sc, i) => (
+        <line key={`s${i}`}
+              x1={X({ x: sc.x1, y: sc.y1 })} y1={Y({ x: sc.x1, y: sc.y1 })}
+              x2={X({ x: sc.x2, y: sc.y2 })} y2={Y({ x: sc.x2, y: sc.y2 })}
+              stroke={sc.current ? "#facc15" : "#38bdf8"}
+              strokeWidth={sc.current ? 1.6 : 0.7} opacity={sc.current ? 1 : 0.65} />
+      ))}
       {annos.map((a, i) => a.kind === "line" ? (
         <g key={i} stroke="#facc15" strokeWidth={1.5} fill="none">
           <line x1={X(a.pts[0])} y1={Y(a.pts[0])} x2={X(a.pts[1])} y2={Y(a.pts[1])} />
