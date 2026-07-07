@@ -144,6 +144,53 @@ export const IN_SHORTCUTS: { key: string; action: string }[] = [
   { key: "Space", action: "Cine 재생" },
 ];
 
+/** 검사 상태 12단계 — User Guide p.5 "Exam Status of INFINITT Pacs server" */
+export const IN_EXAM_STATUSES: { key: string; label: string; desc: string; color: string }[] = [
+  { key: "examined", label: "Examined", desc: "Unread exam (미판독)", color: "#94a3b8" },
+  { key: "verified", label: "Verified", desc: "After changes saved", color: "#a78bfa" },
+  { key: "dictating", label: "Dictating", desc: "After voice recording (녹음 중)", color: "#f472b6" },
+  { key: "dictated", label: "Dictated", desc: "After voice recorded", color: "#fb923c" },
+  { key: "transcribing", label: "Transcribing", desc: "After reporting (작성 중)", color: "#38bdf8" },
+  { key: "transcribed", label: "Transcribed", desc: "After reported", color: "#eab308" },
+  { key: "approved", label: "Approved", desc: "Confirmed report by Approver", color: "#4ade80" },
+  { key: "add_dictating", label: "Addendum Dictating", desc: "추가판독 녹음 중", color: "#f472b6" },
+  { key: "add_dictated", label: "Addendum Dictated", desc: "추가판독 녹음 완료", color: "#fb923c" },
+  { key: "add_transcribing", label: "Addendum Transcribing", desc: "추가판독 작성 중", color: "#38bdf8" },
+  { key: "add_transcribed", label: "Addendum Transcribed", desc: "추가판독 작성 완료", color: "#eab308" },
+  { key: "add_approved", label: "Addendum Approved", desc: "추가판독 승인", color: "#22c55e" },
+];
+
+/** Saintview 상태 → INFINITT 상태 매핑 (워크리스트 상태 배지 색·툴팁) */
+export const IN_STATUS_MAP: Record<string, string> = {
+  received: "examined",
+  draft_ready: "transcribed",
+  reading: "transcribing",
+  draft: "dictated",
+  in_review: "verified",
+  finalized: "approved",
+};
+
+/** Crosslink 5모드 — User Guide §3.3 */
+export const IN_CROSSLINK_MODES = [
+  { key: "crosslink", label: "Crosslink", desc: "다중 이미지 동기" },
+  { key: "auto_sync", label: "Auto Sync", desc: "같은 검사 시리즈 동기" },
+  { key: "sync_other", label: "Sync With Other Exams", desc: "같은 환자 과거검사와 동기" },
+  { key: "scout", label: "Scout Line", desc: "참조선 표시" },
+  { key: "all_lines", label: "All Lines", desc: "활성 시리즈의 모든 참조선" },
+];
+
+/** 마우스 조작 — User Guide §3.5 (우드래그=기본 도구(W/L), 더블클릭=최대화) */
+export const IN_MOUSE_OPS = [
+  { key: "lclick", action: "이미지/객체 선택" },
+  { key: "ctrl_lclick", action: "다중 선택" },
+  { key: "shift_lclick", action: "연속 다중 선택 · MPR Zoom In" },
+  { key: "ldrag", action: "툴바 지정 도구 실행" },
+  { key: "dblclick", action: "이미지 최대화/해제" },
+  { key: "rclick", action: "컨텍스트 메뉴" },
+  { key: "rdrag", action: "기본 지정 도구(W/L)" },
+  { key: "ctrl_wheel", action: "Zoom in/out" },
+];
+
 /** INFINITT 라이트 테마 토큰 — piviewskin.ini 실측(보조 테마, 기본은 다크) */
 export const IN_LIGHT_THEME = {
   dialogBk: "rgb(114,130,139)",

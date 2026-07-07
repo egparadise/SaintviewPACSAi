@@ -47,6 +47,7 @@ import {
 } from "./WorklistTree";
 
 import { GridPicker } from "../lib/GridPicker";
+import { IN_EXAM_STATUSES, IN_STATUS_MAP } from "../lib/infiConfig";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
@@ -76,7 +77,18 @@ const STATUS_LABEL: Record<string, string> = {
   suspended: "보류", draft: "초안", in_review: "검토중",
 };
 function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${status}`}>{STATUS_LABEL[status] ?? status}</span>;
+  // INFINITT User Guide p.5 Exam Status 매핑 — 색 점 + 툴팁으로 등가 상태 표기
+  const inSt = IN_EXAM_STATUSES.find((s) => s.key === IN_STATUS_MAP[status]);
+  return (
+    <span className={`badge ${status}`}
+          title={inSt ? `${inSt.label} — ${inSt.desc}` : undefined}>
+      {inSt && <span style={{
+        display: "inline-block", width: 7, height: 7, borderRadius: 4,
+        background: inSt.color, marginRight: 4, verticalAlign: "middle",
+      }} />}
+      {STATUS_LABEL[status] ?? status}
+    </span>
+  );
 }
 
 /* ── 컬럼 정의 (F-8: 설정에서 구성 가능) ──────────── */
@@ -325,9 +337,11 @@ const DATE_PRESETS = [
   { key: "1m", label: "최근 1개월", days: 30 },
   { key: "all", label: "전체", days: -1 },
 ];
-function SearchRail({ active, onPick, tree, width }: {
+function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
   active: string; onPick: (key: string, from: string) => void; tree: React.ReactNode; width: number;
+  mods: Record<string, number>; activeMod: string; onMod: (m: string) => void;
 }) {
+  const total = Object.values(mods).reduce((a, b) => a + b, 0);
   const pick = (p: { key: string; days: number }) => {
     if (p.days < 0) return onPick(p.key, "");
     const d = new Date();
@@ -350,6 +364,33 @@ function SearchRail({ active, onPick, tree, width }: {
                color: active === p.key ? "var(--text-primary)" : "var(--text-secondary)",
              }}>
           {p.label}
+        </div>
+      ))}
+      {/* INFINITT User Guide p.5 ⑦ Search Filter — 모달리티 트리 */}
+      <div style={{
+        fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
+        padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
+      }}>
+        Search Filter
+      </div>
+      <div onClick={() => onMod("")}
+           style={{
+             padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+             display: "flex", justifyContent: "space-between",
+             background: activeMod === "" ? "var(--accent-subtle)" : undefined,
+             color: activeMod === "" ? "var(--text-primary)" : "var(--text-secondary)",
+           }}>
+        <span>📁 전체</span><span style={{ fontSize: 11 }}>{total}</span>
+      </div>
+      {Object.entries(mods).sort(([a], [b]) => a.localeCompare(b)).map(([m, n]) => (
+        <div key={m} onClick={() => onMod(activeMod === m ? "" : m)}
+             style={{
+               padding: "3px 8px 3px 18px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+               display: "flex", justifyContent: "space-between",
+               background: activeMod === m ? "var(--accent-subtle)" : undefined,
+               color: activeMod === m ? "var(--text-primary)" : "var(--text-secondary)",
+             }}>
+          <span>{m || "(없음)"}</span><span style={{ fontSize: 11 }}>{n}</span>
         </div>
       ))}
       <div style={{
@@ -1677,6 +1718,8 @@ export function Worklist() {
   // UBPACS-Z Study Open 5종 + Study With Open — 뷰어는 새 창(별도 웹페이지)으로 연다
   const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
+  // INFINITT Guide ⑦ Search Filter — 모달리티 카운트(모달리티 필터 미적용 시점의 분포 유지)
+  const [modCounts, setModCounts] = useState<Record<string, number>>({});
   const [nlPreview, setNlPreview] = useState<NlQueryResult | null>(null);
   const [nlBusy, setNlBusy] = useState(false);
   // 패널 배치 사용자화(드래그) — UBPACS-Z Worklist 구성(p.8):
@@ -1806,6 +1849,14 @@ export function Worklist() {
   useEffect(() => {
     api.worklist(queryParams).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => {});
   }, [queryParams, refreshKey]);
+
+  // Search Filter 모달리티 분포 — 모달리티 필터가 꺼진 결과에서만 갱신(필터 중 카운트 유지)
+  useEffect(() => {
+    if (filters.modality) return;
+    const c: Record<string, number> = {};
+    items.forEach((r) => { c[r.modality || ""] = (c[r.modality || ""] ?? 0) + 1; });
+    setModCounts(c);
+  }, [items, filters.modality]);
 
   useEffect(() => {
     if (!refreshSec) return;
@@ -2137,7 +2188,10 @@ export function Worklist() {
 
       {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 — 좌우 스플리터 */}
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
-        <SearchRail width={sizes.railW} active={datePreset} onPick={(key, from) => {
+        <SearchRail width={sizes.railW} active={datePreset}
+                    mods={modCounts} activeMod={filters.modality ?? ""}
+                    onMod={(m) => setFilters((f) => ({ ...f, modality: m }))}
+                    onPick={(key, from) => {
           setDatePreset(key);
           setFilters((f) => ({ ...f, tree_from: from, date_from_iso: "", date_to_iso: "" }));
         }} tree={
