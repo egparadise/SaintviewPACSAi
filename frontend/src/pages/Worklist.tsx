@@ -2173,11 +2173,69 @@ export function Worklist() {
     }).catch(() => {});
   }, [refreshKey]);
 
+  // In 모드 ① 상단 아이콘 툴바 (INFINITT 원본 13종) — 기존 doAction + 특수 동작 매핑
+  const infiTool = (act: string) => {
+    switch (act) {
+      case "import":  // Import DICOM — Orthanc 업로드 UI
+        window.open("http://localhost:8042/ui/app/#/upload", "_blank"); break;
+      case "csv": {   // Export — 현재 워크리스트를 CSV 로 (원본 Export result to file)
+        const rows = [
+          ["PatientID", "Name", "Sex", "Modality", "StudyDate", "Description", "Status"].join(","),
+          ...items.map((r) => [r.patient_key, r.patient_name, r.sex, r.modality, r.study_date,
+                               (r.study_desc ?? "").replaceAll(",", " "), r.status].join(",")),
+        ].join("\n");
+        const url = URL.createObjectURL(new Blob(["﻿" + rows], { type: "text/csv;charset=utf-8" }));
+        const a = document.createElement("a");
+        a.href = url; a.download = `worklist_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+        URL.revokeObjectURL(url);
+        break;
+      }
+      case "print": window.print(); break;
+      case "logout":
+        localStorage.removeItem("sv_token"); sessionStorage.removeItem("sv_token");
+        location.href = "/"; break;
+      default: void doAction(act);
+    }
+  };
+  const INFI_ICONS: { i: string; l: string; a: string }[] = [
+    { i: "🖥", l: "View — 선택 검사를 In Viewer 로 열기", a: "viewer2d" },
+    { i: "🌐", l: "Advanced View — OHIF 웹뷰어", a: "ub_adv" },
+    { i: "🧊", l: "3D — MPR/MIP 뷰어", a: "3d" },
+    { i: "⇄", l: "Compare — 과거검사 비교 열기", a: "compare" },
+    { i: "📥", l: "Import — DICOM 파일 업로드(Orthanc)", a: "import" },
+    { i: "📤", l: "Export — 워크리스트 CSV 내보내기", a: "csv" },
+    { i: "🖨", l: "Print — 화면 인쇄", a: "print" },
+    { i: "📄", l: "Report — 판독서 PDF 내려받기", a: "pdf" },
+    { i: "🤖", l: "AI — 초안 재생성", a: "regen" },
+    { i: "📋", l: "Batch — AI 일괄 검토 (B)", a: "batch" },
+    { i: "🚨", l: "Emergency 토글 (E)", a: "emergency" },
+    { i: "🔄", l: "Refresh — 목록 새로고침", a: "refresh" },
+    { i: "🚪", l: "Logout — 로그아웃", a: "logout" },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
       {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환 */}
       <WorklistTabsBar tabs={tabs} activeId={activeTabId}
                        onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)} />
+      {/* ── In 모드 ① 아이콘 툴바 (원본 우측 상단 13종) ── */}
+      {infiMode && (
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
+                      padding: "3px 10px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", gap: 2, padding: "2px 4px", border: "1px solid var(--border)",
+                        borderRadius: 5, background: "var(--bg-elevated)" }}>
+            {INFI_ICONS.map((t) => (
+              <button key={t.a} title={t.l} onClick={() => infiTool(t.a)}
+                      style={{ width: 32, height: 26, fontSize: 14, padding: 0, border: "none",
+                               background: "transparent", cursor: "pointer", borderRadius: 3 }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-subtle)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                {t.i}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
                      onSearch={() => setRefreshKey((k) => k + 1)}
