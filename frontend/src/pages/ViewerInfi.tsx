@@ -4,7 +4,10 @@
 //         B/W Inverse/Sharpen/Average/Pseudo/Auto Scroll/Calibrate/Measure 2D Line/Measure 2D Angle
 // 미구현(반투명): Magnification/3D Cursor/Dictation 계열/Select All 계열/Shutter 3종/CT Ratio/
 //         Limb Length/Center Line/Profile/2D Table/Spine Label/Volume/3D 주석/2D 주석·ROI 계열/Cobb/Marking/Lens
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+
+// Setting(p.12 'Open the setting window of Viewer') — 워크리스트 헤더의 설정과 동일한 설정 창
+const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
@@ -176,6 +179,10 @@ export function ViewerInfi({ detail, onClose }: {
   // §3.1 툴바 상단(원본): Report 도크 + Prev/Next 워크리스트 내비게이션
   const [reportDock, setReportDock] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
+  // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [role, setRole] = useState("user");
+  useEffect(() => { api.profile().then((p) => setRole(p.role)).catch(() => {}); }, []);
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
   const [annos, setAnnos] = useState<Record<string, Anno2[]>>({});
   const [pend, setPend] = useState<{ sop: string; pts: { x: number; y: number }[] } | null>(null);
@@ -647,10 +654,15 @@ export function ViewerInfi({ detail, onClose }: {
             })}
           </div>
           <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-            <button title="More (개발 예정)" style={{ fontSize: 10.5, opacity: 0.4 }}>More</button>
-            <button title="Setting — W/L Preset 패널 토글 (p.12 Setting)" onClick={() => setWlPanel((v) => !v)}
+            <button title="W/L Preset 패널 토글" onClick={() => setWlPanel((v) => !v)}
                     style={{ fontSize: 10.5, background: wlPanel ? "var(--accent)" : undefined,
                              color: wlPanel ? "#fff" : undefined }}>
+              W/L
+            </button>
+            <button title="Setting — 뷰어 설정 창 열기 (워크리스트의 설정과 동일)"
+                    onClick={() => setSettingsOpen(true)}
+                    style={{ fontSize: 10.5, background: settingsOpen ? "var(--accent)" : undefined,
+                             color: settingsOpen ? "#fff" : undefined }}>
               Setting
             </button>
           </div>
@@ -762,6 +774,18 @@ export function ViewerInfi({ detail, onClose }: {
           </div>
         )}
       </div>
+
+      {/* ── Setting — 앱 공통 설정 창 (워크리스트 '설정' 버튼과 동일 기능) ── */}
+      {settingsOpen && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center",
+                        background: "rgba(0,0,0,0.5)", zIndex: 100, color: "var(--text-secondary)" }}>
+            설정 로딩…
+          </div>
+        }>
+          <SettingsModal role={role} onClose={() => setSettingsOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }
