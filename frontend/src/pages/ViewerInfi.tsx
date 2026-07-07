@@ -5,7 +5,7 @@
 // 미구현(반투명): Magnification/3D Cursor/Dictation 계열/Select All 계열/Shutter 3종/CT Ratio/
 //         Limb Length/Center Line/Profile/2D Table/Spine Label/Volume/3D 주석/2D 주석·ROI 계열/Cobb/Marking/Lens
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
+import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 
@@ -169,6 +169,9 @@ export function ViewerInfi({ detail, onClose }: {
   // scout=활성 페인 현재 이미지 절단선, all_lines=활성 시리즈 전체 절단선
   const [xlink, setXlink] = useState<Record<string, boolean>>({ crosslink: true, auto_sync: true, scout: true });
   const [toast, setToast] = useState("");
+  // §3.1 툴바 상단(원본): Report 도크 + Prev/Next 워크리스트 내비게이션
+  const [reportDock, setReportDock] = useState(false);
+  const [report, setReport] = useState<Report | null>(null);
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
   const [annos, setAnnos] = useState<Record<string, Anno2[]>>({});
   const [pend, setPend] = useState<{ sop: string; pts: { x: number; y: number }[] } | null>(null);
@@ -345,8 +348,73 @@ export function ViewerInfi({ detail, onClose }: {
     });
   };
 
+  // Prev/Next(§3.1) — 워크리스트에서 현재 검사의 위/아래 검사를 이 창에서 열기
+  const nav = async (dir: number) => {
+    try {
+      const r = await api.worklist({});
+      const idx = r.items.findIndex((it) => it.id === detail.id);
+      const nxt = idx >= 0 ? r.items[idx + dir] : undefined;
+      if (nxt) location.search = `?viewer=2d&study=${nxt.id}`;
+      else say(dir < 0 ? "워크리스트에 위 검사가 없습니다" : "워크리스트에 아래 검사가 없습니다");
+    } catch { say("워크리스트 조회 실패"); }
+  };
+  // Worklist 버튼(§3.1) — 워크리스트 화면으로
+  const gotoWorklist = () => {
+    if (window.opener && !window.opener.closed) window.opener.focus();
+    else window.open("/", "_blank");
+  };
+  // Report 버튼(§3.1) — 현재 검사 판독 도크
+  useEffect(() => {
+    if (!reportDock) return;
+    api.reports(detail.id).then((r) => setReport(r.items[0] ?? null)).catch(() => setReport(null));
+  }, [reportDock, detail.id]);
+
   const paneIdxs = maximized !== null ? [maximized] : panes.map((_, i) => i);
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
+
+  // 좌측 세로 썸네일 열 (원본 이미지4 — 툴바 옆 세로 스택)
+  const thumbCol = (
+    <div style={{ width: 88, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
+                  overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+      <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
+      {series.map((s) => (
+        <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: detail.study_uid })}
+             title={`Se${s.series_number} · ${s.series_desc}`}
+             style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
+                      border: panes[active]?.series?.series_uid === s.series_uid
+                        ? "2px solid #4ade80" : "1px solid var(--border)", borderRadius: 3, background: "#000" }}>
+          {s.instances[0] && (
+            <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
+          )}
+          <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+            {s.series_number}/{s.instances.length}
+          </div>
+        </div>
+      ))}
+      {(detail.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
+        <button key={re.id} onClick={() => loadPrior(re.id, re.study_uid, re.study_date)}
+                title={`과거검사 열기 — ${re.modality} ${re.study_desc}`}
+                style={{ fontSize: 10, color: "#facc15" }}>
+          +{re.study_date.slice(4)} {re.modality}
+        </button>
+      ))}
+      {priorSeries.map((e) => (
+        <div key={`${e.uid}-${e.s.series_uid}`}
+             onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
+             title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}`}
+             style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
+                      border: panes[active]?.series?.series_uid === e.s.series_uid
+                        ? "2px solid #facc15" : "1px solid #854d0e", borderRadius: 3, background: "#000" }}>
+        {e.s.instances[0] && (
+          <img src={e.s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
+        )}
+        <div style={{ color: "#facc15", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+          P·{e.label.slice(4)}
+        </div>
+        </div>
+      ))}
+    </div>
+  );
 
   // §3.3 ④⑤ Scout lines — 활성 페인 시리즈의 절단선을 다른 시리즈 타일에 투영
   // (scout=현재 이미지 1선, all_lines=시리즈 전체. 같은 시리즈·평행 평면은 제외)
@@ -378,61 +446,21 @@ export function ViewerInfi({ detail, onClose }: {
         </filter>
       </svg>
 
-      {/* ── 상단 가로 썸네일 스트립 ── */}
-      <div style={{ display: "flex", gap: 4, padding: "4px 6px", background: "var(--bg-panel)",
-                    borderBottom: "1px solid var(--border)", overflowX: "auto", flexShrink: 0, alignItems: "center" }}>
-        <b style={{ color: "var(--text-primary)", fontSize: 12, flexShrink: 0 }}>In Viewer</b>
-        <button onClick={combine} title="Combine Series" style={{ fontSize: 11, flexShrink: 0 }}>Combine</button>
-        {series.map((s) => (
-          <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: detail.study_uid })}
-               title={`Se${s.series_number} · ${s.series_desc}`}
-               style={{ flexShrink: 0, width: 76, cursor: "pointer", textAlign: "center", fontSize: 10,
-                        border: panes[active]?.series?.series_uid === s.series_uid
-                          ? "2px solid #4ade80" : "1px solid var(--border)", borderRadius: 3, background: "#000" }}>
-            {s.instances[0] && (
-              <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", height: 56, objectFit: "cover", display: "block" }} />
-            )}
-            <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-              {s.series_number}/{s.instances.length}
-            </div>
-          </div>
-        ))}
-        {/* 과거검사(Related Exam) — 클릭 로드 후 노란 테두리 썸네일, Sync With Other Exams 대상 */}
-        {(detail.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
-          <button key={re.id} onClick={() => loadPrior(re.id, re.study_uid, re.study_date)}
-                  title={`과거검사 열기 — ${re.modality} ${re.study_desc}`}
-                  style={{ fontSize: 10.5, flexShrink: 0, color: "#facc15" }}>
-            +{re.study_date} {re.modality}
-          </button>
-        ))}
-        {priorSeries.map((e) => (
-          <div key={`${e.uid}-${e.s.series_uid}`}
-               onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
-               title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}`}
-               style={{ flexShrink: 0, width: 76, cursor: "pointer", textAlign: "center", fontSize: 10,
-                        border: panes[active]?.series?.series_uid === e.s.series_uid
-                          ? "2px solid #facc15" : "1px solid #854d0e", borderRadius: 3, background: "#000" }}>
-            {e.s.instances[0] && (
-              <img src={e.s.instances[0].preview_url} alt="" style={{ width: "100%", height: 56, objectFit: "cover", display: "block" }} />
-            )}
-            <div style={{ color: "#facc15", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-              P·{e.label.slice(4)}
-            </div>
-          </div>
-        ))}
-        <span style={{ marginLeft: "auto" }} />
-        <span style={{ position: "relative", flexShrink: 0 }}>
-          <button onClick={() => setCloseMenu((v) => !v)} style={{ fontSize: 11 }}>Close Exam ▾</button>
-          {closeMenu && (
-            <div style={{ position: "absolute", right: 0, top: "110%", zIndex: 30, background: "var(--bg-elevated)",
-                          border: "1px solid var(--border)", borderRadius: 4, minWidth: 170, fontSize: 12 }}>
-              {[["현재 검사 닫기", onClose], ["모든 검사 닫기", () => window.close()]].map(([label, fn]) => (
-                <div key={label as string} onClick={fn as () => void}
-                     style={{ padding: "6px 10px", cursor: "pointer" }}>{label as string}</div>
-              ))}
-              <div style={{ padding: "6px 10px", opacity: 0.45 }} title="개발 예정">닫으며 자동 Verify</div>
-            </div>
-          )}
+      {/* ── 상단 헤더 (원본 이미지3: 로고 + 환자 블록(노랑 ID/초록 이름) + 검사 탭) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "3px 10px",
+                    background: "#0b0f14", borderBottom: "1px solid var(--border)", flexShrink: 0, fontSize: 11.5 }}>
+        <b style={{ color: "var(--text-primary)", fontSize: 12.5 }}>
+          ◈ Saintview <span style={{ color: "var(--accent)" }}>In Viewer</span>
+        </b>
+        <span style={{ lineHeight: 1.2 }}>
+          <span style={{ color: "#facc15" }}>{detail.patient_key}</span>{" "}
+          <span style={{ color: "#4ade80" }}>{detail.patient_name}</span>{" "}
+          <span>[{detail.sex}]</span>
+        </span>
+        <span title="현재 열린 검사(Exam 탭)"
+              style={{ border: "1px solid var(--accent)", borderRadius: 4, padding: "1px 8px",
+                       background: "var(--bg-elevated)", fontSize: 10.5, lineHeight: 1.25 }}>
+          {detail.modality}(Original)<br />{detail.study_date} {(detail.study_desc ?? "").slice(0, 20)}
         </span>
       </div>
 
@@ -496,8 +524,56 @@ export function ViewerInfi({ detail, onClose }: {
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* ── 좌측 2열 아이콘 툴바 (p.11~14 전 툴) ── */}
-        <div style={{ width: 72, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+        <div style={{ width: 94, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", padding: "6px 4px", gap: 4, flexShrink: 0 }}>
+          {/* §3.1 툴바 상단(원본 이미지2): Prev/Next · Crosslink · 행잉 · Worklist/Report · Close */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <button title="Prev — 워크리스트의 위 검사 열기" onClick={() => void nav(-1)}
+                    style={{ fontSize: 12, padding: "1px 7px" }}>◀</button>
+            <span style={{ fontSize: 13 }}>👤</span>
+            <button title="Next — 워크리스트의 아래 검사 열기" onClick={() => void nav(1)}
+                    style={{ fontSize: 12, padding: "1px 7px" }}>▶</button>
+          </div>
+          <button title="Crosslink 마스터 토글 (§3.3)"
+                  onClick={() => setXlink((x) => ({ ...x, crosslink: !x.crosslink }))}
+                  style={{ fontSize: 10, background: xlink.crosslink ? "var(--accent)" : undefined,
+                           color: xlink.crosslink ? "#fff" : undefined }}>
+            ⛓ Crosslink
+          </button>
+          <select title="행잉 프로토콜 (Default hanging protocol)" defaultValue=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "stack") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 1, c: 1 } }); }
+                    else if (v === "tile") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 3, c: 3 } }); }
+                    else if (v === "cmp") applySLayout({ r: 1, c: 2 });
+                    e.target.value = "";
+                  }} style={{ fontSize: 10 }}>
+            <option value="" disabled>Default …</option>
+            <option value="stack">Stack 1x1</option>
+            <option value="tile">Tile 3x3</option>
+            <option value="cmp">Compare 1x2</option>
+          </select>
+          <div style={{ display: "flex", gap: 2 }}>
+            <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
+                    style={{ flex: 1, fontSize: 12 }}>🗂</button>
+            <button title="Report — 현재 검사 판독 열기/닫기" onClick={() => setReportDock((v) => !v)}
+                    style={{ flex: 1, fontSize: 12, background: reportDock ? "var(--accent)" : undefined }}>📄</button>
+          </div>
+          <span style={{ position: "relative" }}>
+            <button title="Close — 검사 닫기(현재/전체) 후 워크리스트로" onClick={() => setCloseMenu((v) => !v)}
+                    style={{ width: "100%", fontSize: 10.5 }}>⊠ Close</button>
+            {closeMenu && (
+              <div style={{ position: "absolute", left: 0, top: "105%", zIndex: 30, background: "var(--bg-elevated)",
+                            border: "1px solid var(--border)", borderRadius: 4, minWidth: 150, fontSize: 11.5 }}>
+                {[["현재 검사 닫기", () => { gotoWorklist(); onClose(); }],
+                  ["모든 검사 닫기", () => { gotoWorklist(); window.close(); }]].map(([label, fn]) => (
+                  <div key={label as string} onClick={fn as () => void}
+                       style={{ padding: "5px 8px", cursor: "pointer" }}>{label as string}</div>
+                ))}
+              </div>
+            )}
+          </span>
+          <div style={{ borderTop: "1px solid var(--border)" }} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, overflowY: "auto" }}>
             {PALETTE.map((t) => {
               const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
@@ -524,6 +600,9 @@ export function ViewerInfi({ detail, onClose }: {
             </button>
           </div>
         </div>
+
+        {/* ── 세로 시리즈 썸네일 열 (원본 이미지4) ── */}
+        {thumbCol}
 
         {/* ── 뷰포트 ── */}
         <div style={{ flex: 1, display: "grid", minWidth: 0,
@@ -599,6 +678,29 @@ export function ViewerInfi({ detail, onClose }: {
                 {w.label}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ── Report 도크 (§3.1 Report 버튼 — 현재 검사 판독) ── */}
+        {reportDock && (
+          <div style={{ width: 280, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
+                        padding: 10, overflowY: "auto", fontSize: 12, flexShrink: 0 }}>
+            <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>
+              Report — {detail.modality} {detail.study_date}
+            </div>
+            {report ? (
+              <>
+                <div style={{ marginBottom: 6, color: "var(--text-secondary)" }}>
+                  상태: {report.status}
+                  {report.created_by === "ai" && <span className="badge ai" style={{ marginLeft: 6 }}>AI 초안</span>}
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, lineHeight: 1.5 }}>
+                  {report.narrative_text}
+                </pre>
+              </>
+            ) : (
+              <div style={{ color: "var(--text-secondary)" }}>이 검사의 판독이 없습니다.</div>
+            )}
           </div>
         )}
       </div>
