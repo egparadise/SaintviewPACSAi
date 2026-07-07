@@ -17,11 +17,21 @@ interface Pane {
   flipH: boolean; flipV: boolean; invert: boolean;
   wl: string;
   fx: "" | "sharpen" | "smooth" | "pseudo";   // p.13 필터(Sharpens/Average/Pseudo)
+  il: { r: number; c: number };  // Image Layout — DICOM 계층: 페인(Series) 내부의 이미지 타일 분할(페인별)
 }
 const initPane = (studyUid = ""): Pane => ({
   series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
-  flipH: false, flipV: false, invert: false, wl: "", fx: "",
+  flipH: false, flipV: false, invert: false, wl: "", fx: "", il: { r: 1, c: 1 },
 });
+/** "00 x 00" 임의 레이아웃 입력(1~10) */
+function askLayout(cur: { r: number; c: number }): { r: number; c: number } | null {
+  const v = prompt("Image Layout — 행 x 열 (1~10)", `${cur.r} x ${cur.c}`);
+  if (!v) return null;
+  const m = v.match(/(\d+)\s*[xX*]\s*(\d+)/);
+  if (!m) return null;
+  const clamp = (n: number) => Math.min(10, Math.max(1, n));
+  return { r: clamp(+m[1]), c: clamp(+m[2]) };
+}
 
 /* ── Scout line 기하 — DICOM ImagePosition/Orientation 으로 소스 이미지의 절단선을
       타깃 이미지 픽셀좌표에 투영 (§3.3 ④⑤ Scout Line / All Lines) ── */
@@ -148,7 +158,6 @@ export function ViewerInfi({ detail, onClose }: {
   const [priorSeries, setPriorSeries] = useState<{ uid: string; label: string; s: SeriesNode }[]>([]);
   const [priorLoaded, setPriorLoaded] = useState<Set<number>>(new Set());
   const [sLayout, setSLayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
-  const [iLayout, setILayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
   const [panes, setPanes] = useState<Pane[]>([initPane()]);
   const [active, setActive] = useState(0);
   const [tool, setTool] = useState<Tool>("select");
@@ -166,7 +175,7 @@ export function ViewerInfi({ detail, onClose }: {
   const drag = useRef<{ x: number; y: number; btn: number; pane: number } | null>(null);
 
   const wlPresets = detail.modality === "MR" ? IN_WL_PRESETS_MR : IN_WL_PRESETS_CT;
-  const tilesPerPane = iLayout.r * iLayout.c;
+  const tilesOf = (p?: Pane) => (p ? p.il.r * p.il.c : 1);
 
   const loadSeries = useCallback(() => {
     api.seriesTree(detail.id).then((r) => {
@@ -179,7 +188,9 @@ export function ViewerInfi({ detail, onClose }: {
       });
       const first = r.series[0];
       if (first && ["CT", "MR"].includes(first.modality) && first.instances.length >= 9) {
-        setILayout((cur) => (cur.r * cur.c === 1 ? { r: 3, c: 3 } : cur));
+        // 기본 행잉: 첫 페인 Image Layout 3x3 (원본 CT 화면)
+        setPanes((ps) => ps.map((p, k) =>
+          k === 0 && p.il.r * p.il.c === 1 ? { ...p, il: { r: 3, c: 3 } } : p));
       }
     }).catch(() => {});
   }, [detail.id]);
@@ -219,11 +230,11 @@ export function ViewerInfi({ detail, onClose }: {
     const t = setInterval(() => {
       setPanes((ps) => ps.map((p, k) => {
         if (k !== active || !p.series) return p;
-        return { ...p, index: (p.index + tilesPerPane) % p.series.instances.length };
+        return { ...p, index: (p.index + p.il.r * p.il.c) % p.series.instances.length };
       }));
     }, 150);
     return () => clearInterval(t);
-  }, [cine, active, tilesPerPane]);
+  }, [cine, active]);
 
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2500); };
 
@@ -318,7 +329,10 @@ export function ViewerInfi({ detail, onClose }: {
     if (e.ctrlKey) {
       const p = panes[i];
       if (p) upd(i, { zoom: Math.max(0.05, Math.min(30, p.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) });
-    } else scroll(i, (e.deltaY > 0 ? 1 : -1) * (tilesPerPane > 1 ? iLayout.c : 1));
+    } else {
+      const p = panes[i];
+      scroll(i, (e.deltaY > 0 ? 1 : -1) * (p && tilesOf(p) > 1 ? p.il.c : 1));
+    }
   };
 
   const combine = () => {
@@ -430,18 +444,40 @@ export function ViewerInfi({ detail, onClose }: {
         </span>
         <span style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 10 }}>
           Series
-          <select value={layoutLabel(sLayout)} onChange={(e) => {
-            const [r, c] = e.target.value.split(" x ").map(Number);
-            applySLayout({ r, c });
-          }} style={{ fontSize: 11 }}>
+          <select value={layoutLabel(sLayout)} title="화면을 시리즈 페인으로 분할 (DICOM Series 단위)"
+                  onChange={(e) => {
+                    if (e.target.value === "custom") {
+                      const res = askLayout(sLayout);
+                      if (res) applySLayout(res);
+                      return;
+                    }
+                    const [r, c] = e.target.value.split(" x ").map(Number);
+                    applySLayout({ r, c });
+                  }} style={{ fontSize: 11 }}>
             {IN_LAYOUTS.map((l) => <option key={layoutLabel(l)}>{layoutLabel(l)}</option>)}
+            {!IN_LAYOUTS.some((l) => layoutLabel(l) === layoutLabel(sLayout)) && (
+              <option>{layoutLabel(sLayout)}</option>
+            )}
+            <option value="custom">직접 입력(00 x 00)…</option>
           </select>
           Image
-          <select value={layoutLabel(iLayout)} onChange={(e) => {
-            const [r, c] = e.target.value.split(" x ").map(Number);
-            setILayout({ r, c });
-          }} style={{ fontSize: 11 }}>
+          <select value={layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })}
+                  title="선택된 페인 안에서 해당 시리즈의 연속 이미지를 타일로 분할 (DICOM Image 단위, 페인별 적용)"
+                  onChange={(e) => {
+                    const cur = panes[active]?.il ?? { r: 1, c: 1 };
+                    if (e.target.value === "custom") {
+                      const res = askLayout(cur);
+                      if (res) upd(active, { il: res });
+                      return;
+                    }
+                    const [r, c] = e.target.value.split(" x ").map(Number);
+                    upd(active, { il: { r, c } });
+                  }} style={{ fontSize: 11 }}>
             {IN_LAYOUTS.map((l) => <option key={layoutLabel(l)}>{layoutLabel(l)}</option>)}
+            {!IN_LAYOUTS.some((l) => layoutLabel(l) === layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })) && (
+              <option>{layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })}</option>
+            )}
+            <option value="custom">직접 입력(00 x 00)…</option>
           </select>
         </span>
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
@@ -506,9 +542,9 @@ export function ViewerInfi({ detail, onClose }: {
                    style={{ position: "relative", minWidth: 0, minHeight: 0, background: "#000",
                             outline: active === pi ? "1px solid #4ade80" : "1px solid #1e293b",
                             display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
-                            gridTemplateColumns: `repeat(${iLayout.c}, 1fr)`,
-                            gridTemplateRows: `repeat(${iLayout.r}, 1fr)`, gap: 1 }}>
-                {Array.from({ length: tilesPerPane }, (_, t) => {
+                            gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
+                            gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
+                {Array.from({ length: tilesOf(p) }, (_, t) => {
                   const idx = p.index + t;
                   const inst = insts[idx];
                   return (
