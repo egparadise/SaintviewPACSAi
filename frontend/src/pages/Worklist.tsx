@@ -64,9 +64,25 @@ export function loadHangingPrefs() {
   }).catch(() => {});
 }
 
-/** 모니터 설정 기반 창 위치/크기 — Window Management API(Chrome) 가용 시 */
+/** 모니터 설정 기반 창 위치/크기 — Window Management API(Chrome) 가용 시.
+ *  매 호출마다 최신 설정을 다시 읽는다(설정 저장 직후에도 반영). */
 async function viewerWindowFeatures(): Promise<string> {
+  try {
+    const r = await api.getSetting("viewer.prefs");
+    monitorScreens = ((r.value as { monitor?: { screens?: number[] } }).monitor?.screens) ?? monitorScreens;
+  } catch { /* 캐시 유지 */ }
   return screenFeatures(monitorScreens);
+}
+/** 재사용 창(window.open 의 위치 옵션이 무시됨)도 지정 모니터로 이동/리사이즈 */
+function applyWindowBounds(w: Window | null, features: string) {
+  if (!w) return;
+  const m: Record<string, number> = {};
+  for (const kv of features.split(",")) {
+    const [k, v] = kv.split("=");
+    m[k] = Number(v);
+  }
+  if ([m.left, m.top, m.width, m.height].some((n) => n === undefined || Number.isNaN(n))) return;
+  try { w.moveTo(m.left, m.top); w.resizeTo(m.width, m.height); } catch { /* 권한/브라우저 제약 */ }
 }
 function hpFor(modality: string): string | undefined {
   return hangingMap[modality] ?? hangingMap.default;
@@ -581,8 +597,9 @@ function ServerButtons() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
+    // 팝업을 열 때마다 최신 설정을 다시 읽는다 — 설정>서버 네트워크 저장 직후에도 반영
     api.getSetting("server.network").then((r) => setNet(r.value as ServerNetwork)).catch(() => {});
-  }, []);
+  }, [open]);
 
   const pick = (m: "local" | "web") => {
     setMode(m);
@@ -2133,6 +2150,8 @@ export function Worklist() {
       : `${window.location.origin}${window.location.pathname}`;
     void viewerWindowFeatures().then((features) => {
       const w = window.open(`${base}?${p}`, "sv_viewer", features);
+      // 재사용 창은 open() 의 위치 옵션이 무시되므로 명시적으로 이동/리사이즈 (모니터 설정 적용)
+      applyWindowBounds(w, features);
       w?.focus();
     });
   }, []);

@@ -275,6 +275,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     await api.putSetting("report.prefs",
       { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
     if (isAdmin) {
+      // 서버 네트워크(공유 루트 등)도 OK(저장)로 함께 저장 — '서버 설정 저장' 버튼을 몰라도 반영
+      if (snDir.trim() || snWeb.ip || snWeb.port || snWeb.name || snWeb.ae_title) {
+        const curN = (await api.getSetting("server.network").catch(() => ({ value: {} }))).value;
+        await api.putSetting("server.network", {
+          ...curN,
+          local_share_dir: snDir,
+          web: { ...snWeb, port: Number(snWeb.port) || snWeb.port },
+        }, "global");
+      }
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
       await api.putSetting("ai.policy", {
         auto_generate: autoGenerate, vision, stt_engine: sttEngine, stt_model: sttModel,
