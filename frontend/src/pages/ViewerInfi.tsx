@@ -460,6 +460,64 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2500); };
 
+  // ── 작업 히스토리 (◀ 이전 / ◯ 초기 / ▶ 다음) — 이미지 조정·주석·방향 전환 등 스냅샷 ──
+  type Snap = {
+    vis: Pick<Pane, "zoom" | "tx" | "ty" | "rot" | "flipH" | "flipV" | "invert" | "wl" | "fx" | "shutter">[];
+    annos: Record<string, Anno2[]>;
+  };
+  const histRef = useRef<Snap[]>([]);
+  const histIdx = useRef(-1);
+  const [histTick, setHistTick] = useState(0);
+  const panesRef = useRef(panes);
+  useEffect(() => { panesRef.current = panes; }, [panes]);
+  const annosSnapRef = useRef(annos);
+  useEffect(() => { annosSnapRef.current = annos; }, [annos]);
+  const takeSnap = (): Snap => ({
+    vis: panesRef.current.map((p) => ({
+      zoom: p.zoom, tx: p.tx, ty: p.ty, rot: p.rot, flipH: p.flipH, flipV: p.flipV,
+      invert: p.invert, wl: p.wl, fx: p.fx, shutter: p.shutter ?? null,
+    })),
+    annos: annosSnapRef.current,
+  });
+  const pushHist = () => {
+    const s = takeSnap();
+    const h = histRef.current;
+    if (h[histIdx.current] && JSON.stringify(h[histIdx.current]) === JSON.stringify(s)) return;
+    histRef.current = [...h.slice(0, histIdx.current + 1), s].slice(-50);   // redo 꼬리 절단, 최대 50
+    histIdx.current = histRef.current.length - 1;
+    setHistTick((t) => t + 1);
+  };
+  const schedHist = () => { window.setTimeout(pushHist, 50); };   // 상태 반영 후 캡처
+  const applySnap = (s: Snap) => {
+    setPanes((ps) => ps.map((p, i) => (s.vis[i] ? { ...p, ...s.vis[i] } : p)));
+    setAnnos(s.annos);
+  };
+  const histGo = (d: -1 | 1) => {
+    const ni = histIdx.current + d;
+    if (ni < 0 || ni >= histRef.current.length) return;
+    histIdx.current = ni;
+    applySnap(histRef.current[ni]);
+    setHistTick((t) => t + 1);
+  };
+  const histReset = () => {
+    if (!histRef.current[0]) return;
+    applySnap(histRef.current[0]);
+    histIdx.current = 0;
+    setHistTick((t) => t + 1);
+    say("초기 상태로 되돌렸습니다");
+  };
+  // 검사 구성이 바뀌면 히스토리 재시작 + 초기 스냅샷
+  useEffect(() => {
+    if (!exams.length) return;
+    histRef.current = [];
+    histIdx.current = -1;
+    schedHist();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exams]);
+  // 히스토리에 기록할 원샷 조작들
+  const HIST_OPS = new Set(["fit", "invert", "flipH", "flipV", "rotL", "rotR", "rot180",
+                            "reset", "sharpen", "smooth", "pseudo", "clrAnno"]);
+
   const fire = (id: string) => {
     const p = panes[active];
     if (!p) return;
@@ -569,11 +627,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }
       }
     }
+    if (HIST_OPS.has(id)) schedHist();   // 방향 전환/반전/필터/초기화 등 — 히스토리 기록
   };
 
   // ── 점 클릭형 툴 공통: 화면좌표 → 이미지 픽셀좌표 (fit 배치 + zoom/pan 역변환, rot/flip 미적용 전제) ──
-  const addAnno = (sop: string, a: Anno2) =>
+  const addAnno = (sop: string, a: Anno2) => {
     setAnnos((prev) => ({ ...prev, [sop]: [...(prev[sop] ?? []), a] }));
+    schedHist();   // 글자 새기기/측정 등 주석 추가 — 히스토리 기록
+  };
 
   const finishTool = (pi: number, p: Pane, inst: InstanceNode, pts: { x: number; y: number }[]) => {
     const sop = inst.sop_uid;
@@ -617,9 +678,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         break;
       }
       // ── 셔터 (페인 표시 가림) ──
-      case "shutRect": upd(pi, { shutter: { kind: "rect", pts } }); say("사각 셔터 적용 — 🧹로 해제"); break;
-      case "shutEl": upd(pi, { shutter: { kind: "ellipse", pts } }); say("타원 셔터 적용 — 🧹로 해제"); break;
-      case "shutPoly": upd(pi, { shutter: { kind: "poly", pts } }); say("다각 셔터 적용 — 🧹로 해제"); break;
+      case "shutRect": upd(pi, { shutter: { kind: "rect", pts } }); say("사각 셔터 적용 — 🧹로 해제"); schedHist(); break;
+      case "shutEl": upd(pi, { shutter: { kind: "ellipse", pts } }); say("타원 셔터 적용 — 🧹로 해제"); schedHist(); break;
+      case "shutPoly": upd(pi, { shutter: { kind: "poly", pts } }); say("다각 셔터 적용 — 🧹로 해제"); schedHist(); break;
       // ── 3D Cursor: 클릭 지점을 모든 페인의 동일 3D 위치로 ──
       case "cursor3d": {
         const g = geomOf(inst);
@@ -773,7 +834,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       });
     }
   };
-  const endDrag = () => { drag.current = null; };
+  const endDrag = () => {
+    const d = drag.current;
+    drag.current = null;
+    // W/L·Zoom·Pan 드래그 종료 시점에 히스토리 기록(드래그 중엔 미기록)
+    if (d && (d.btn === 2 || ["pan", "zoom", "wl"].includes(tool))) schedHist();
+  };
   const onWheel = (e: React.WheelEvent, i: number) => {
     if (tHeld.current) {   // T+스크롤 — 오버레이 글자 크기 (계정 저장)
       const nf = Math.min(24, Math.max(6, ovlFont + (e.deltaY < 0 ? 0.5 : -0.5)));
@@ -1320,7 +1386,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           {/* 📂 미디어 열기 — JPEG/PNG/BMP/AVI/MP4/MPEG 를 활성 페인에서 표시/재생 */}
           <button title="파일 열기 — 이미지(JPEG/PNG/BMP)·동영상(AVI/MP4/MPEG)을 활성 페인에서 보기"
                   onClick={() => mediaInputRef.current?.click()}
-                  style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }}>📂</button>
+                  style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }}>🎞️</button>
           <input ref={mediaInputRef} type="file" hidden
                  accept="image/*,video/*,.avi,.mpg,.mpeg,.mp4"
                  onChange={(e) => {
@@ -1407,6 +1473,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               </div>
             )}
           </span>
+          {/* 작업 히스토리 — ◀ 이전 상태 · ◯ 초기 상태로 · ▶ 다음 상태 (이미지 조정/주석/방향 등) */}
+          <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center", padding: "2px 0" }}>
+            <button title="이전 작업 상태로 (Undo)" onClick={() => histGo(-1)}
+                    disabled={histTick < 0 || histIdx.current <= 0}
+                    style={{ flex: 1, fontSize: 13, padding: "3px 0" }}>◀</button>
+            <button title="초기 상태로 되돌리기 — 모든 조정/주석을 처음으로" onClick={histReset}
+                    disabled={histIdx.current < 0}
+                    style={{ width: 30, height: 26, borderRadius: "50%", fontSize: 12, padding: 0,
+                             display: "grid", placeItems: "center" }}>◯</button>
+            <button title="다음 작업 상태로 (Redo)" onClick={() => histGo(1)}
+                    disabled={histIdx.current >= histRef.current.length - 1}
+                    style={{ flex: 1, fontSize: 13, padding: "3px 0" }}>▶</button>
+          </div>
           <div style={{ borderTop: "1px solid var(--border)" }} />
           {/* 툴 목록 — 기능별 구획 + 설정 반영(열 수·이름 표시·아이콘 크기) */}
           <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
@@ -1529,7 +1608,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               W/L ({detail.modality === "MR" ? "MR" : "CT"})
             </div>
             {wlPresets.map((w) => (
-              <div key={w.key} onClick={() => updMany(targetsOf(active), () => ({ wl: w.q }))}
+              <div key={w.key}
+                   onClick={() => { updMany(targetsOf(active), () => ({ wl: w.q })); schedHist(); }}
                    title={w.q ? `W/L ${w.q}` : "서버 기본"}
                    style={{ padding: "3px 6px", borderRadius: 3, cursor: "pointer",
                             background: panes[active]?.wl === w.q ? "var(--accent-subtle)" : undefined }}>
