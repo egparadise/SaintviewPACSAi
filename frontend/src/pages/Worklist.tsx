@@ -33,7 +33,6 @@ import {
 import {
   DEFAULT_TAB,
   FolderTreeEditor,
-  filtersToFolder,
   folderSummary,
   folderToFilters,
   loadTabs,
@@ -2075,31 +2074,54 @@ export function Worklist() {
   }, []);
 
   /* ── UBPACS-Z 페이지 탭 + 검색 폴더 ── */
-  // 탭 전환: 저장된 검색 정의를 페이지처럼 적용
-  const pickTab = useCallback((tab: WorklistTab) => {
+  // 탭별 라이브 상태 — 탭을 오가도 각 탭의 검색조건·설정이 독립 보존된다
+  const tabLive = useRef<Record<string, {
+    filters: Record<string, string>; searchText: string; datePreset: string; selNodeId: string | null;
+  }>>({});
+  // 탭 전환: 현재 탭 상태를 스냅샷하고, 대상 탭의 라이브 상태(있으면) 또는 저장된 정의를 적용
+  const pickTab = (tab: WorklistTab) => {
+    tabLive.current[activeTabId] = {
+      filters: filtersRef.current, searchText: searchRef.current, datePreset, selNodeId,
+    };
+    setActiveTabId(tab.id);
+    const live = tabLive.current[tab.id];
+    if (live) {
+      setFilters(live.filters);
+      setSearchText(live.searchText);
+      setDatePreset(live.datePreset);
+      setSelNodeId(live.selNodeId);
+    } else {
+      setSelNodeId(null);
+      setSearchText("");
+      setDatePreset(tab.filter.date ?? "all");
+      setFilters(folderToFilters(tab.filter));
+    }
+    setRefreshKey((k) => k + 1);
+  };
+
+  // 새 페이지 등록 (최대 10) — 새 탭은 빈 검색으로 시작해 독립적으로 조건을 설정한다.
+  // (검색 폴더에서 만들면 그 폴더 조건으로 시작)
+  const addTab = useCallback(async (treeFilter?: { label: string; filter: WorklistTab["filter"] }) => {
+    if (tabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)"); return; }
+    const label = prompt("새 페이지 이름 — 새 검색으로 시작합니다 (예: CR, 응급실)",
+                         treeFilter?.label ?? `WORKLIST ${tabs.length + 1}`);
+    if (!label) return;
+    // 현재 탭 상태 보존 후 새 탭으로
+    tabLive.current[activeTabId] = {
+      filters: filtersRef.current, searchText: searchRef.current, datePreset, selNodeId,
+    };
+    const tab: WorklistTab = { id: newId(), label, filter: treeFilter?.filter ?? {} };
+    const next = [...tabs, tab];
+    setTabs(next);
     setActiveTabId(tab.id);
     setSelNodeId(null);
     setSearchText("");
     setDatePreset(tab.filter.date ?? "all");
     setFilters(folderToFilters(tab.filter));
     setRefreshKey((k) => k + 1);
-  }, []);
-
-  // 현재 검색조건 스냅샷 → 새 페이지 등록 (최대 10)
-  const addTab = useCallback(async (treeFilter?: { label: string; filter: WorklistTab["filter"] }) => {
-    if (tabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)"); return; }
-    const label = prompt("페이지 이름 — 현재 검색조건이 저장됩니다 (예: CR, 응급실)",
-                         treeFilter?.label ?? `WORKLIST ${tabs.length + 1}`);
-    if (!label) return;
-    const tab: WorklistTab = {
-      id: newId(), label,
-      filter: treeFilter?.filter ?? filtersToFolder(filtersRef.current, datePreset),
-    };
-    const next = [...tabs, tab];
-    setTabs(next);
-    setActiveTabId(tab.id);
     try { await saveTabs(next); } catch (e) { alert(e instanceof Error ? e.message : "페이지 저장 실패"); }
-  }, [tabs, datePreset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs, datePreset, activeTabId, selNodeId]);
 
   const removeTab = useCallback(async (id: string) => {
     const t = tabs.find((x) => x.id === id);
