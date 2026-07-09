@@ -11,7 +11,7 @@ import { Splitter } from "../lib/Splitter";
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
-import { IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { IN_PALETTE, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 
 interface Pane {
   series: SeriesNode | null;
@@ -45,6 +45,11 @@ const vdot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const vcross = (a: V3, b: V3): V3 =>
   [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 interface Geom { pos: V3; row: V3; col: V3; rs: number; cs: number; n: V3; rows: number; cols: number }
+/** 평면의 지배 축(0=SAG,1=COR,2=AX 근사) — 크로스 라인 축별 1개 제한용 */
+function axisOf(g: Geom): number {
+  const a = [Math.abs(g.n[0]), Math.abs(g.n[1]), Math.abs(g.n[2])];
+  return a.indexOf(Math.max(...a));
+}
 function geomOf(inst: InstanceNode): Geom | null {
   if (inst.position?.length !== 3 || inst.orientation?.length !== 6 || inst.pixel_spacing?.length !== 2) return null;
   const row = inst.orientation.slice(0, 3), col = inst.orientation.slice(3, 6);
@@ -98,65 +103,7 @@ function paneFilter(p: Pane): string | undefined {
 type Tool = "select" | "pan" | "zoom" | "wl" | "mline" | "mangle";
 interface Anno2 { kind: "line" | "angle"; pts: { x: number; y: number }[] }
 
-// ── User Guide p.11~14 툴 카탈로그 (표 순서 유지) — impl=false 는 반투명(개발 대상) ──
-const PALETTE: { id: string; icon: string; label: string; impl: boolean; mode?: boolean }[] = [
-  // p.11 §3.4 기본 6종
-  { id: "select", icon: "➤", label: "Select — 이미지 선택/해제", impl: true, mode: true },
-  { id: "pan", icon: "✥", label: "Pan — 이미지 이동(창보다 클 때 유용)", impl: true, mode: true },
-  { id: "zoom", icon: "🔍", label: "Zoom — 드래그로 확대/축소 (Ctrl+휠)", impl: true, mode: true },
-  { id: "wl", icon: "◐", label: "Windowing — W/L 적용(우드래그 기본)", impl: true, mode: true },
-  { id: "magnify", icon: "⌕", label: "Magnification — 부분 확대경 (개발 예정)", impl: false },
-  { id: "fit", icon: "▣", label: "Fit — 창 크기에 맞춤", impl: true },
-  // p.12 상단
-  { id: "capture", icon: "📷", label: "Capture All — 현재 이미지 저장", impl: true },
-  { id: "reset", icon: "↺", label: "Reset — 초기값 복원", impl: true },
-  { id: "print", icon: "🖨", label: "Print — 리포트/이미지 인쇄", impl: true },
-  { id: "cursor3d", icon: "✛", label: "3D Cursor — 3D 위치 표시 (개발 예정)", impl: false },
-  { id: "dictation", icon: "🎙", label: "Dictation — 음성 녹음 (개발 예정)", impl: false },
-  { id: "playdict", icon: "🔊", label: "Play Dictation (개발 예정)", impl: false },
-  { id: "refreshExam", icon: "🔄", label: "Refresh Exam — 검사 정보 갱신", impl: true },
-  // p.12 중단 — 선택/방향
-  { id: "selAll", icon: "⊞", label: "Select All — 전체 선택 (개발 예정)", impl: false },
-  { id: "selInv", icon: "⊟", label: "Select All Inverse (개발 예정)", impl: false },
-  { id: "flipV", icon: "⇵", label: "Flip Vertical — 상하 반전", impl: true },
-  { id: "flipH", icon: "⇋", label: "Flip Horizontal — 좌우 반전", impl: true },
-  { id: "rotL", icon: "⟲", label: "Rotate Left 90 — 반시계 90도", impl: true },
-  { id: "rotR", icon: "⟳", label: "Rotate Right 90 — 시계 90도", impl: true },
-  { id: "rot180", icon: "◒", label: "Rotate 180", impl: true },
-  { id: "invert", icon: "◑", label: "B/W Inverse — 흑백 반전", impl: true },
-  { id: "shutEl", icon: "◙", label: "Ellipse Shutter (개발 예정)", impl: false },
-  { id: "shutRect", icon: "▣", label: "Rectangle Shutter (개발 예정)", impl: false },
-  { id: "shutPoly", icon: "⬠", label: "Polyline Shutter (개발 예정)", impl: false },
-  // p.13 상단 — 필터/스크롤
-  { id: "sharpen", icon: "◮", label: "Sharpens Filter — 선예화", impl: true },
-  { id: "smooth", icon: "◍", label: "Average Filter — 평활화", impl: true },
-  { id: "pseudo", icon: "🎨", label: "Pseudo — 의사 컬러(핵의학)", impl: true },
-  { id: "cine", icon: "▶", label: "Auto Scroll — 이미지 자동 스크롤", impl: true },
-  // p.13 측정/분석
-  { id: "ctr", icon: "♥", label: "CT Ratio — 심흉비 (개발 예정)", impl: false },
-  { id: "limb", icon: "🦵", label: "Limb Length Discrepancy (개발 예정)", impl: false },
-  { id: "centerline", icon: "╂", label: "Center Line (개발 예정)", impl: false },
-  { id: "profile", icon: "📈", label: "Profile — 픽셀 그래프 (개발 예정)", impl: false },
-  { id: "table2d", icon: "▤", label: "2D Table — 픽셀값 표 (개발 예정)", impl: false },
-  { id: "calibrate", icon: "📐", label: "Calibrate — Pixel Spacing 정보", impl: true },
-  { id: "spine", icon: "🦴", label: "Spine Label (개발 예정)", impl: false },
-  { id: "anno3d", icon: "🧊", label: "3D Arrow/Text/Line/Curve (개발 예정)", impl: false },
-  // p.13~14 — 2D 주석/측정
-  { id: "arrow2d", icon: "↗", label: "2D Arrow (개발 예정)", impl: false },
-  { id: "text2d", icon: "T", label: "2D Text (개발 예정)", impl: false },
-  { id: "box2d", icon: "▭", label: "2D Box — 메모 (개발 예정)", impl: false },
-  { id: "key2d", icon: "🔑", label: "Key — 현재 이미지를 키이미지로 등록/해제 (워크리스트 🔑·Key 필터 조회)", impl: true },
-  { id: "circle", icon: "◯", label: "Circle (개발 예정)", impl: false },
-  { id: "polyline", icon: "〰", label: "Polyline/Freehand (개발 예정)", impl: false },
-  { id: "mline", icon: "📏", label: "Measure 2D Line — 두 점 클릭 = 거리(mm)", impl: true, mode: true },
-  { id: "mangle", icon: "∠", label: "Measure 2D Angle — 세 점 클릭 = 각도", impl: true, mode: true },
-  { id: "mellipse", icon: "⬭", label: "Measure 2D Ellipse ROI (개발 예정)", impl: false },
-  { id: "mrect", icon: "⬜", label: "Measure 2D Rectangle ROI (개발 예정)", impl: false },
-  { id: "cobb", icon: "⟁", label: "Measure Cobb Angle (개발 예정)", impl: false },
-  { id: "marking", icon: "M", label: "Marking (개발 예정)", impl: false },
-  { id: "lens", icon: "🎯", label: "Lens/Hounsfield/SUV (개발 예정)", impl: false },
-  { id: "clrAnno", icon: "🧹", label: "측정 전체 지우기", impl: true },
-];
+const PALETTE = IN_PALETTE;
 
 export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
   detail: StudyDetail;
@@ -217,7 +164,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const d = id === detail.id ? detail : await api.study(id);
       const t = await api.seriesTree(id);
       return { d, series: t.series };
-    })).then((list) => {
+    })).then(async (list) => {
+      // Modality 기본 레이아웃(설정>뷰어 — 행잉과 별도) 로드
+      const prefsV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value as
+        { infi_default_layout?: Record<string, { s?: { r: number; c: number } | null;
+                                                 i?: { r: number; c: number } | null }> };
+      const defMap = prefsV.infi_default_layout ?? {};
       // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
       if (keySops?.length) {
         const prim = list.find((e) => e.d.id === detail.id);
@@ -242,18 +194,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         setActive(0);
         return;
       }
-      // ①②: 검사 수만큼 Series 페인 확장(오른쪽 누적), 각 페인에 각 검사의 첫 시리즈
-      const n = Math.max(1, list.length);
-      const c = Math.min(n, 4), r = Math.ceil(n / c);
+      // ①②: 페인 구성 — 단독 검사는 Modality 기본 레이아웃(설정) 우선, 다중 검사는 오른쪽 누적
+      const single = list.length === 1;
+      const mod = list[0]?.d.modality ?? "";
+      const defCfg = single ? (defMap[mod] ?? defMap["*"]) : undefined;
+      let r: number, c: number;
+      if (defCfg?.s) { r = defCfg.s.r; c = defCfg.s.c; }
+      else { const n = Math.max(1, list.length); c = Math.min(n, 4); r = Math.ceil(n / c); }
       setSLayout({ r, c });
       setPanes(Array.from({ length: r * c }, (_, i) => {
-        const ex = list[i];
-        const p = ex ? { ...initPane(ex.d.study_uid), series: ex.series[0] ?? null } : initPane();
-        if (ex && list.length === 1 && ["CT", "MR"].includes(ex.d.modality)
-            && (ex.series[0]?.instances.length ?? 0) >= 9) {
-          p.il = { r: 3, c: 3 };   // 단독 CT/MR 기본 행잉 (원본)
+        if (single) {
+          // 단독 검사: 페인마다 시리즈를 순서대로(부족하면 빈 페인), Image 레이아웃은 설정값
+          const s0 = list[0].series[i] ?? null;
+          const p = { ...initPane(list[0].d.study_uid), series: s0 };
+          if (defCfg?.i) p.il = defCfg.i;
+          else if (i === 0 && r * c === 1 && ["CT", "MR"].includes(mod)
+                   && (list[0].series[0]?.instances.length ?? 0) >= 9) {
+            p.il = { r: 3, c: 3 };   // 설정 없을 때 기본 행잉 (원본)
+          }
+          return p;
         }
-        return p;
+        const ex = list[i];
+        return ex ? { ...initPane(ex.d.study_uid), series: ex.series[0] ?? null } : initPane();
       }));
       setActive(ai);
     }).catch(() => {});
@@ -521,14 +483,18 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [ovlFont, setOvlFont] = useState(9.5);
   const [ovlVisible, setOvlVisible] = useState(true);
   const [selColor, setSelColor] = useState("#d946ef");
+  // 툴바 사용자화 — 설정에서 끈 툴은 팔레트에서 숨김 (viewer.prefs.infi_toolbar)
+  const [tbShow, setTbShow] = useState<Record<string, boolean>>({});
   const tHeld = useRef(false);
   const persistTimer = useRef<number | null>(null);
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
-      const v = r.value as { infi_overlay_font?: number; infi_overlay_visible?: boolean; infi_sel_color?: string };
+      const v = r.value as { infi_overlay_font?: number; infi_overlay_visible?: boolean;
+                             infi_sel_color?: string; infi_toolbar?: Record<string, boolean> };
       if (v.infi_overlay_font) setOvlFont(v.infi_overlay_font);
       if (v.infi_overlay_visible !== undefined) setOvlVisible(v.infi_overlay_visible);
       if (v.infi_sel_color) setSelColor(v.infi_sel_color);
+      if (v.infi_toolbar) setTbShow(v.infi_toolbar);
     }).catch(() => {});
   }, []);
   const persistPrefs = (patch: Record<string, unknown>) => {
@@ -679,9 +645,30 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
       <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
-      {series.map((s) => (
-        <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: curD.study_uid })}
-             title={`Se${s.series_number} · ${s.series_desc}`}
+      {series.map((s, sIdx) => (
+        <div key={s.series_uid}
+             onClick={(e) => {
+               // 썸네일에서도 다중 선택: Ctrl=해당 시리즈가 표시된 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
+               if (e.ctrlKey) {
+                 const pi = panes.findIndex((p) => p.series?.series_uid === s.series_uid);
+                 if (pi >= 0) {
+                   setSelPanes((prev) => {
+                     const n = new Set(prev.size ? prev : [active]);
+                     if (n.has(pi) && pi !== active) n.delete(pi); else n.add(pi);
+                     return n;
+                   });
+                 }
+                 return;
+               }
+               if (e.shiftKey) {
+                 const uids = new Set(series.slice(0, sIdx + 1).map((x) => x.series_uid));
+                 setSelPanes(new Set(panes.map((p, k) => (p.series && uids.has(p.series.series_uid) ? k : -1))
+                   .filter((k) => k >= 0)));
+                 return;
+               }
+               upd(active, { series: s, index: 0, studyUid: curD.study_uid });
+             }}
+             title={`Se${s.series_number} · ${s.series_desc}\n(Ctrl=페인 선택 토글 · Shift=범위 선택)`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
                       border: thumbBorder(s.series_uid, "1px solid var(--border)"),
                       borderRadius: 3, background: "#000" }}>
@@ -742,11 +729,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                    label: current ? `${act.index + 1}/${total}` : undefined });   // "현재/전체"
       });
     }
-    // 2) 상호 참조 — 기준 페인 자신이거나 기준과 평행 평면(예: 같은 AX 축)이라 1)이 비면,
-    //    화면의 다른 페인들 '현재 이미지' 절단선을 시안색으로 표시 (INFINITT 상호 크로스링크)
+    // 2) 상호 참조 — 기준 페인 자신이거나 기준과 평행 평면이라 1)이 비면,
+    //    다른 페인들 현재 이미지 절단선을 표시하되 **축별 1개만**(중복 제거 — 선택 페인 우선)
     if (!out.length) {
       const seen = new Set([tileSeriesUid]);
-      for (const q of panes) {
+      const usedAxis = new Set<number>([axisOf(tg)]);   // 자기 축(평행)은 제외
+      const order = panes.map((_, k) => k)
+        .sort((a, b) => Number(selPanes.has(b)) - Number(selPanes.has(a)));   // 다중 선택 페인 우선
+      for (const k of order) {
+        const q = panes[k];
         const s = q?.series;
         if (!s || seen.has(s.series_uid)) continue;
         seen.add(s.series_uid);
@@ -754,8 +745,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         if (!qi) continue;
         const qg = geomOf(qi);
         if (!qg) continue;
+        const ax = axisOf(qg);
+        if (usedAxis.has(ax)) continue;   // 같은 축 평면은 1개만
         const seg = scoutSegment(qg, tg);
         if (!seg) continue;
+        usedAxis.add(ax);
         out.push({ ...seg, current: false, cross: true,
                    label: `${q.index + 1}/${s.instances.length}` });
       }
@@ -918,7 +912,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </span>
           <div style={{ borderTop: "1px solid var(--border)" }} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, overflowY: "auto" }}>
-            {PALETTE.map((t) => {
+            {PALETTE.filter((t) => tbShow[t.id] !== false).map((t) => {
               const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
                 || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id);
               return (

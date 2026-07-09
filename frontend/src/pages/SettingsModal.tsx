@@ -4,6 +4,7 @@ import { VIEWER_BASE, api, type AiQuality, type OrthancStatus, type PhraseRow } 
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
+import { IN_LAYOUTS, IN_PALETTE } from "../lib/infiConfig";
 import { ToolIcon } from "../lib/toolIcons";
 import { HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
 import {
@@ -83,6 +84,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infSelColor, setInfSelColor] = useState("#d946ef");
   const [infOvlFont, setInfOvlFont] = useState(9.5);
   const [infOvlVisible, setInfOvlVisible] = useState(true);
+  // In Viewer 툴바 사용자화(표시/숨김) + Modality 기본 레이아웃(행잉과 별도)
+  const [infTb, setInfTb] = useState<Record<string, boolean>>({});
+  const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
   const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
@@ -182,10 +186,19 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (cv && CLIENT_VIEWERS.some((x) => x.id === cv)) setClientViewer(cv);
       const mk = (v as { mode_key?: string }).mode_key;
       if (mk) setModeSel(mk);
-      const iv = v as { infi_sel_color?: string; infi_overlay_font?: number; infi_overlay_visible?: boolean };
+      const iv = v as { infi_sel_color?: string; infi_overlay_font?: number; infi_overlay_visible?: boolean;
+                        infi_toolbar?: Record<string, boolean>;
+                        infi_default_layout?: Record<string, { s?: { r: number; c: number } | null;
+                                                               i?: { r: number; c: number } | null }> };
       if (iv.infi_sel_color) setInfSelColor(iv.infi_sel_color);
       if (iv.infi_overlay_font) setInfOvlFont(iv.infi_overlay_font);
       if (iv.infi_overlay_visible !== undefined) setInfOvlVisible(iv.infi_overlay_visible);
+      if (iv.infi_toolbar) setInfTb(iv.infi_toolbar);
+      if (iv.infi_default_layout) {
+        const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
+        setDefLay(Object.fromEntries(Object.entries(iv.infi_default_layout)
+          .map(([k, cfg]) => [k, { s: toStr(cfg.s), i: toStr(cfg.i) }])));
+      }
       if (v.paletteSide) setPaletteSide(v.paletteSide);
       if (v.thumbSide) setThumbSide(v.thumbSide);
       if (v.thumbSize) setThumbSize(v.thumbSize);
@@ -268,6 +281,16 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       hanging2d: { CT: h2dCT, MR: h2dMR },
       client_viewer: clientViewer,
       infi_sel_color: infSelColor, infi_overlay_font: infOvlFont, infi_overlay_visible: infOvlVisible,
+      infi_toolbar: infTb,
+      infi_default_layout: Object.fromEntries(Object.entries(defLay)
+        .map(([k, v]) => {
+          const parse = (s: string) => {
+            const m = s.match(/(\d+)\s*x\s*(\d+)/);
+            return m ? { r: Number(m[1]), c: Number(m[2]) } : null;
+          };
+          return [k, { s: parse(v.s), i: parse(v.i) }];
+        })
+        .filter(([, cfg]) => (cfg as { s: unknown; i: unknown }).s || (cfg as { s: unknown; i: unknown }).i)),
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
@@ -988,6 +1011,50 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </Row>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   단축키(뷰어): <b>T + 마우스 스크롤</b> = 글자 크기 조절 · <b>T + Del</b> = 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.
+                </div>
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="Modality 기본 레이아웃 (In Viewer — 행잉과 별도)">
+                {["CT", "MR", "CR", "DX", "US", "XA", "*"].map((m) => (
+                  <Row key={m} label={m === "*" ? "기타(전체)" : m}>
+                    <span style={{ fontSize: 12 }}>Series</span>
+                    <select value={defLay[m]?.s ?? ""} style={{ fontSize: 12 }}
+                            onChange={(e) => setDefLay((p) => ({ ...p, [m]: { s: e.target.value, i: p[m]?.i ?? "" } }))}>
+                      <option value="">자동</option>
+                      {IN_LAYOUTS.map((l) => <option key={`${l.r}x${l.c}`}>{`${l.r} x ${l.c}`}</option>)}
+                    </select>
+                    <span style={{ fontSize: 12, marginLeft: 8 }}>Image</span>
+                    <select value={defLay[m]?.i ?? ""} style={{ fontSize: 12 }}
+                            onChange={(e) => setDefLay((p) => ({ ...p, [m]: { s: p[m]?.s ?? "", i: e.target.value } }))}>
+                      <option value="">자동</option>
+                      {IN_LAYOUTS.map((l) => <option key={`${l.r}x${l.c}`}>{`${l.r} x ${l.c}`}</option>)}
+                    </select>
+                  </Row>
+                ))}
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  검사를 열 때 해당 Modality 의 Series(페인)/Image(타일) 분할이 자동 적용됩니다.
+                  '자동' = 기존 규칙(CT/MR 다층 3x3). 행잉 프로토콜(F-18)과는 별개 설정입니다.
+                </div>
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="툴바 사용자화 (In Viewer — 표시할 툴 선택)">
+                <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)",
+                              borderRadius: 4, padding: 6 }}>
+                  {IN_PALETTE.map((t) => (
+                    <label key={t.id}
+                           style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12,
+                                    padding: "2px 4px", opacity: t.impl ? 1 : 0.55 }}>
+                      <input type="checkbox" checked={infTb[t.id] !== false}
+                             onChange={(e) => setInfTb((p) => ({ ...p, [t.id]: e.target.checked }))} />
+                      <span style={{ width: 22, textAlign: "center", flexShrink: 0 }}>{t.icon}</span>
+                      <span style={{ color: "var(--text-secondary)" }}>{t.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  체크 해제한 툴은 뷰어 팔레트에서 숨겨집니다. 흐린 항목은 개발 예정 툴입니다.
                 </div>
               </Group>
             )}

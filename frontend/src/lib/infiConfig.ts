@@ -203,3 +203,63 @@ export const IN_LIGHT_THEME = {
   listBk: "rgb(255,255,255)",
   text: "rgb(0,0,0)",
 };
+
+// ── User Guide p.11~14 툴 카탈로그 (표 순서 유지) — impl=false 는 반투명(개발 대상) ──
+export const IN_PALETTE: { id: string; icon: string; label: string; impl: boolean; mode?: boolean }[] = [
+  // p.11 §3.4 기본 6종
+  { id: "select", icon: "➤", label: "Select — 이미지 선택/해제", impl: true, mode: true },
+  { id: "pan", icon: "✥", label: "Pan — 이미지 이동(창보다 클 때 유용)", impl: true, mode: true },
+  { id: "zoom", icon: "🔍", label: "Zoom — 드래그로 확대/축소 (Ctrl+휠)", impl: true, mode: true },
+  { id: "wl", icon: "◐", label: "Windowing — W/L 적용(우드래그 기본)", impl: true, mode: true },
+  { id: "magnify", icon: "⌕", label: "Magnification — 부분 확대경 (개발 예정)", impl: false },
+  { id: "fit", icon: "▣", label: "Fit — 창 크기에 맞춤", impl: true },
+  // p.12 상단
+  { id: "capture", icon: "📷", label: "Capture All — 현재 이미지 저장", impl: true },
+  { id: "reset", icon: "↺", label: "Reset — 초기값 복원", impl: true },
+  { id: "print", icon: "🖨", label: "Print — 리포트/이미지 인쇄", impl: true },
+  { id: "cursor3d", icon: "✛", label: "3D Cursor — 3D 위치 표시 (개발 예정)", impl: false },
+  { id: "dictation", icon: "🎙", label: "Dictation — 음성 녹음 (개발 예정)", impl: false },
+  { id: "playdict", icon: "🔊", label: "Play Dictation (개발 예정)", impl: false },
+  { id: "refreshExam", icon: "🔄", label: "Refresh Exam — 검사 정보 갱신", impl: true },
+  // p.12 중단 — 선택/방향
+  { id: "selAll", icon: "⊞", label: "Select All — 전체 선택 (개발 예정)", impl: false },
+  { id: "selInv", icon: "⊟", label: "Select All Inverse (개발 예정)", impl: false },
+  { id: "flipV", icon: "⇵", label: "Flip Vertical — 상하 반전", impl: true },
+  { id: "flipH", icon: "⇋", label: "Flip Horizontal — 좌우 반전", impl: true },
+  { id: "rotL", icon: "⟲", label: "Rotate Left 90 — 반시계 90도", impl: true },
+  { id: "rotR", icon: "⟳", label: "Rotate Right 90 — 시계 90도", impl: true },
+  { id: "rot180", icon: "◒", label: "Rotate 180", impl: true },
+  { id: "invert", icon: "◑", label: "B/W Inverse — 흑백 반전", impl: true },
+  { id: "shutEl", icon: "◙", label: "Ellipse Shutter (개발 예정)", impl: false },
+  { id: "shutRect", icon: "▣", label: "Rectangle Shutter (개발 예정)", impl: false },
+  { id: "shutPoly", icon: "⬠", label: "Polyline Shutter (개발 예정)", impl: false },
+  // p.13 상단 — 필터/스크롤
+  { id: "sharpen", icon: "◮", label: "Sharpens Filter — 선예화", impl: true },
+  { id: "smooth", icon: "◍", label: "Average Filter — 평활화", impl: true },
+  { id: "pseudo", icon: "🎨", label: "Pseudo — 의사 컬러(핵의학)", impl: true },
+  { id: "cine", icon: "▶", label: "Auto Scroll — 이미지 자동 스크롤", impl: true },
+  // p.13 측정/분석
+  { id: "ctr", icon: "♥", label: "CT Ratio — 심흉비 (개발 예정)", impl: false },
+  { id: "limb", icon: "🦵", label: "Limb Length Discrepancy (개발 예정)", impl: false },
+  { id: "centerline", icon: "╂", label: "Center Line (개발 예정)", impl: false },
+  { id: "profile", icon: "📈", label: "Profile — 픽셀 그래프 (개발 예정)", impl: false },
+  { id: "table2d", icon: "▤", label: "2D Table — 픽셀값 표 (개발 예정)", impl: false },
+  { id: "calibrate", icon: "📐", label: "Calibrate — Pixel Spacing 정보", impl: true },
+  { id: "spine", icon: "🦴", label: "Spine Label (개발 예정)", impl: false },
+  { id: "anno3d", icon: "🧊", label: "3D Arrow/Text/Line/Curve (개발 예정)", impl: false },
+  // p.13~14 — 2D 주석/측정
+  { id: "arrow2d", icon: "↗", label: "2D Arrow (개발 예정)", impl: false },
+  { id: "text2d", icon: "T", label: "2D Text (개발 예정)", impl: false },
+  { id: "box2d", icon: "▭", label: "2D Box — 메모 (개발 예정)", impl: false },
+  { id: "key2d", icon: "🔑", label: "Key — 현재 이미지를 키이미지로 등록/해제 (워크리스트 🔑·Key 필터 조회)", impl: true },
+  { id: "circle", icon: "◯", label: "Circle (개발 예정)", impl: false },
+  { id: "polyline", icon: "〰", label: "Polyline/Freehand (개발 예정)", impl: false },
+  { id: "mline", icon: "📏", label: "Measure 2D Line — 두 점 클릭 = 거리(mm)", impl: true, mode: true },
+  { id: "mangle", icon: "∠", label: "Measure 2D Angle — 세 점 클릭 = 각도", impl: true, mode: true },
+  { id: "mellipse", icon: "⬭", label: "Measure 2D Ellipse ROI (개발 예정)", impl: false },
+  { id: "mrect", icon: "⬜", label: "Measure 2D Rectangle ROI (개발 예정)", impl: false },
+  { id: "cobb", icon: "⟁", label: "Measure Cobb Angle (개발 예정)", impl: false },
+  { id: "marking", icon: "M", label: "Marking (개발 예정)", impl: false },
+  { id: "lens", icon: "🎯", label: "Lens/Hounsfield/SUV (개발 예정)", impl: false },
+  { id: "clrAnno", icon: "🧹", label: "측정 전체 지우기", impl: true },
+];
