@@ -28,6 +28,15 @@ export function ReportWindow() {
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({});
   const [msg, setMsg] = useState("");
   const report = reports[0] ?? null;
+
+  // 워크리스트에서 로그아웃하면 판독 창도 닫는다 (뷰어 창과 동일한 신호)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "sv_logout" || (e.key === "sv_token" && !e.newValue)) window.close();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
   const finalized = report?.status === "finalized";
   const sig = (report?.diff_metrics as { signature?: { name: string; license_no: string; signed_at: string } })?.signature;
 

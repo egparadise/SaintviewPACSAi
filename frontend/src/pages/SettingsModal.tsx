@@ -109,6 +109,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // 판독(Reading) 페이지 — 기본/단축키/템플릿 3탭 + 레포트 옵션(report.prefs)
   const [rdTab, setRdTab] = useState<"basic" | "shortcut" | "template">("basic");
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({
+    always_report_window: false,
     open_next_after_save: false, save_alert: false, auto_insert_prior: false,
     cvr_notice: false, sidebar_tab: "history", panel_tab: "shortcut",
     insert_pos: "end", key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A",
@@ -704,6 +705,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </Group>
                     <Group title="레포트 옵션">
                       {([
+                        ["always_report_window", "판독 창 항상 별도로 열기 — 워크리스트 옆 웹창(검사 선택 연동)"],
                         ["open_next_after_save", "저장(확정) 후 다음 레포트 열기"],
                         ["save_alert", "레포트 저장 알림 사용"],
                         ["auto_insert_prior", "이전 검사 비교 정보 자동 삽입"],

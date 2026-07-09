@@ -2144,10 +2144,34 @@ export function Worklist() {
     return () => clearInterval(t);
   }, [refreshSec]);
 
+  // 판독 창 항상 열기(설정>판독) — 워크리스트 옆 별도 웹창(?report=1), 선택 동기(sync) 연동
+  const readingWinRef = useRef<Window | null>(null);
+  const alwaysReadingRef = useRef(false);
+  useEffect(() => {
+    api.getSetting("report.prefs").then((r) => {
+      alwaysReadingRef.current = !!(r.value as { always_report_window?: boolean }).always_report_window;
+    }).catch(() => {});
+  }, [refreshKey]);
+  const ensureReadingWindow = useCallback((id: number) => {
+    if (!alwaysReadingRef.current) return;
+    if (readingWinRef.current && !readingWinRef.current.closed) return;   // 이미 옆에 떠 있음
+    void (async () => {
+      // 배치: 설정>모니터의 판독 모니터 우선, 없으면 워크리스트 창 오른쪽 옆
+      const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
+      const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
+      const beside = `left=${window.screenX + Math.max(360, window.outerWidth - 620)},` +
+        `top=${window.screenY},width=980,height=${Math.max(600, window.outerHeight - 40)}`;
+      const features = await screenFeatures(mon != null && mon >= 0 ? [mon] : null, beside);
+      readingWinRef.current = window.open(
+        `${window.location.origin}${window.location.pathname}?report=1&study=${id}`, "sv_report", features);
+    })();
+  }, []);
+
   const onSelect = useCallback((row: StudyRow) => {
     api.study(row.id).then(setSelected);
     postStudySync(row.id, "worklist");  // Viewer·Reading 연동
-  }, []);
+    ensureReadingWindow(row.id);        // 설정 시 판독 창 자동 오픈(옆 창)
+  }, [ensureReadingWindow]);
 
   // 다른 창(Viewer/Reading)에서 환자가 바뀌면 워크리스트 선택도 따라간다
   useEffect(() => {
@@ -2196,7 +2220,8 @@ export function Worklist() {
   const selectAndSync = useCallback((d: StudyDetail) => {
     setSelected(d);
     postStudySync(d.id, "worklist");
-  }, []);
+    ensureReadingWindow(d.id);
+  }, [ensureReadingWindow]);
 
   const doAction = useCallback(async (a: string, row?: StudyRow) => {
     const target = row ?? selected;
