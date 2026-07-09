@@ -364,6 +364,13 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
   mods: Record<string, number>; activeMod: string; onMod: (m: string) => void;
 }) {
   const total = Object.values(mods).reduce((a, b) => a + b, 0);
+  const [favTick, setFavTick] = useState(0);   // Favorites 편집(이름변경/삭제) 후 재렌더
+  const favs = (JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]") as
+    { label: string; filters?: Record<string, string>; searchText?: string }[]);
+  const saveFavs = (list: typeof favs) => {
+    localStorage.setItem("sv_shortcuts", JSON.stringify(list));
+    setFavTick(favTick + 1);
+  };
   const pick = (p: { key: string; days: number }) => {
     if (p.days < 0) return onPick(p.key, "");
     const d = new Date();
@@ -395,26 +402,29 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
       }}>
         Search Filter
       </div>
-      <div onClick={() => onMod("")}
-           style={{
-             padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
-             display: "flex", justifyContent: "space-between",
-             background: activeMod === "" ? "var(--accent-subtle)" : undefined,
-             color: activeMod === "" ? "var(--text-primary)" : "var(--text-secondary)",
-           }}>
-        <span>📁 전체</span><span style={{ fontSize: 11 }}>{total}</span>
-      </div>
-      {Object.entries(mods).sort(([a], [b]) => a.localeCompare(b)).map(([m, n]) => (
-        <div key={m} onClick={() => onMod(activeMod === m ? "" : m)}
+      {/* 항목이 늘어나도 섹션 안에서 스크롤 */}
+      <div style={{ maxHeight: "30vh", overflowY: "auto", flexShrink: 0 }}>
+        <div onClick={() => onMod("")}
              style={{
-               padding: "3px 8px 3px 18px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+               padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
                display: "flex", justifyContent: "space-between",
-               background: activeMod === m ? "var(--accent-subtle)" : undefined,
-               color: activeMod === m ? "var(--text-primary)" : "var(--text-secondary)",
+               background: activeMod === "" ? "var(--accent-subtle)" : undefined,
+               color: activeMod === "" ? "var(--text-primary)" : "var(--text-secondary)",
              }}>
-          <span>{m || "(없음)"}</span><span style={{ fontSize: 11 }}>{n}</span>
+          <span>📁 전체</span><span style={{ fontSize: 11 }}>{total}</span>
         </div>
-      ))}
+        {Object.entries(mods).sort(([a], [b]) => a.localeCompare(b)).map(([m, n]) => (
+          <div key={m} onClick={() => onMod(activeMod === m ? "" : m)}
+               style={{
+                 padding: "3px 8px 3px 18px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+                 display: "flex", justifyContent: "space-between",
+                 background: activeMod === m ? "var(--accent-subtle)" : undefined,
+                 color: activeMod === m ? "var(--text-primary)" : "var(--text-secondary)",
+               }}>
+            <span>{m || "(없음)"}</span><span style={{ fontSize: 11 }}>{n}</span>
+          </div>
+        ))}
+      </div>
       {/* INFINITT Guide ⑦ Favorites — 저장된 검색 바로가기(★저장) 원클릭 적용 */}
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
@@ -422,15 +432,39 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
       }}>
         Favorites
       </div>
-      {(JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]") as { label: string }[]).map((s) => (
-        <div key={s.label}
-             onClick={() => window.dispatchEvent(new CustomEvent("sv-apply-shortcut", { detail: s }))}
-             title="저장된 검색조건 적용 (툴바 ★저장으로 등록)"
-             style={{ padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
-                      color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          ⭐ {s.label}
-        </div>
-      ))}
+      <div style={{ maxHeight: "22vh", overflowY: "auto", flexShrink: 0 }}>
+        {favs.length === 0 && (
+          <div style={{ padding: "2px 8px", fontSize: 11, color: "var(--text-secondary)" }}>
+            툴바 ★저장으로 현재 검색조건 등록
+          </div>
+        )}
+        {favs.map((s, i) => (
+          <div key={`${s.label}-${favTick}`}
+               onClick={() => window.dispatchEvent(new CustomEvent("sv-apply-shortcut", { detail: s }))}
+               title={`클릭=적용 · ✏=이름 변경 · ✕=삭제\n(같은 이름으로 ★저장하면 조건이 덮어써집니다)`}
+               className="sv-fav-row"
+               style={{ padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+                        color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              ⭐ {s.label}
+            </span>
+            <span title="이름 변경" style={{ flexShrink: 0 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const nn = prompt("바로가기 이름 변경", s.label);
+                    if (!nn || nn === s.label) return;
+                    saveFavs(favs.map((f, k) => (k === i ? { ...f, label: nn } : f)));
+                  }}>✏</span>
+            <span title="삭제" style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`'${s.label}' 바로가기를 삭제할까요?`)) {
+                      saveFavs(favs.filter((_, k) => k !== i));
+                    }
+                  }}>✕</span>
+          </div>
+        ))}
+      </div>
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
         padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
