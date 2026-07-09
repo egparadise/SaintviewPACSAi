@@ -117,6 +117,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [orthanc, setOrthanc] = useState<OrthancStatus | null>(null);
   // 05 Mode Profile — 백엔드 mode.profiles JSON (S7 applyMode)
   const [modeProfiles, setModeProfiles] = useState<Record<string, ModeProfile>>({});
+  const [modeSel, setModeSel] = useState("");   // 현재 적용된 모드(viewer.prefs.mode_key) — 콤보에 표시
   const [modeJson, setModeJson] = useState("");
   // UBPACS-Z Worklist 구성요소 표시/숨김 (Study List 제외 추가·삭제)
   const [wlPanels, setWlPanels] = useState<Record<string, boolean>>({
@@ -173,6 +174,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       setHangingMR(h.MR ?? "default");
       const cv = (v as { client_viewer?: string }).client_viewer;
       if (cv && CLIENT_VIEWERS.some((x) => x.id === cv)) setClientViewer(cv);
+      const mk = (v as { mode_key?: string }).mode_key;
+      if (mk) setModeSel(mk);
       if (v.paletteSide) setPaletteSide(v.paletteSide);
       if (v.thumbSide) setThumbSide(v.thumbSide);
       if (v.thumbSize) setThumbSize(v.thumbSize);
@@ -321,21 +324,22 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               <>
                 <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                    <select id="sv-mode" defaultValue="">
+                    <select id="sv-mode" value={modeSel} onChange={(e) => setModeSel(e.target.value)}>
                       <option value="" disabled>모드 선택…</option>
                       {Object.entries(modeProfiles).map(([k, p]) => (
-                        <option key={k} value={k}>{p.label ?? k}</option>
+                        <option key={k} value={k}>{p.label ?? k}{k === modeSel ? " ✓ (현재 적용)" : ""}</option>
                       ))}
                     </select>
                     <button onClick={async () => {
-                      const m = (document.getElementById("sv-mode") as HTMLSelectElement).value;
+                      const m = modeSel;
                       const prof = modeProfiles[m];
                       if (!prof) return;
                       const cur = (await api.getSetting("worklist.prefs")).value;
                       const wl = { ...cur, ...(prof.worklist ?? {}) } as Record<string, unknown>;
                       await api.putSetting("worklist.prefs", wl, "user");
                       const curv = (await api.getSetting("viewer.prefs")).value;
-                      const vw = { ...curv, ...(prof.viewer ?? {}) } as Record<string, unknown>;
+                      // mode_key 영속 — 다음에 설정을 열면 현재 적용 모드가 콤보에 표시된다
+                      const vw = { ...curv, ...(prof.viewer ?? {}), mode_key: m } as Record<string, unknown>;
                       await api.putSetting("viewer.prefs", vw, "user");
                       // 설정 창 상태를 프로파일 값으로 즉시 동기화 — 이후 OK(저장)가 옛 값으로 덮어쓰지 않도록
                       const wlc = wl.columns as string[] | undefined;
@@ -354,7 +358,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     {isAdmin && (
                       <button title="현재 워크리스트·뷰어 레이아웃(컬럼·검색필드·팔레트/썸네일 배치·선택 뷰어)을 선택한 프로파일에 저장 (전역)"
                               onClick={async () => {
-                        const m = (document.getElementById("sv-mode") as HTMLSelectElement).value;
+                        const m = modeSel;
                         const prof = modeProfiles[m];
                         if (!prof) { alert("저장할 프로파일을 먼저 선택하세요"); return; }
                         if (!confirm(`현재 화면 구성을 '${prof.label ?? m}' 프로파일에 저장할까요? (전역 — 모든 사용자에게 적용)`)) return;
