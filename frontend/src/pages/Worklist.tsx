@@ -2332,12 +2332,13 @@ export function Worklist() {
       {infiMode && (
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
                       padding: "3px 10px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", gap: 2, padding: "2px 4px", border: "1px solid var(--border)",
-                        borderRadius: 5, background: "var(--bg-elevated)" }}>
+          <div style={{ display: "flex", gap: 4, padding: "3px 6px", border: "1px solid var(--border)",
+                        borderRadius: 6, background: "var(--bg-elevated)" }}>
             {INFI_ICONS.map((t) => (
               <button key={t.a} title={t.l} onClick={() => infiTool(t.a)}
-                      style={{ width: 32, height: 26, fontSize: 14, padding: 0, border: "none",
-                               background: "transparent", cursor: "pointer", borderRadius: 3 }}
+                      style={{ width: 46, height: 40, fontSize: 22, padding: 0, border: "none",
+                               display: "flex", alignItems: "center", justifyContent: "center",
+                               background: "transparent", cursor: "pointer", borderRadius: 5 }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-subtle)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 {t.i}
