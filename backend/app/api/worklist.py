@@ -252,6 +252,52 @@ async def import_dicom(
                                  str(Path(__file__).resolve().parents[2] / "storage" / "import")))
     safe = lambda s: re.sub(r"[^\w\-.]", "_", s or "UNKNOWN")[:64]  # noqa: E731
 
+    def _image_to_sc(raw: bytes, filename: str) -> bytes | None:
+        """JPEG/PNG/BMP → DICOM Secondary Capture 변환 (일반 이미지도 PACS 파이프라인으로)."""
+        try:
+            import io as _io
+            from datetime import datetime
+
+            from PIL import Image
+            from pydicom.dataset import Dataset, FileMetaDataset
+            from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+            img = Image.open(_io.BytesIO(raw)).convert("RGB")
+            stem = re.sub(r"\.[^.]+$", "", filename or "image")
+            meta = FileMetaDataset()
+            meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.7"   # Secondary Capture
+            meta.MediaStorageSOPInstanceUID = generate_uid()
+            meta.TransferSyntaxUID = ExplicitVRLittleEndian
+            ds = Dataset()
+            ds.file_meta = meta
+            ds.SOPClassUID = meta.MediaStorageSOPClassUID
+            ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+            ds.StudyInstanceUID = generate_uid()
+            ds.SeriesInstanceUID = generate_uid()
+            ds.PatientID = "MEDIA"
+            ds.PatientName = safe(stem)[:48]
+            ds.Modality = "OT"
+            now = datetime.now()
+            ds.StudyDate = now.strftime("%Y%m%d")
+            ds.StudyTime = now.strftime("%H%M%S")
+            ds.StudyDescription = f"Media Import — {stem[:40]}"
+            ds.SeriesNumber = 1
+            ds.InstanceNumber = 1
+            ds.SamplesPerPixel = 3
+            ds.PhotometricInterpretation = "RGB"
+            ds.PlanarConfiguration = 0
+            ds.Rows, ds.Columns = img.height, img.width
+            ds.BitsAllocated = 8
+            ds.BitsStored = 8
+            ds.HighBit = 7
+            ds.PixelRepresentation = 0
+            ds.PixelData = img.tobytes()
+            buf = _io.BytesIO()
+            ds.save_as(buf, write_like_original=False)
+            return buf.getvalue()
+        except Exception:  # noqa: BLE001 — 변환 실패 시 원본 그대로(Orthanc가 거부)
+            return None
+
     results = []
     ok = 0
     parent_studies: set[str] = set()   # 업로드된 인스턴스의 Orthanc StudyID — 즉시 등록용
@@ -260,6 +306,11 @@ async def import_dicom(
         if not data:
             results.append({"filename": f.filename, "size": 0, "status": "빈 파일"})
             continue
+        # 일반 이미지(JPEG/PNG/BMP)는 DICOM SC 로 변환해 동일 파이프라인으로 등록
+        if re.search(r"\.(jpe?g|png|bmp)$", f.filename or "", re.I):
+            sc = _image_to_sc(data, f.filename or "image")
+            if sc is not None:
+                data = sc
         try:
             r = client.upload_dicom(data)
             status = "중복" if r.get("Status") == "AlreadyStored" else "성공"

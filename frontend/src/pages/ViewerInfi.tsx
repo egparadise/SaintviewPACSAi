@@ -65,6 +65,9 @@ interface Pane {
   fx: "" | "sharpen" | "smooth" | "pseudo";   // p.13 필터(Sharpens/Average/Pseudo)
   il: { r: number; c: number };  // Image Layout — DICOM 계층: 페인(Series) 내부의 이미지 타일 분할(페인별)
   shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] } | null;  // 표시 셔터
+  playing?: boolean;             // 시네 재생 중 (페인별 독립)
+  cineSec?: number;              // 시네 간격(초) — 없으면 설정 기본값
+  media?: { url: string; kind: "image" | "video"; name: string } | null;  // 로컬 미디어(JPEG/AVI 등)
 }
 const initPane = (studyUid = ""): Pane => ({
   series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
@@ -231,7 +234,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [active, setActive] = useState(0);
   const [tool, setTool] = useState<Tool>("select");
   const [maximized, setMaximized] = useState<number | null>(null);
-  const [cine, setCine] = useState(false);
+  // 시네 기본 간격(초) — 설정>뷰어(viewer.prefs.infi_cine_sec)에서 초기값 변경
+  const [cineDefault, setCineDefault] = useState(0.5);
+  const mediaInputRef = useRef<HTMLInputElement>(null);   // 📂 이미지/동영상 파일 열기
   const [closeMenu, setCloseMenu] = useState(false);
   const [wlPanel, setWlPanel] = useState(false);
   // §3.3 Crosslink 5기능 — 전부 동작: crosslink=마스터, auto_sync=같은 검사, sync_other=다른 검사(과거),
@@ -430,16 +435,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }));
   }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
 
+  // ── 시네 엔진 — 페인별 독립 재생(playing/cineSec), 100ms 틱에서 각 페인의 간격 경과 시 전진 ──
+  const cineLast = useRef<Record<number, number>>({});
   useEffect(() => {
-    if (!cine) return;
-    const t = setInterval(() => {
-      setPanes((ps) => ps.map((p, k) => {
-        if (k !== active || !p.series) return p;
-        return { ...p, index: (p.index + p.il.r * p.il.c) % p.series.instances.length };
-      }));
-    }, 150);
-    return () => clearInterval(t);
-  }, [cine, active]);
+    const t = window.setInterval(() => {
+      const now = Date.now();
+      setPanes((ps) => {
+        let changed = false;
+        const next = ps.map((p, k) => {
+          if (!p.playing || !p.series || p.media) return p;
+          const sec = p.cineSec ?? cineDefault;
+          if (now - (cineLast.current[k] ?? 0) < sec * 1000) return p;
+          cineLast.current[k] = now;
+          changed = true;
+          const step = p.il.r * p.il.c;
+          return { ...p, index: (p.index + step) % p.series.instances.length };
+        });
+        return changed ? next : ps;
+      });
+    }, 100);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2500); };
 
@@ -475,7 +492,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         break;
       }
       case "reset": upd(active, { ...initPane(), series: p.series, index: p.index }); break;
-      case "cine": setCine((c) => !c); break;
+      case "cine": {   // 활성(또는 멀티 선택) 페인 재생 토글
+        const newVal = !panes[active]?.playing;
+        for (const k of targetsOf(active)) cineLast.current[k] = 0;
+        updMany(targetsOf(active), () => ({ playing: newVal }));
+        break;
+      }
       case "print": window.print(); break;
       case "refreshExam": loadSeries(); say("검사 정보를 갱신했습니다"); break;
       case "clrAnno":
@@ -832,10 +854,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (v.infi_overlay_visible !== undefined) setOvlVisible(v.infi_overlay_visible);
       if (v.infi_sel_color) setSelColor(v.infi_sel_color);
       if (v.infi_toolbar) setTbShow(v.infi_toolbar);
-      const tv = r.value as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number };
+      const tv = r.value as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number;
+                              infi_cine_sec?: number };
       if (tv.infi_tool_cols) setToolCols(tv.infi_tool_cols);
       if (tv.infi_tool_labels !== undefined) setToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setToolSize(tv.infi_tool_size);
+      if (tv.infi_cine_sec) setCineDefault(tv.infi_cine_sec);
     }).catch(() => {});
   }, []);
   const persistPrefs = (patch: Record<string, unknown>) => {
@@ -914,6 +938,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const renderPane = (pi: number) => {
     const p = panes[pi];
     if (!p) return <div style={{ flex: 1 }} />;
+    // 로컬 미디어(이미지/동영상) 페인 — DICOM 외 JPEG/PNG/BMP/AVI/MP4/MPEG 표시·재생
+    if (p.media) {
+      return (
+        <div onMouseDown={() => setActive(pi)}
+             style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
+                      outline: active === pi ? "2px solid #4ade80"
+                        : selPanes.has(pi) ? `2px solid ${selColor}` : "1px solid #1e293b",
+                      display: "grid", placeItems: "center", overflow: "hidden" }}>
+          {p.media.kind === "video"
+            ? <video src={p.media.url} controls autoPlay loop
+                     style={{ maxWidth: "100%", maxHeight: "100%" }} />
+            : <img src={p.media.url} alt=""
+                   style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
+          <div style={{ position: "absolute", top: 4, left: 6, fontSize: 10.5, color: "#7dd3fc",
+                        textShadow: "0 0 3px #000", pointerEvents: "none" }}>
+            📂 {p.media.name}
+          </div>
+          <button title="미디어 닫기 — DICOM 표시로 복귀" onClick={() => upd(pi, { media: null })}
+                  style={{ position: "absolute", top: 3, right: 4, fontSize: 11, padding: "0 6px" }}>✕</button>
+        </div>
+      );
+    }
     const insts = p.series?.instances ?? [];
     const wlText = p.wl ? p.wl.replace(",", " / ") : "기본";
     return (
@@ -1003,6 +1049,27 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           );
         })}
         {insts.length > 1 && <ScrollBar index={p.index} total={insts.length} />}
+        {/* 페인별 시네 컨트롤 — 각 Layout 프레임 개별 재생/정지 + 간격(초) */}
+        {p.series && insts.length > 1 && (
+          <div onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+               onWheel={(e) => e.stopPropagation()}
+               style={{ position: "absolute", bottom: 3, left: "50%", transform: "translateX(-50%)",
+                        zIndex: 4, display: "flex", gap: 4, alignItems: "center",
+                        background: "rgba(2,6,23,0.72)", borderRadius: 6, padding: "1px 7px" }}>
+            <span title={p.playing ? "Pause — 이 페인 정지" : "Play — 이 페인만 재생"}
+                  style={{ cursor: "pointer", fontSize: 12.5, color: p.playing ? "#38bdf8" : "#cbd5e1" }}
+                  onClick={() => { cineLast.current[pi] = 0; upd(pi, { playing: !p.playing }); }}>
+              {p.playing ? "⏸" : "▶"}
+            </span>
+            <input type="number" min={0.1} max={10} step={0.1} title="이 페인의 넘김 간격(초)"
+                   value={p.cineSec ?? cineDefault}
+                   onChange={(e) => upd(pi, {
+                     cineSec: Math.min(10, Math.max(0.1, Number(e.target.value) || cineDefault)),
+                   })}
+                   style={{ width: 42, fontSize: 10, padding: "0 2px" }} />
+            <span style={{ fontSize: 9.5, color: "#94a3b8" }}>초</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -1231,6 +1298,39 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   style={{ marginLeft: 4, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
             ⇄ Compare
           </button>
+          {/* 시네 — ▶는 누르는 즉시 ⏸로 전환. 대상=활성 페인(멀티 선택 시 함께). 옆 숫자=간격(초) */}
+          <button title={panes[active]?.playing
+                    ? "Pause — 재생 정지"
+                    : "Play — 자동으로 다음 영상 넘기기 (멀티 선택 시 선택 페인 모두)"}
+                  onClick={() => fire("cine")}
+                  style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700,
+                           background: panes[active]?.playing ? "var(--accent)" : undefined,
+                           color: panes[active]?.playing ? "#fff" : undefined }}>
+            {panes[active]?.playing ? "⏸" : "▶"}
+          </button>
+          <input type="number" min={0.1} max={10} step={0.1}
+                 title="넘김 간격(초) — 활성/선택 페인에 적용"
+                 value={panes[active]?.cineSec ?? cineDefault}
+                 onChange={(e) => {
+                   const v = Math.min(10, Math.max(0.1, Number(e.target.value) || cineDefault));
+                   updMany(targetsOf(active), () => ({ cineSec: v }));
+                 }}
+                 style={{ width: 52, marginLeft: 3, fontSize: 12 }} />
+          <span style={{ fontSize: 11, marginLeft: 1 }}>초</span>
+          {/* 📂 미디어 열기 — JPEG/PNG/BMP/AVI/MP4/MPEG 를 활성 페인에서 표시/재생 */}
+          <button title="파일 열기 — 이미지(JPEG/PNG/BMP)·동영상(AVI/MP4/MPEG)을 활성 페인에서 보기"
+                  onClick={() => mediaInputRef.current?.click()}
+                  style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }}>📂</button>
+          <input ref={mediaInputRef} type="file" hidden
+                 accept="image/*,video/*,.avi,.mpg,.mpeg,.mp4"
+                 onChange={(e) => {
+                   const f = e.target.files?.[0];
+                   if (!f) return;
+                   const kind = f.type.startsWith("video") || /\.(avi|mpe?g|mp4|mov)$/i.test(f.name)
+                     ? "video" as const : "image" as const;
+                   upd(active, { media: { url: URL.createObjectURL(f), kind, name: f.name } });
+                   e.target.value = "";
+                 }} />
         </span>
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
         <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
@@ -1322,7 +1422,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: `repeat(${toolCols}, 1fr)`, gap: 3 }}>
                     {items.map((t) => {
-                      const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
+                      const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && !!panes[active]?.playing)
                         || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
                         || (t.id === "dictation" && recording);
                       const name = t.label.split("—")[0].trim();

@@ -21,6 +21,7 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
   // 시그니처 없는 구형 raw 파일은 그룹 0008 리틀엔디언 시작으로 감지 (PA000000/IM000000 류 CD 대응)
   const sniffDicom = async (f: File): Promise<boolean> => {
     if (/\.dcm$/i.test(f.name)) return true;
+    if (/\.(jpe?g|png|bmp)$/i.test(f.name)) return true;   // 일반 이미지 — 서버가 DICOM SC 로 변환 등록
     if (f.name.toUpperCase() === "DICOMDIR") return false;   // 디렉토리 레코드는 제외
     if (f.size < 132) return false;
     try {

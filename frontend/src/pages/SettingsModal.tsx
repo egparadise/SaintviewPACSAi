@@ -90,6 +90,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infToolCols, setInfToolCols] = useState(2);
   const [infToolLabels, setInfToolLabels] = useState(true);
   const [infToolSize, setInfToolSize] = useState(34);
+  const [infCineSec, setInfCineSec] = useState(0.5);   // 시네 기본 간격(초)
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
@@ -199,10 +200,12 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (iv.infi_overlay_font) setInfOvlFont(iv.infi_overlay_font);
       if (iv.infi_overlay_visible !== undefined) setInfOvlVisible(iv.infi_overlay_visible);
       if (iv.infi_toolbar) setInfTb(iv.infi_toolbar);
-      const tv = v as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number };
+      const tv = v as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number;
+                        infi_cine_sec?: number };
       if (tv.infi_tool_cols) setInfToolCols(tv.infi_tool_cols);
       if (tv.infi_tool_labels !== undefined) setInfToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setInfToolSize(tv.infi_tool_size);
+      if (tv.infi_cine_sec) setInfCineSec(tv.infi_cine_sec);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
         setDefLay(Object.fromEntries(Object.entries(iv.infi_default_layout)
@@ -292,6 +295,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_sel_color: infSelColor, infi_overlay_font: infOvlFont, infi_overlay_visible: infOvlVisible,
       infi_toolbar: infTb,
       infi_tool_cols: infToolCols, infi_tool_labels: infToolLabels, infi_tool_size: infToolSize,
+      infi_cine_sec: infCineSec,
       infi_default_layout: Object.fromEntries(Object.entries(defLay)
         .map(([k, v]) => {
           const parse = (s: string) => {
@@ -1072,6 +1076,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <Row label="아이콘 크기">
                   <input type="range" min={24} max={52} step={2} value={infToolSize}
                          onChange={(e) => setInfToolSize(Number(e.target.value))} /> {infToolSize}px
+                </Row>
+                <Row label="시네 기본 간격">
+                  <input type="number" min={0.1} max={10} step={0.1} value={infCineSec}
+                         onChange={(e) => setInfCineSec(Math.min(10, Math.max(0.1, Number(e.target.value) || 0.5)))}
+                         style={{ width: 70 }} />
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
+                    초 — Play(▶) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능
+                  </span>
                 </Row>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   팔레트는 기능별 구획(영상 조정 · 측정 · 주석 · 셔터 · 선택·연동 · 기타)으로 표시됩니다.
