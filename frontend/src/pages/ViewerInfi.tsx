@@ -204,6 +204,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [show3d, setShow3d] = useState(false);   // 정보바 3D 버튼 — 현재 검사 MPR/MIP
+  // Compare — 같은 환자 과거검사 선택 비교 (선택 검사들을 페인으로 추가 + Sync With Other Exams)
+  const [cmpOpen, setCmpOpen] = useState(false);
+  const [cmpSel, setCmpSel] = useState<Set<number>>(new Set());
   const [role, setRole] = useState("user");
   useEffect(() => { api.profile().then((p) => setRole(p.role)).catch(() => {}); }, []);
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
@@ -235,6 +238,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (!ids.includes(wid)) ids.push(wid);
     }
     localStorage.setItem(EXAMS_KEY, JSON.stringify(ids));
+    // Compare 로 재진입한 경우 — Sync With Other Exams 자동 ON
+    if (localStorage.getItem("sv_infi_cmp") === "1") {
+      localStorage.removeItem("sv_infi_cmp");
+      setXlink((x) => ({ ...x, sync_other: true }));
+    }
     Promise.all(ids.map(async (id) => {
       const d = id === detail.id ? detail : await api.study(id);
       const t = await api.seriesTree(id);
@@ -253,6 +261,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             .map((s) => ({ ...s, series_desc: `[KEY] ${s.series_desc}`,
                            instances: s.instances.filter((i) => keySops.includes(i.sop_uid)) }))
             .filter((s) => s.instances.length > 0);
+        }
+      }
+      // 환자 혼합 방지 — 암묵적 열기(더블클릭/내비)에서는 같은 환자 검사만 유지.
+      // 다른 환자 비교는 명시적 동선(+Add/Stack/With Open/Compare)으로만.
+      const explicit = !!(addDetail || stackDetail || (withOpen?.ids?.length ?? 0) || keySops?.length);
+      if (!explicit) {
+        const same = list.filter((e) => e.d.patient_key === detail.patient_key);
+        if (same.length !== list.length) {
+          list.splice(0, list.length, ...same);
+          localStorage.setItem(EXAMS_KEY, JSON.stringify(list.map((e) => e.d.id)));
         }
       }
       setExams(list);
@@ -782,7 +800,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 기능 영역(툴바/썸네일/W-L/Report) 폭 — 경계 스플리터로 조절, localStorage 보존
   const UI_KEY = "sv_infi_ui";
   const [ui, setUi] = useState<{ toolW: number; thumbW: number; wlW: number; dockW: number }>(() => {
-    const def = { toolW: 126, thumbW: 88, wlW: 108, dockW: 280 };
+    const def = { toolW: 158, thumbW: 88, wlW: 108, dockW: 280 };   // 툴 아이콘+이름 행 기준
     try { return { ...def, ...JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") }; } catch { return def; }
   });
   const uiRef = useRef(ui);
@@ -1159,6 +1177,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
             3D
           </button>
+          <button title="Compare — 같은 환자의 과거검사를 골라 나란히 비교(동기 스크롤)"
+                  onClick={() => { setCmpSel(new Set()); setCmpOpen(true); }}
+                  style={{ marginLeft: 4, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
+            ⇄ Compare
+          </button>
         </span>
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
         <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
@@ -1228,19 +1251,37 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             )}
           </span>
           <div style={{ borderTop: "1px solid var(--border)" }} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, overflowY: "auto" }}>
+          {/* 툴 목록 — 아이콘(입체) + 이름 행 (첨부 레퍼런스 디자인) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
             {PALETTE.filter((t) => tbShow[t.id] !== false).map((t) => {
               const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
-                || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id);
+                || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
+                || (t.id === "dictation" && recording);
+              const name = t.label.split("—")[0].trim();
               return (
                 <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
-                        style={{ height: 42, fontSize: 20, padding: 0,
+                        style={{ display: "flex", alignItems: "center", gap: 8, height: 32,
+                                 padding: "0 5px", textAlign: "left",
                                  opacity: t.impl ? 1 : 0.32,
-                                 background: activeBtn ? "var(--accent)" : "var(--bg-elevated)",
-                                 color: activeBtn ? "#fff" : "var(--text-secondary)",
-                                 border: "1px solid var(--border)", borderRadius: 3,
+                                 background: activeBtn ? "rgba(56,189,248,0.16)" : "transparent",
+                                 color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
+                                 border: "none", borderRadius: 6,
                                  cursor: t.impl ? "pointer" : "default" }}>
-                  {t.icon}
+                  {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
+                  <span style={{
+                    width: 26, height: 26, flexShrink: 0, display: "grid", placeItems: "center",
+                    fontSize: 13.5, borderRadius: 7,
+                    color: activeBtn ? "#fff" : "#cbd5e1",
+                    background: activeBtn
+                      ? "linear-gradient(145deg, #1e40af, #38bdf8)"
+                      : "linear-gradient(145deg, #3b4759, #171d29)",
+                    boxShadow: activeBtn
+                      ? "inset 2px 2px 5px rgba(0,0,0,0.55), inset -1px -1px 2px rgba(255,255,255,0.15)"
+                      : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
+                    textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
+                  }}>{t.icon}</span>
+                  <span style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis",
+                                 whiteSpace: "nowrap" }}>{name}</span>
                 </button>
               );
             })}
@@ -1349,6 +1390,61 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         )}
       </div>
+
+      {/* ── Compare — 같은 환자 과거검사 선택 → 나란히 비교 ── */}
+      {cmpOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 250,
+                      display: "grid", placeItems: "center" }}
+             onMouseDown={(e) => { if (e.target === e.currentTarget) setCmpOpen(false); }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                        width: "min(560px, 94vw)", maxHeight: "80vh", overflow: "auto", padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+              <b style={{ fontSize: 13 }}>⇄ Compare — {curD.patient_name} 의 과거검사</b>
+              <button style={{ marginLeft: "auto" }} onClick={() => setCmpOpen(false)}>✕</button>
+            </div>
+            {(curD.related_exams ?? []).length === 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 8 }}>
+                이 환자의 과거검사가 없습니다.<br />
+                다른 환자와 비교하려면 워크리스트의 <b>＋Add</b> 버튼을 사용하세요(명시적 비교).
+              </div>
+            )}
+            {(curD.related_exams ?? []).map((re) => (
+              <label key={re.id}
+                     style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 6px",
+                              borderRadius: 4, fontSize: 12.5, cursor: "pointer",
+                              background: cmpSel.has(re.id) ? "var(--accent-subtle)" : undefined }}>
+                <input type="checkbox" checked={cmpSel.has(re.id)}
+                       onChange={(e) => setCmpSel((s) => {
+                         const n = new Set(s);
+                         if (e.target.checked) n.add(re.id); else n.delete(re.id);
+                         return n;
+                       })} />
+                <span style={{ width: 78 }}>{re.study_date}</span>
+                <span style={{ width: 36 }}>{re.modality}</span>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {re.study_desc}
+                </span>
+                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{re.status}</span>
+              </label>
+            ))}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button className="primary" disabled={!cmpSel.size}
+                      onClick={() => {
+                        // 선택 검사를 누적 목록에 추가 후 재구성 — Sync With Other Exams 자동 ON
+                        let ids: number[] = [];
+                        try { ids = JSON.parse(localStorage.getItem(EXAMS_KEY) ?? "[]"); } catch { /* 초기화 */ }
+                        for (const id of cmpSel) if (!ids.includes(id)) ids.push(id);
+                        localStorage.setItem(EXAMS_KEY, JSON.stringify(ids));
+                        localStorage.setItem("sv_infi_cmp", "1");
+                        window.location.search = `?viewer=2d&study=${curD.id}`;
+                      }}>
+                비교 열기 ({cmpSel.size}건)
+              </button>
+              <button onClick={() => setCmpOpen(false)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 2D Table — 영역 픽셀값 표 (근사값) ── */}
       {tableData && (

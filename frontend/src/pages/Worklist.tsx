@@ -2530,7 +2530,16 @@ export function Worklist() {
       default: void doAction(act);
     }
   };
-  const INFI_ICONS: { i: string; l: string; a: string }[] = [
+  // 열린 문 로그아웃 아이콘 (문틀 + 열린 문짝 + 나가는 화살표)
+  const openDoorIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 3 h9 v18 h-9 z" />                             {/* 문틀 */}
+      <path d="M13 4.5 L19 2.5 V19.5 L13 21.5 Z" fill="rgba(56,189,248,0.25)" />  {/* 열린 문짝 */}
+      <circle cx="15" cy="12" r="0.9" fill="currentColor" />      {/* 손잡이 */}
+      <path d="M6.5 12 H11 M9.2 9.6 L11.6 12 L9.2 14.4" />        {/* 나가는 화살표 */}
+    </svg>
+  );
+  const INFI_ICONS: { i: React.ReactNode; l: string; a: string }[] = [
     { i: "🖥", l: "View — 선택 검사를 In Viewer 로 열기", a: "viewer2d" },
     { i: "🌐", l: "Advanced View — OHIF 웹뷰어", a: "ub_adv" },
     { i: "🧊", l: "3D — MPR/MIP 뷰어", a: "3d" },
@@ -2543,7 +2552,7 @@ export function Worklist() {
     { i: "📋", l: "Batch — AI 일괄 검토 (B)", a: "batch" },
     { i: "🚨", l: "Emergency 토글 (E)", a: "emergency" },
     { i: "🔄", l: "Refresh — 목록 새로고침", a: "refresh" },
-    { i: "🚪", l: "Logout — 로그아웃", a: "logout" },
+    { i: openDoorIcon, l: "Logout — 로그아웃", a: "logout" },
   ];
 
   return (
