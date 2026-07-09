@@ -304,8 +304,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }
       }
       // 환자 혼합 방지 — 암묵적 열기(더블클릭/내비)에서는 같은 환자 검사만 유지.
-      // 다른 환자 비교는 명시적 동선(+Add/Stack/With Open/Compare)으로만.
-      const explicit = !!(addDetail || stackDetail || (withOpen?.ids?.length ?? 0) || keySops?.length);
+      // 다른 환자 비교는 명시적 동선(+Add/Stack/With Open 체크/Compare)으로만 —
+      // With Open 은 ids 가 비어도(과거검사 없음) 신호 자체가 명시적 다중 오픈 의사.
+      const explicit = !!(addDetail || stackDetail || withOpen || keySops?.length);
       if (!explicit) {
         const same = list.filter((e) => e.d.patient_key === detail.patient_key);
         if (same.length !== list.length) {

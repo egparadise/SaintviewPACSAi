@@ -2235,7 +2235,9 @@ export function Worklist() {
           const d = await api.study(target.id);
           selectAndSync(d);
           if (dblAction === "ohif") openStudy(d);
-          else if (withOpen && d.related_exams.length) {
+          else if (withOpen) {
+            // With Open 체크 = 명시적 다중 오픈 — 다른 환자라도 기존 검사에 ADD/STACK 으로 누적.
+            // 과거검사(최대 3건)도 함께. related 가 없어도 withOpen 신호를 보내 누적 유지
             openV2({ detail: d, withOpen: { mode: withOpenMode, ids: d.related_exams.slice(0, 3).map((e) => e.id) } });
           } else openV2({ detail: d });
         }
