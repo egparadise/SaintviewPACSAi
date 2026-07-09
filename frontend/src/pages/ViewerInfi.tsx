@@ -729,9 +729,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                    label: current ? `${act.index + 1}/${total}` : undefined });   // "현재/전체"
       });
     }
-    // 2) 상호 참조 — 기준 페인 자신이거나 기준과 평행 평면이라 1)이 비면,
-    //    다른 페인들 현재 이미지 절단선을 표시하되 **축별 1개만**(중복 제거 — 선택 페인 우선)
-    if (!out.length) {
+    // 2) 상호 참조(십자) — §3.3 ① 'Crosslink'는 다중 이미지 연동의 마스터.
+    //    따라서 Crosslink ON 일 때만, 기준 페인 자신·평행 평면 페인에 다른 페인들의
+    //    현재 이미지 절단선을 축별 1개 표시. (Scout Line 단독 ON = 기준 이미지 선만)
+    if (!out.length && xlink.crosslink) {
       const seen = new Set([tileSeriesUid]);
       const usedAxis = new Set<number>([axisOf(tg)]);   // 자기 축(평행)은 제외
       const order = panes.map((_, k) => k)
