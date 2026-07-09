@@ -76,10 +76,12 @@ export function hasToken() {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // FormData(파일 업로드)는 브라우저가 multipart boundary 를 직접 설정 — Content-Type 강제 금지
+  const isForm = init?.body instanceof FormData;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -253,6 +255,13 @@ export const api = {
       body: JSON.stringify({ emergency }),
     }),
   orthancStatus: () => req<OrthancStatus>("/api/admin/orthanc-status"),
+  importDicom: (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.name);
+    return req<{ processed: number; uploaded: number; registered: number;
+                 results: { filename: string; size: number; status: string }[] }>(
+      "/api/import-dicom", { method: "POST", body: fd });
+  },
   seriesTree: (studyId: number) =>
     req<{ study_uid: string; series: SeriesNode[] }>(`/api/studies/${studyId}/series-tree`),
   nlQuery: (text: string) =>

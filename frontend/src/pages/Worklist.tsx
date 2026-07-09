@@ -52,6 +52,7 @@ import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
+const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
 
 /* ── F-18 행잉 매핑 + 모니터 배치(viewer.prefs.monitor) ─────────────────── */
 let hangingMap: Record<string, string> = {};
@@ -1741,6 +1742,7 @@ export function Worklist() {
   const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
   // UBPACS-Z Study Open 5종 + Study With Open — 뷰어는 새 창(별도 웹페이지)으로 연다
   const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
@@ -2215,8 +2217,7 @@ export function Worklist() {
   // In 모드 ① 상단 아이콘 툴바 (INFINITT 원본 13종) — 기존 doAction + 특수 동작 매핑
   const infiTool = (act: string) => {
     switch (act) {
-      case "import":  // Import DICOM — Orthanc 업로드 UI
-        window.open("http://localhost:8042/ui/app/#/upload", "_blank"); break;
+      case "import": setImportOpen(true); break;  // Import DICOM — USB/CD .dcm 등록
       case "csv": {   // Export — 현재 워크리스트를 CSV 로 (원본 Export result to file)
         const rows = [
           ["PatientID", "Name", "Sex", "Modality", "StudyDate", "Description", "Status"].join(","),
@@ -2439,6 +2440,11 @@ export function Worklist() {
       </footer>
 
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
+      {importOpen && (
+        <Suspense fallback={null}>
+          <ImportDialog onClose={() => setImportOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />
+        </Suspense>
+      )}
       {/* 자체 뷰어(Viewer2D)는 새 창(?viewer=2d)으로 열린다 — openV2 참조 */}
       {viewer3dUid && (
         <Suspense fallback={

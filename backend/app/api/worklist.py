@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -219,6 +219,59 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
     for it in items:
         it["preview_url"] = f"{base}/instances/{it['orthanc_id']}/preview"
     return {"items": items, "key_images": study.key_images or []}
+
+
+@router.post("/import-dicom")
+async def import_dicom(
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    user: dict = Depends(current_user),
+):
+    """USB/CD 등에서 고른 .dcm 파일을 Orthanc(자체 저장소)에 올리고 로컬 DB에 등록.
+
+    원본 PiViewSTAR 'Import DICOM Files' 대응 — 파일별 결과(성공/중복/실패)를 반환한다.
+    """
+    from app.dicom.orthanc import OrthancClient
+    from app.models import AuditLog
+    from app.workers.ai_worker import sync_orthanc_once
+
+    client = OrthancClient()
+    if not client.alive():
+        raise HTTPException(status_code=503, detail="Orthanc 저장소에 연결할 수 없습니다")
+
+    results = []
+    ok = 0
+    for f in files:
+        data = await f.read()
+        if not data:
+            results.append({"filename": f.filename, "size": 0, "status": "빈 파일"})
+            continue
+        try:
+            r = client.upload_dicom(data)
+            status = "중복" if r.get("Status") == "AlreadyStored" else "성공"
+            if status == "성공":
+                ok += 1
+            results.append({"filename": f.filename, "size": len(data), "status": status})
+        except Exception as e:  # noqa: BLE001 — 파일 단위 실패는 격리해 계속 진행
+            results.append({"filename": f.filename, "size": len(data),
+                            "status": f"실패: {str(e)[:60]}"})
+    client.close()
+
+    # 변경 피드 동기화 → studies 테이블 등록 (운영 워커와 동일 커서 재사용)
+    registered = 0
+    if ok:
+        for _ in range(40):
+            cnt = sync_orthanc_once()
+            registered += cnt
+            if cnt == 0:
+                break
+
+    db.add(AuditLog(account_id=user.get("uid"), action="import_dicom",
+                    target_type="study", target_id="",
+                    detail={"by": user["sub"], "files": len(files), "uploaded": ok,
+                            "registered": registered}))
+    db.commit()
+    return {"processed": len(files), "uploaded": ok, "registered": registered, "results": results}
 
 
 class KeyImagesBody(BaseModel):
