@@ -249,7 +249,22 @@ export function FolderTreeEditor({ nodes, onChange, selectedId, onSelect, applyH
           {(n.children?.length ?? 0) > 0 ? (collapsed.has(n.id) ? "▸" : "▾") : ""}
         </span>
         <span style={{ flexShrink: 0 }}>📁</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
+        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
+        {/* 선택된 행에 바로 수정/삭제 — 어디서 편집하는지 즉시 보이도록 */}
+        {selectedId === n.id && (
+          <>
+            <span title="이 폴더 이름·조건 수정" style={{ flexShrink: 0, fontSize: 10.5, padding: "0 3px" }}
+                  onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit" }); }}>수정</span>
+            <span title="이 폴더 삭제(하위 포함)"
+                  style={{ flexShrink: 0, fontSize: 11, padding: "0 3px", color: "var(--stat-emergency)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`'${n.label}' 폴더와 하위 폴더를 모두 삭제할까요?`)) {
+                      onChange(removeNode(nodes, n.id));
+                    }
+                  }}>✕</span>
+          </>
+        )}
       </div>
       {!collapsed.has(n.id) && (n.children?.length ?? 0) > 0 && renderRows(n.children, depth + 1)}
     </div>
@@ -259,15 +274,9 @@ export function FolderTreeEditor({ nodes, onChange, selectedId, onSelect, applyH
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        {nodes.length === 0 && (
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "4px 6px" }}>
-            ＋루트로 폴더 등록<br />예: 응급실 › DR › Chest
-          </div>
-        )}
-        {renderRows(nodes, 0)}
-      </div>
-      <div style={{ display: "flex", gap: 2, padding: "3px 2px", flexWrap: "wrap", borderTop: "1px solid var(--border)" }}>
+      {/* 편집 버튼 바 — 트리 위에 항상 표시(레일이 넘쳐도 잘리지 않음) */}
+      <div style={{ display: "flex", gap: 2, padding: "2px 2px 4px", flexWrap: "wrap",
+                    borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <button title="루트 폴더 추가" style={{ padding: "1px 6px", fontSize: 10.5 }}
                 onClick={() => setModal({ mode: "add-root" })}>＋루트</button>
         <button title="선택 폴더 아래에 하위 폴더 추가" style={{ padding: "1px 6px", fontSize: 10.5 }}
@@ -281,6 +290,14 @@ export function FolderTreeEditor({ nodes, onChange, selectedId, onSelect, applyH
                   if (!window.confirm(`'${selected.label}' 폴더와 하위 폴더를 모두 삭제할까요?`)) return;
                   onChange(removeNode(nodes, selected.id));
                 }}>✕</button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+        {nodes.length === 0 && (
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", padding: "4px 6px" }}>
+            ＋루트로 폴더 등록<br />예: 응급실 › DR › Chest
+          </div>
+        )}
+        {renderRows(nodes, 0)}
       </div>
       {modal && (
         <FolderEditModal
