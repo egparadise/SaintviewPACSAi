@@ -462,6 +462,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
 
+  // 기능 영역(툴바/썸네일/W-L/Report) 폭 — 경계 스플리터로 조절, localStorage 보존
+  const UI_KEY = "sv_infi_ui";
+  const [ui, setUi] = useState<{ toolW: number; thumbW: number; wlW: number; dockW: number }>(() => {
+    const def = { toolW: 126, thumbW: 88, wlW: 108, dockW: 280 };
+    try { return { ...def, ...JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") }; } catch { return def; }
+  });
+  const uiRef = useRef(ui);
+  useEffect(() => { uiRef.current = ui; }, [ui]);
+  const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify(uiRef.current)); } catch { /* quota */ } };
+  const clampW = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
   // 페인 크기 분율(fr) — 경계 스플리터 드래그로 좌우(colFr)/상하(rowFr) 조절. 레이아웃 변경 시 초기화
   const vpRef = useRef<HTMLDivElement>(null);
   const [colFr, setColFr] = useState<number[]>([1]);
@@ -538,17 +549,25 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     );
   };
 
+  // 썸네일 테두리 색 — 화면(어느 페인이든)에 출력 중=주황, 활성 페인의 시리즈=초록
+  const shownUids = new Set(panes.map((p) => p.series?.series_uid).filter(Boolean) as string[]);
+  const activeUid = panes[active]?.series?.series_uid;
+  const thumbBorder = (uid: string, fallback: string) =>
+    uid === activeUid ? "2px solid #4ade80"
+      : shownUids.has(uid) ? "2px solid #f97316"
+      : fallback;
+
   // 좌측 세로 썸네일 열 (원본 이미지4 — 툴바 옆 세로 스택)
   const thumbCol = (
-    <div style={{ width: 88, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
+    <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
       <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
       {series.map((s) => (
         <div key={s.series_uid} onClick={() => upd(active, { series: s, index: 0, studyUid: curD.study_uid })}
              title={`Se${s.series_number} · ${s.series_desc}`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
-                      border: panes[active]?.series?.series_uid === s.series_uid
-                        ? "2px solid #4ade80" : "1px solid var(--border)", borderRadius: 3, background: "#000" }}>
+                      border: thumbBorder(s.series_uid, "1px solid var(--border)"),
+                      borderRadius: 3, background: "#000" }}>
           {s.instances[0] && (
             <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
           )}
@@ -569,8 +588,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
              onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
              title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
-                      border: panes[active]?.series?.series_uid === e.s.series_uid
-                        ? "2px solid #facc15" : "1px solid #854d0e", borderRadius: 3, background: "#000" }}>
+                      border: thumbBorder(e.s.series_uid, "1px solid #854d0e"),
+                      borderRadius: 3, background: "#000" }}>
         {e.s.instances[0] && (
           <img src={e.s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
         )}
@@ -704,7 +723,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* ── 좌측 2열 아이콘 툴바 (p.11~14 전 툴) ── */}
-        <div style={{ width: 126, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+        <div style={{ width: ui.toolW, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", padding: "6px 5px", gap: 5, flexShrink: 0 }}>
           {/* §3.1 툴바 상단(원본 이미지2): Prev/Next · Crosslink · 행잉 · Worklist/Report · Close */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -788,8 +807,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         </div>
 
+        {/* 툴바 ↔ 썸네일 폭 조절 */}
+        <Splitter dir="v" onEnd={saveUi}
+                  onDrag={(dx) => setUi((u) => ({ ...u, toolW: clampW(u.toolW + dx, 72, 240) }))} />
+
         {/* ── 세로 시리즈 썸네일 열 (원본 이미지4) ── */}
         {thumbCol}
+
+        {/* 썸네일 ↔ 뷰포트 폭 조절 */}
+        <Splitter dir="v" onEnd={saveUi}
+                  onDrag={(dx) => setUi((u) => ({ ...u, thumbW: clampW(u.thumbW + dx, 56, 260) }))} />
 
         {/* ── 뷰포트: Series 페인 — 경계 스플리터로 좌우/상하 크기 조절 ── */}
         <div ref={vpRef} style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
@@ -822,7 +849,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         </div>
         {/* ── W/L Preset 패널 (Setting 토글) ── */}
         {wlPanel && (
-          <div style={{ width: 108, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
+          <Splitter dir="v" onEnd={saveUi}
+                    onDrag={(dx) => setUi((u) => ({ ...u, wlW: clampW(u.wlW - dx, 80, 260) }))} />
+        )}
+        {wlPanel && (
+          <div style={{ width: ui.wlW, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
                         padding: 6, overflowY: "auto", fontSize: 11.5, flexShrink: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>
               W/L ({detail.modality === "MR" ? "MR" : "CT"})
@@ -840,7 +871,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
         {/* ── Report 도크 (§3.1 Report 버튼 — 현재 검사 판독) ── */}
         {reportDock && (
-          <div style={{ width: 280, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
+          <Splitter dir="v" onEnd={saveUi}
+                    onDrag={(dx) => setUi((u) => ({ ...u, dockW: clampW(u.dockW - dx, 180, 520) }))} />
+        )}
+        {reportDock && (
+          <div style={{ width: ui.dockW, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
                         padding: 10, overflowY: "auto", fontSize: 12, flexShrink: 0 }}>
             <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>
               Report — {curD.modality} {curD.study_date}
