@@ -135,7 +135,7 @@ const PALETTE: { id: string; icon: string; label: string; impl: boolean; mode?: 
   { id: "arrow2d", icon: "↗", label: "2D Arrow (개발 예정)", impl: false },
   { id: "text2d", icon: "T", label: "2D Text (개발 예정)", impl: false },
   { id: "box2d", icon: "▭", label: "2D Box — 메모 (개발 예정)", impl: false },
-  { id: "key2d", icon: "🔑", label: "2D Key — 키이미지 (개발 예정)", impl: false },
+  { id: "key2d", icon: "🔑", label: "Key — 현재 이미지를 키이미지로 등록/해제 (워크리스트 🔑·Key 필터 조회)", impl: true },
   { id: "circle", icon: "◯", label: "Circle (개발 예정)", impl: false },
   { id: "polyline", icon: "〰", label: "Polyline/Freehand (개발 예정)", impl: false },
   { id: "mline", icon: "📏", label: "Measure 2D Line — 두 점 클릭 = 거리(mm)", impl: true, mode: true },
@@ -301,6 +301,23 @@ export function ViewerInfi({ detail, onClose }: {
       case "sharpen": upd(active, { fx: p.fx === "sharpen" ? "" : "sharpen" }); break;
       case "smooth": upd(active, { fx: p.fx === "smooth" ? "" : "smooth" }); break;
       case "pseudo": upd(active, { fx: p.fx === "pseudo" ? "" : "pseudo" }); break;
+      case "key2d": {   // F-16: 현재 이미지 키이미지 토글 → DB(study.key_images) 저장
+        const inst = p.series?.instances[p.index];
+        if (!p.series || !inst) break;
+        const exd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+        api.instances(exd.id).then((r) => {
+          const cur = r.key_images ?? [];
+          const exists = cur.some((k) => k.sop_uid === inst.sop_uid);
+          const next = exists
+            ? cur.filter((k) => k.sop_uid !== inst.sop_uid)
+            : [...cur, { sop_uid: inst.sop_uid, orthanc_id: inst.orthanc_id,
+                         instance_number: inst.instance_number }];
+          return api.setKeyImages(exd.id, next).then(() =>
+            say(exists ? `🔑 키이미지 해제 — 남은 ${next.length}장`
+                       : `🔑 키이미지 등록 (${next.length}장) — 워크리스트에 🔑 표시`));
+        }).catch(() => say("키이미지 저장 실패"));
+        break;
+      }
       case "reset": upd(active, { ...initPane(), series: p.series, index: p.index }); break;
       case "cine": setCine((c) => !c); break;
       case "print": window.print(); break;

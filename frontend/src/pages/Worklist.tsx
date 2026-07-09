@@ -100,7 +100,10 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
         : r.report_status === "draft" ? <span className="badge ai">초안</span> : null,
   },
   patient_key: { label: "ID", render: (r) => r.patient_key },
-  patient_name: { label: "이름", render: (r) => r.patient_name },
+  patient_name: {
+    label: "이름",
+    render: (r) => <>{r.has_key && <span title="키이미지 등록 검사">🔑 </span>}{r.patient_name}</>,
+  },
   sex: { label: "성별", render: (r) => r.sex },
   birth_date: { label: "생년월일", render: (r) => r.birth_date },
   study_date: { label: "검사일", render: (r) => r.study_date },
@@ -243,9 +246,9 @@ function ActionToolbar({
 export const FIND_FIELDS: Record<string, string> = {
   pid: "환자 ID", pname: "환자 이름", sex: "성별", modality: "Modality",
   date: "검사일", desc: "검사명(Description)", body_part: "부위",
-  status: "상태", finding: "소견 검색(F-2)", emergency: "Emergency",
+  status: "상태", finding: "소견 검색(F-2)", emergency: "Emergency", key: "Key Image",
 };
-export const DEFAULT_FIND_FIELDS = ["pid", "pname", "sex", "modality", "date", "desc", "status", "finding", "emergency"];
+export const DEFAULT_FIND_FIELDS = ["pid", "pname", "sex", "modality", "date", "desc", "status", "finding", "emergency", "key"];
 
 function FilterBar({ filters, setFilters, fields, onSearch }: {
   filters: Record<string, string>;
@@ -313,6 +316,15 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
             <input type="checkbox" checked={filters.emergency === "true"}
                    onChange={(e) => set("emergency", e.target.checked ? "true" : "")} />
             ⚠ Emergency
+          </label>
+        );
+      case "key":
+        return (
+          <label key={key} title="키이미지가 등록된 검사만 조회 (F-16)"
+                 style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+            <input type="checkbox" checked={filters.key === "true"}
+                   onChange={(e) => set("key", e.target.checked ? "true" : "")} />
+            🔑 Key
           </label>
         );
       default: return null;
@@ -1852,7 +1864,7 @@ export function Worklist() {
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
-    for (const k of ["pid", "pname", "sex", "desc", "modality", "status", "body_part", "finding", "emergency"]) {
+    for (const k of ["pid", "pname", "sex", "desc", "modality", "status", "body_part", "finding", "emergency", "key"]) {
       if (filters[k]) p[k] = filters[k];
     }
     if (filters.date_from_iso) p.date_from = filters.date_from_iso.replaceAll("-", "");

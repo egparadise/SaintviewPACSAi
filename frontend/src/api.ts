@@ -111,6 +111,7 @@ export interface StudyRow {
   study_desc: string;
   status: string;
   emergency: boolean;
+  has_key?: boolean;   // 키이미지 등록 검사 (F-16 — 워크리스트 🔑 표시)
   critical: boolean;
   series_count: number;
   instance_count: number;

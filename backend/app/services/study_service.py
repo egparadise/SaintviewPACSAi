@@ -23,6 +23,7 @@ class WorklistFilter:
     date_to: str = ""
     finding_query: str = ""       # F-2: 소견/임프레션 텍스트 검색
     emergency_only: bool = False
+    key_only: bool = False         # 키이미지 등록 검사만 (F-16 — 서치필터 별도 조회)
     hospital_id: int | None = None  # 경량 테넌시 — 소속 병원 검사로 제한(None=전체)
     limit: int = 100
     offset: int = 0
@@ -158,6 +159,11 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         q = q.where(Study.study_date <= f.date_to)
     if f.emergency_only:
         q = q.where(Study.emergency.is_(True))
+    if f.key_only:
+        # key_images JSON 이 비어있지 않은 검사 — PG/SQLite 공통(텍스트 캐스트 비교)
+        from sqlalchemy import String, cast
+
+        q = q.where(Study.key_images.isnot(None), cast(Study.key_images, String) != "[]")
     if f.hospital_id is not None:
         q = q.where(Study.hospital_id == f.hospital_id)
     if f.finding_query:
@@ -222,6 +228,7 @@ def _study_row(study: Study, patient: Patient, latest: Report | None, *, order_n
         "study_desc": study.study_desc,
         "status": study.status,
         "emergency": study.emergency,
+        "has_key": bool(study.key_images),
         "critical": has_critical_flag,
         "series_count": study.series_count,
         "instance_count": study.instance_count,
