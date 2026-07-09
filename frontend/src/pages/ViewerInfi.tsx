@@ -24,6 +24,7 @@ interface Pane {
   wl: string;
   fx: "" | "sharpen" | "smooth" | "pseudo";   // p.13 필터(Sharpens/Average/Pseudo)
   il: { r: number; c: number };  // Image Layout — DICOM 계층: 페인(Series) 내부의 이미지 타일 분할(페인별)
+  shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] } | null;  // 표시 셔터
 }
 const initPane = (studyUid = ""): Pane => ({
   series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
@@ -102,8 +103,70 @@ function paneFilter(p: Pane): string | undefined {
   return parts.length ? parts.join(" ") : undefined;
 }
 
-type Tool = "select" | "pan" | "zoom" | "wl" | "mline" | "mangle";
-interface Anno2 { kind: "line" | "angle"; pts: { x: number; y: number }[] }
+type Tool = string;   // select/pan/zoom/wl + 점 클릭형 측정·주석·셔터·렌즈 등 (IN_PALETTE mode)
+interface Anno2 { kind: string; pts: { x: number; y: number }[]; text?: string; value?: string }
+
+// 점 클릭형 툴의 필요 점 수 (polyline/shutPoly 는 더블클릭 종료)
+const TOOL_PTS: Record<string, number> = {
+  mline: 2, mangle: 3, arrow2d: 2, box2d: 2, circle: 2, mellipse: 2, mrect: 2,
+  cobb: 4, centerline: 4, limb: 4, ctr: 4, profile: 2, table2d: 2,
+  text2d: 1, marking: 1, spine: 1, lens: 1, cursor3d: 1, shutRect: 2, shutEl: 2,
+};
+const OPEN_ENDED = new Set(["polyline", "shutPoly"]);
+const isPointTool = (t: string) => t in TOOL_PTS || OPEN_ENDED.has(t);
+
+// ── 렌더 이미지 픽셀 샘플러 (ROI 통계/Profile/Table/Lens) ──
+// WADO-RS rendered PNG(8bit) 를 canvas 로 읽는다. W/L(c,w)을 알면 근사 원값으로 역변환:
+//   raw ≈ (v/255)·w + (c − w/2)  — 표기는 '≈' (근사값, 원본 픽셀 아님)
+const _pixCache = new Map<string, ImageData>();
+async function samplePixels(url: string, cols: number, rows: number): Promise<ImageData | null> {
+  const hit = _pixCache.get(url);
+  if (hit) return hit;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const cv = document.createElement("canvas");
+        cv.width = cols; cv.height = rows;
+        const ctx = cv.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, cols, rows);
+        const data = ctx.getImageData(0, 0, cols, rows);
+        if (_pixCache.size > 40) _pixCache.clear();   // 캐시 상한
+        _pixCache.set(url, data);
+        resolve(data);
+      } catch { resolve(null); }   // CORS taint 등
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+function rawOf(v: number, wl: string): number {
+  if (!wl) return v;
+  const [c, w] = wl.split(",").map(Number);
+  if (Number.isNaN(c) || Number.isNaN(w)) return v;
+  return (v / 255) * w + (c - w / 2);
+}
+function roiStats(data: ImageData, x0: number, y0: number, x1: number, y1: number,
+                  ellipse: boolean, wl: string) {
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rx = Math.abs(x1 - x0) / 2, ry = Math.abs(y1 - y0) / 2;
+  let n = 0, sum = 0, sq = 0, mn = Infinity, mx = -Infinity;
+  for (let y = Math.max(0, Math.floor(Math.min(y0, y1))); y < Math.min(data.height, Math.max(y0, y1)); y++) {
+    for (let x = Math.max(0, Math.floor(Math.min(x0, x1))); x < Math.min(data.width, Math.max(x0, x1)); x++) {
+      if (ellipse && rx > 0 && ry > 0) {
+        const dx = (x - cx) / rx, dy = (y - cy) / ry;
+        if (dx * dx + dy * dy > 1) continue;
+      }
+      const v = rawOf(data.data[(y * data.width + x) * 4], wl);
+      n++; sum += v; sq += v * v;
+      if (v < mn) mn = v; if (v > mx) mx = v;
+    }
+  }
+  if (!n) return null;
+  const mean = sum / n;
+  const sd = Math.sqrt(Math.max(0, sq / n - mean * mean));
+  return { n, mean, sd, mn, mx };
+}
 
 const PALETTE = IN_PALETTE;
 
@@ -146,6 +209,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
   const [annos, setAnnos] = useState<Record<string, Anno2[]>>({});
   const [pend, setPend] = useState<{ sop: string; pts: { x: number; y: number }[] } | null>(null);
+  // 3D Cursor 마커(페인별, 일시적) · 돋보기 위치 · 픽셀값 표 모달 · 딕테이션
+  const [cross3d, setCross3d] = useState<Record<number, { sop: string; x: number; y: number }>>({});
+  const [magPos, setMagPos] = useState<{ pi: number; t: number; mx: number; my: number;
+                                         nx: number; ny: number; sc: number } | null>(null);
+  const [tableData, setTableData] = useState<{ title: string; rows: string[][] } | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const audioRef = useRef<Record<number, Blob>>({});
+  const [recording, setRecording] = useState(false);
+  const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
   const drag = useRef<{ x: number; y: number; btn: number; pane: number } | null>(null);
 
   const tilesOf = (p?: Pane) => (p ? p.il.r * p.il.c : 1);
@@ -347,7 +419,48 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "cine": setCine((c) => !c); break;
       case "print": window.print(); break;
       case "refreshExam": loadSeries(); say("검사 정보를 갱신했습니다"); break;
-      case "clrAnno": setAnnos({}); setPend(null); say("측정을 모두 지웠습니다"); break;
+      case "clrAnno":
+        setAnnos({}); setPend(null); setCross3d({});
+        setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
+        say("측정·주석·셔터를 모두 지웠습니다");
+        break;
+      case "selAll":   // Select All — 모든 페인 선택 (키 'A' 와 동일)
+        setSelPanes(new Set(panes.map((_, k) => k)));
+        break;
+      case "selInv":   // Select All Inverse — 선택 반전
+        setSelPanes((prev) => new Set(panes.map((_, k) => k).filter((k) => !prev.has(k))));
+        break;
+      case "anno3d":   // 3D 주석은 3D 뷰어(Crosshair)에서 — 뷰어 호출
+        setShow3d(true);
+        break;
+      case "dictation": {   // 음성 녹음 시작/정지 (세션 보관 — 서버 저장은 차기)
+        if (recording) {
+          recRef.current?.stop();
+          break;
+        }
+        navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
+          const chunks: BlobPart[] = [];
+          const mr = new MediaRecorder(stream);
+          mr.ondataavailable = (ev) => chunks.push(ev.data);
+          mr.onstop = () => {
+            audioRef.current[curD.id] = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+            stream.getTracks().forEach((t) => t.stop());
+            setRecording(false);
+            say("🎙 녹음 저장됨 — 🔊 로 재생 (세션 보관)");
+          };
+          mr.start();
+          recRef.current = mr;
+          setRecording(true);
+          say("🎙 녹음 중… 다시 누르면 정지");
+        }).catch(() => say("마이크 권한이 필요합니다"));
+        break;
+      }
+      case "playdict": {
+        const blob = audioRef.current[curD.id];
+        if (!blob) { say("이 검사의 녹음이 없습니다"); break; }
+        void new Audio(URL.createObjectURL(blob)).play();
+        break;
+      }
       case "calibrate": {
         const inst = p.series?.instances[p.index];
         const sp = inst?.pixel_spacing;
@@ -365,32 +478,180 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }
         break;
       }
-      default:
-        if (["select", "pan", "zoom", "wl", "mline", "mangle"].includes(id)) {
+      default: {
+        const item = PALETTE.find((t) => t.id === id);
+        if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {
           setTool(id as Tool);
-          if (id === "mline") say("두 점을 클릭하면 거리(mm)가 측정됩니다");
-          if (id === "mangle") say("세 점을 클릭하면 각도가 측정됩니다 (가운데=꼭짓점)");
+          setPend(null);
+          const hint = item?.label?.split("—")[1]?.trim();
+          if (hint) say(hint);
         }
+      }
     }
   };
 
-  // ── 측정 클릭: 화면좌표 → 이미지 픽셀좌표 (fit 배치 + zoom/pan 역변환, rot/flip 미적용 전제) ──
-  const measureClick = (e: React.MouseEvent, tileEl: HTMLElement, p: Pane, inst: InstanceNode) => {
+  // ── 점 클릭형 툴 공통: 화면좌표 → 이미지 픽셀좌표 (fit 배치 + zoom/pan 역변환, rot/flip 미적용 전제) ──
+  const addAnno = (sop: string, a: Anno2) =>
+    setAnnos((prev) => ({ ...prev, [sop]: [...(prev[sop] ?? []), a] }));
+
+  const finishTool = (pi: number, p: Pane, inst: InstanceNode, pts: { x: number; y: number }[]) => {
+    const sop = inst.sop_uid;
+    const url = p.series ? instUrl(p.studyUid || curD.study_uid, p.series, inst, p.wl) : "";
+    const sp = inst.pixel_spacing?.length === 2 ? inst.pixel_spacing : null;
+    switch (tool) {
+      // ── 주석 ──
+      case "mline": addAnno(sop, { kind: "line", pts }); break;
+      case "mangle": addAnno(sop, { kind: "angle", pts }); break;
+      case "arrow2d": addAnno(sop, { kind: "arrow", pts }); break;
+      case "circle": addAnno(sop, { kind: "circle", pts }); break;
+      case "polyline": addAnno(sop, { kind: "poly", pts }); break;
+      case "cobb": addAnno(sop, { kind: "cobb", pts }); break;
+      case "centerline": addAnno(sop, { kind: "centerline", pts }); break;
+      case "limb": addAnno(sop, { kind: "limb", pts }); break;
+      case "ctr": addAnno(sop, { kind: "ctr", pts }); break;
+      case "text2d": {
+        const text = prompt("표시할 문구");
+        if (text) addAnno(sop, { kind: "text", pts, text });
+        break;
+      }
+      case "marking": {
+        const text = prompt("Marking (짧은 표기, 예: ①, R, ✓)");
+        if (text) addAnno(sop, { kind: "marking", pts, text });
+        break;
+      }
+      case "box2d": {
+        const text = prompt("메모 제목");
+        if (text !== null) addAnno(sop, { kind: "box", pts, text: text || "" });
+        break;
+      }
+      case "spine": {
+        if (spineSeq.current.n === 1) {
+          const base = prompt("시작 라벨 (예: C1, T1, L1)", "L1");
+          if (!base) break;
+          const m = base.match(/^([A-Za-z]+)(\d+)$/);
+          spineSeq.current = m ? { base: m[1].toUpperCase(), n: Number(m[2]) } : { base: base.toUpperCase(), n: 1 };
+        }
+        addAnno(sop, { kind: "spine", pts, text: `${spineSeq.current.base}${spineSeq.current.n}` });
+        spineSeq.current.n += 1;
+        break;
+      }
+      // ── 셔터 (페인 표시 가림) ──
+      case "shutRect": upd(pi, { shutter: { kind: "rect", pts } }); say("사각 셔터 적용 — 🧹로 해제"); break;
+      case "shutEl": upd(pi, { shutter: { kind: "ellipse", pts } }); say("타원 셔터 적용 — 🧹로 해제"); break;
+      case "shutPoly": upd(pi, { shutter: { kind: "poly", pts } }); say("다각 셔터 적용 — 🧹로 해제"); break;
+      // ── 3D Cursor: 클릭 지점을 모든 페인의 동일 3D 위치로 ──
+      case "cursor3d": {
+        const g = geomOf(inst);
+        if (!g) { say("기하 정보가 없어 3D Cursor 를 쓸 수 없습니다"); break; }
+        const P: number[] = [0, 1, 2].map((k) =>
+          g.pos[k] + pts[0].x * g.cs * g.row[k] + pts[0].y * g.rs * g.col[k]);
+        const markers: Record<number, { sop: string; x: number; y: number }> = {};
+        setPanes((ps) => ps.map((q, k) => {
+          const s = q.series;
+          if (!s) return q;
+          let best = -1, bd = Infinity;
+          for (let idx = 0; idx < s.instances.length; idx++) {
+            const qg = geomOf(s.instances[idx]);
+            if (!qg) continue;
+            const nl = Math.hypot(...qg.n) || 1;
+            const d = Math.abs(vdot(qg.n, vsub(P, qg.pos))) / nl;
+            if (d < bd) { bd = d; best = idx; }
+          }
+          if (best < 0) return q;
+          const bi = s.instances[best];
+          const bg = geomOf(bi)!;
+          const dvec = vsub(P, bg.pos);
+          markers[k] = { sop: bi.sop_uid, x: vdot(dvec, bg.row) / bg.cs, y: vdot(dvec, bg.col) / bg.rs };
+          return { ...q, index: best };
+        }));
+        setCross3d(markers);
+        break;
+      }
+      // ── 픽셀값 계열 (렌더 8bit 근사 — W/L 역변환 '≈' 표기) ──
+      case "lens": {
+        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
+          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          const x = Math.round(pts[0].x), y = Math.round(pts[0].y);
+          const v = rawOf(data.data[(Math.max(0, Math.min(data.height - 1, y)) * data.width +
+                                     Math.max(0, Math.min(data.width - 1, x))) * 4], p.wl);
+          addAnno(sop, { kind: "lens", pts, value: `≈${v.toFixed(0)}` });
+        });
+        break;
+      }
+      case "mellipse": case "mrect": {
+        const ell = tool === "mellipse";
+        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
+          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          const st = roiStats(data, pts[0].x, pts[0].y, pts[1].x, pts[1].y, ell, p.wl);
+          if (!st) return;
+          const areaMm = sp
+            ? Math.abs((pts[1].x - pts[0].x) * sp[1] * (pts[1].y - pts[0].y) * sp[0]) * (ell ? Math.PI / 4 : 1)
+            : 0;
+          const area = areaMm ? ` · ${(areaMm / 100).toFixed(2)}cm²` : "";
+          addAnno(sop, { kind: ell ? "mellipse" : "mrect", pts,
+                         value: `≈${st.mean.toFixed(0)}±${st.sd.toFixed(0)} [${st.mn.toFixed(0)}~${st.mx.toFixed(0)}]${area}` });
+        });
+        break;
+      }
+      case "profile": {
+        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
+          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          const N = 80;
+          const vals: number[] = [];
+          for (let k = 0; k <= N; k++) {
+            const x = Math.round(pts[0].x + (pts[1].x - pts[0].x) * (k / N));
+            const y = Math.round(pts[0].y + (pts[1].y - pts[0].y) * (k / N));
+            if (x < 0 || y < 0 || x >= data.width || y >= data.height) { vals.push(0); continue; }
+            vals.push(rawOf(data.data[(y * data.width + x) * 4], p.wl));
+          }
+          addAnno(sop, { kind: "profile", pts, vals } as Anno2 & { vals: number[] });
+        });
+        break;
+      }
+      case "table2d": {
+        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
+          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          const x0 = Math.floor(Math.min(pts[0].x, pts[1].x)), x1 = Math.ceil(Math.max(pts[0].x, pts[1].x));
+          const y0 = Math.floor(Math.min(pts[0].y, pts[1].y)), y1 = Math.ceil(Math.max(pts[0].y, pts[1].y));
+          const step = Math.max(1, Math.ceil(Math.max(x1 - x0, y1 - y0) / 14));   // 최대 ~14×14
+          const rows: string[][] = [];
+          for (let y = y0; y <= y1; y += step) {
+            const row: string[] = [];
+            for (let x = x0; x <= x1; x += step) {
+              row.push(x < 0 || y < 0 || x >= data.width || y >= data.height ? "-"
+                : rawOf(data.data[(y * data.width + x) * 4], p.wl).toFixed(0));
+            }
+            rows.push(row);
+          }
+          setTableData({ title: `2D Table ≈픽셀값 (${x0},${y0})~(${x1},${y1}) step ${step}`, rows });
+        });
+        break;
+      }
+    }
+  };
+
+  const measureClick = (e: React.MouseEvent, tileEl: HTMLElement, pi: number, p: Pane, inst: InstanceNode) => {
     const r = tileEl.getBoundingClientRect();
     const s0 = Math.min(r.width / (inst.cols || 1), r.height / (inst.rows || 1));
     const s = s0 * p.zoom;
     const ix = (e.clientX - (r.left + r.width / 2 + p.tx)) / s + inst.cols / 2;
     const iy = (e.clientY - (r.top + r.height / 2 + p.ty)) / s + inst.rows / 2;
-    const need = tool === "mline" ? 2 : 3;
     const cur = pend?.sop === inst.sop_uid ? pend.pts : [];
     const pts = [...cur, { x: ix, y: iy }];
+    if (OPEN_ENDED.has(tool)) { setPend({ sop: inst.sop_uid, pts }); return; }   // 더블클릭 종료
+    const need = TOOL_PTS[tool] ?? 2;
     if (pts.length >= need) {
-      setAnnos((a) => ({
-        ...a,
-        [inst.sop_uid]: [...(a[inst.sop_uid] ?? []), { kind: tool === "mline" ? "line" : "angle", pts }],
-      }));
+      finishTool(pi, p, inst, pts);
       setPend(null);
     } else setPend({ sop: inst.sop_uid, pts });
+  };
+
+  // polyline/shutPoly 더블클릭 종료
+  const finishOpenEnded = (pi: number, p: Pane, inst: InstanceNode) => {
+    if (!OPEN_ENDED.has(tool) || !pend || pend.sop !== inst.sop_uid || pend.pts.length < 3) return false;
+    finishTool(pi, p, inst, pend.pts);
+    setPend(null);
+    return true;
   };
 
   const onPaneMouseDown = (e: React.MouseEvent, i: number) => {
@@ -408,7 +669,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setSelPanes(new Set());   // 일반 클릭 — 선택 집합 밖이면 해제
     }
     setActive(i);
-    const measuring = (tool === "mline" || tool === "mangle") && e.button === 0;
+    const measuring = isPointTool(tool) && e.button === 0;
     if (!measuring && (e.button === 0 || e.button === 2)) {
       drag.current = { x: e.clientX, y: e.clientY, btn: e.button, pane: i };
     }
@@ -591,12 +852,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     return (
       <div onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
            onWheel={(e) => onWheel(e, pi)}
-           onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
+           onDoubleClick={() => {
+             // 열린 다각(polyline/셔터) 진행 중이면 더블클릭=완료, 아니면 최대화 토글
+             if (OPEN_ENDED.has(tool) && pend) {
+               const inst2 = p.series?.instances.find((x) => x.sop_uid === pend.sop);
+               if (inst2 && finishOpenEnded(pi, p, inst2)) return;
+             }
+             setMaximized((m) => (m === null ? pi : null));
+           }}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
                     // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록
                     outline: active === pi ? "2px solid #4ade80"
                       : selPanes.has(pi) ? `2px solid ${selColor}` : "1px solid #1e293b",
-                    display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
+                    display: "grid", cursor: isPointTool(tool) ? "copy" : "crosshair",
                     gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
                     gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
         {Array.from({ length: tilesOf(p) }, (_, t) => {
@@ -605,10 +873,21 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           return (
             <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
                  onMouseDown={(e) => {
-                   if ((tool === "mline" || tool === "mangle") && e.button === 0 && p.series && inst) {
-                     measureClick(e, e.currentTarget, p, inst);
+                   if (isPointTool(tool) && e.button === 0 && p.series && inst) {
+                     measureClick(e, e.currentTarget, pi, p, inst);
                    }
-                 }}>
+                 }}
+                 onMouseMove={(e) => {   // Magnification — 마우스 따라 부분 확대경
+                   if (tool !== "magnify" || !p.series || !inst) return;
+                   const r = e.currentTarget.getBoundingClientRect();
+                   const s0 = Math.min(r.width / (inst.cols || 1), r.height / (inst.rows || 1));
+                   const s = s0 * p.zoom;
+                   const ix = (e.clientX - (r.left + r.width / 2 + p.tx)) / s + inst.cols / 2;
+                   const iy = (e.clientY - (r.top + r.height / 2 + p.ty)) / s + inst.rows / 2;
+                   setMagPos({ pi, t, mx: e.clientX - r.left, my: e.clientY - r.top,
+                               nx: ix / (inst.cols || 1), ny: iy / (inst.rows || 1), sc: s });
+                 }}
+                 onMouseLeave={() => { if (tool === "magnify") setMagPos(null); }}>
               {p.series && inst ? (() => {
                 const pd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
                 return (
@@ -621,7 +900,23 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   <TileAnno inst={inst} pane={p}
                             annos={annos[inst.sop_uid] ?? []}
                             pend={pend?.sop === inst.sop_uid ? pend.pts : []}
-                            scout={scoutFor(inst, p.series.series_uid)} />
+                            scout={scoutFor(inst, p.series.series_uid)}
+                            shutter={p.shutter ?? undefined}
+                            cross={cross3d[pi]?.sop === inst.sop_uid ? cross3d[pi] : undefined} />
+                  {/* Magnification 확대경 — 마우스 위치 3배 확대 */}
+                  {tool === "magnify" && magPos && magPos.pi === pi && magPos.t === t && (
+                    <div style={{
+                      position: "absolute", left: magPos.mx - 80, top: magPos.my - 80,
+                      width: 160, height: 160, borderRadius: "50%", zIndex: 4, pointerEvents: "none",
+                      border: "2px solid #38bdf8", backgroundColor: "#000", backgroundRepeat: "no-repeat",
+                      backgroundImage: `url(${instUrl(p.studyUid || pd.study_uid, p.series, inst, p.wl)})`,
+                      backgroundSize: `${(inst.cols || 1) * magPos.sc * 3}px ${(inst.rows || 1) * magPos.sc * 3}px`,
+                      backgroundPosition:
+                        `${80 - magPos.nx * (inst.cols || 1) * magPos.sc * 3}px ` +
+                        `${80 - magPos.ny * (inst.rows || 1) * magPos.sc * 3}px`,
+                      filter: p.invert ? "invert(1)" : undefined,
+                    }} />
+                  )}
                   {ovlVisible && (
                     <>
                       <div style={ovl("tl", ovlFont)}>{pd.patient_name}<br />{pd.patient_key}</div>
@@ -1055,6 +1350,36 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         )}
       </div>
 
+      {/* ── 2D Table — 영역 픽셀값 표 (근사값) ── */}
+      {tableData && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 250,
+                      display: "grid", placeItems: "center" }}
+             onMouseDown={(e) => { if (e.target === e.currentTarget) setTableData(null); }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                        padding: 14, maxWidth: "90vw", maxHeight: "85vh", overflow: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 8, gap: 10 }}>
+              <b style={{ fontSize: 12.5 }}>▤ {tableData.title}</b>
+              <button style={{ marginLeft: "auto" }} onClick={() => setTableData(null)}>✕</button>
+            </div>
+            <table style={{ borderCollapse: "collapse", fontSize: 10.5, fontFamily: "monospace" }}>
+              <tbody>
+                {tableData.rows.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((v, ci) => (
+                      <td key={ci} style={{ border: "1px solid #24303f", padding: "1px 5px",
+                                            textAlign: "right", color: "var(--text-secondary)" }}>{v}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 6 }}>
+              렌더 영상 기반 근사값(W/L 역변환 ≈) — 원본 픽셀값 아님
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── 3D MPR/MIP — 활성 페인 검사의 볼륨 뷰어 (전체 오버레이) ── */}
       {show3d && (
         <Suspense fallback={
@@ -1084,10 +1409,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 }
 
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
-function TileAnno({ inst, pane, annos, pend, scout = [] }: {
+function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
   scout?: { x1: number; y1: number; x2: number; y2: number;
             current: boolean; cross?: boolean; label?: string }[];
+  shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] };
+  cross?: { x: number; y: number };   // 3D Cursor 마커
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const [dim, setDim] = useState({ w: 0, h: 0 });
@@ -1098,7 +1425,9 @@ function TileAnno({ inst, pane, annos, pend, scout = [] }: {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  if (!annos.length && !pend.length && !scout.length) return <svg ref={ref} style={svgStyle} />;
+  if (!annos.length && !pend.length && !scout.length && !shutter && !cross) {
+    return <svg ref={ref} style={svgStyle} />;
+  }
 
   const s0 = Math.min(dim.w / (inst.cols || 1), dim.h / (inst.rows || 1));
   const s = s0 * pane.zoom;
@@ -1142,23 +1471,172 @@ function TileAnno({ inst, pane, annos, pend, scout = [] }: {
           </g>
         );
       })}
-      {annos.map((a, i) => a.kind === "line" ? (
-        <g key={i} stroke="#facc15" strokeWidth={1.5} fill="none">
-          <line x1={X(a.pts[0])} y1={Y(a.pts[0])} x2={X(a.pts[1])} y2={Y(a.pts[1])} />
-          <text x={(X(a.pts[0]) + X(a.pts[1])) / 2 + 5} y={(Y(a.pts[0]) + Y(a.pts[1])) / 2 - 5}
-                fill="#facc15" stroke="none" fontSize={11}>{distLabel(a.pts[0], a.pts[1])}</text>
-        </g>
-      ) : (
-        <g key={i} stroke="#4ade80" strokeWidth={1.5} fill="none">
-          <polyline points={a.pts.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")} />
-          <text x={X(a.pts[1]) + 6} y={Y(a.pts[1]) - 6} fill="#4ade80" stroke="none" fontSize={11}>
-            {angleLabel(a.pts[0], a.pts[1], a.pts[2])}
-          </text>
-        </g>
-      ))}
+      {/* 셔터 — 영역 밖 가림 (evenodd) */}
+      {shutter && shutter.pts.length >= 2 && (() => {
+        const outer = `M0,0 H${dim.w} V${dim.h} H0 Z`;
+        let inner = "";
+        if (shutter.kind === "rect") {
+          const x0 = X(shutter.pts[0]), y0 = Y(shutter.pts[0]);
+          const x1 = X(shutter.pts[1]), y1 = Y(shutter.pts[1]);
+          inner = `M${Math.min(x0, x1)},${Math.min(y0, y1)} H${Math.max(x0, x1)} ` +
+                  `V${Math.max(y0, y1)} H${Math.min(x0, x1)} Z`;
+        } else if (shutter.kind === "ellipse") {
+          const cx = (X(shutter.pts[0]) + X(shutter.pts[1])) / 2;
+          const cy = (Y(shutter.pts[0]) + Y(shutter.pts[1])) / 2;
+          const rx = Math.abs(X(shutter.pts[1]) - X(shutter.pts[0])) / 2;
+          const ry = Math.abs(Y(shutter.pts[1]) - Y(shutter.pts[0])) / 2;
+          inner = `M${cx - rx},${cy} a${rx},${ry} 0 1,0 ${rx * 2},0 a${rx},${ry} 0 1,0 ${-rx * 2},0 Z`;
+        } else {
+          inner = "M" + shutter.pts.map((pt, k) => `${k ? "L" : ""}${X(pt)},${Y(pt)}`).join(" ") + " Z";
+        }
+        return <path d={`${outer} ${inner}`} fill="#000" fillRule="evenodd" stroke="none" />;
+      })()}
+      {annos.map((a, i) => {
+        const T = (x: number, y: number, txt: string, color: string, size = 11) => (
+          <text x={x} y={y} fill={color} stroke="#000" strokeWidth={3} fontSize={size} fontWeight={700}
+                style={{ paintOrder: "stroke" }}>{txt}</text>
+        );
+        const L = (p0: { x: number; y: number }, p1: { x: number; y: number }, color: string, dash?: string) => (
+          <line x1={X(p0)} y1={Y(p0)} x2={X(p1)} y2={Y(p1)} stroke={color} strokeWidth={1.5}
+                strokeDasharray={dash} />
+        );
+        const mid = (p0: { x: number; y: number }, p1: { x: number; y: number }) =>
+          ({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
+        switch (a.kind) {
+          case "line": return (
+            <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15")}
+              {T((X(a.pts[0]) + X(a.pts[1])) / 2 + 5, (Y(a.pts[0]) + Y(a.pts[1])) / 2 - 5,
+                 distLabel(a.pts[0], a.pts[1]), "#facc15")}</g>);
+          case "angle": return (
+            <g key={i} fill="none">
+              <polyline points={a.pts.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
+                        stroke="#4ade80" strokeWidth={1.5} />
+              {T(X(a.pts[1]) + 6, Y(a.pts[1]) - 6, angleLabel(a.pts[0], a.pts[1], a.pts[2]), "#4ade80")}</g>);
+          case "arrow": {
+            const ang = Math.atan2(Y(a.pts[1]) - Y(a.pts[0]), X(a.pts[1]) - X(a.pts[0]));
+            const hx = X(a.pts[1]), hy = Y(a.pts[1]);
+            return (
+              <g key={i} fill="#7dd3fc">{L(a.pts[0], a.pts[1], "#7dd3fc")}
+                <polygon points={`${hx},${hy} ${hx - 11 * Math.cos(ang - 0.42)},${hy - 11 * Math.sin(ang - 0.42)} ${hx - 11 * Math.cos(ang + 0.42)},${hy - 11 * Math.sin(ang + 0.42)}`} /></g>);
+          }
+          case "text": return <g key={i}>{T(X(a.pts[0]), Y(a.pts[0]), a.text ?? "", "#7dd3fc", 12)}</g>;
+          case "marking": return <g key={i}>{T(X(a.pts[0]) - 6, Y(a.pts[0]) + 5, a.text ?? "", "#f97316", 14)}</g>;
+          case "spine": return (
+            <g key={i}><circle cx={X(a.pts[0])} cy={Y(a.pts[0])} r={2.5} fill="#4ade80" />
+              {T(X(a.pts[0]) + 6, Y(a.pts[0]) + 4, a.text ?? "", "#4ade80", 12)}</g>);
+          case "box": {
+            const x0 = Math.min(X(a.pts[0]), X(a.pts[1])), y0 = Math.min(Y(a.pts[0]), Y(a.pts[1]));
+            return (
+              <g key={i} fill="none">
+                <rect x={x0} y={y0} width={Math.abs(X(a.pts[1]) - X(a.pts[0]))}
+                      height={Math.abs(Y(a.pts[1]) - Y(a.pts[0]))} stroke="#7dd3fc" strokeWidth={1.3} />
+                {a.text && T(x0 + 2, y0 - 4, a.text, "#7dd3fc")}</g>);
+          }
+          case "circle": {
+            const r = Math.hypot(X(a.pts[1]) - X(a.pts[0]), Y(a.pts[1]) - Y(a.pts[0]));
+            return (
+              <g key={i} fill="none">
+                <circle cx={X(a.pts[0])} cy={Y(a.pts[0])} r={r} stroke="#7dd3fc" strokeWidth={1.3} />
+                {T(X(a.pts[0]) + r + 4, Y(a.pts[0]), `R ${distLabel(a.pts[0], a.pts[1])}`, "#7dd3fc")}</g>);
+          }
+          case "poly": {
+            let mm = 0;
+            for (let k = 1; k < a.pts.length; k++) {
+              const dx = a.pts[k].x - a.pts[k - 1].x, dy = a.pts[k].y - a.pts[k - 1].y;
+              mm += sp ? Math.hypot(dx * sp[1], dy * sp[0]) : Math.hypot(dx, dy);
+            }
+            return (
+              <g key={i} fill="none">
+                <polyline points={a.pts.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
+                          stroke="#facc15" strokeWidth={1.5} />
+                {T(X(a.pts[a.pts.length - 1]) + 5, Y(a.pts[a.pts.length - 1]),
+                   `${mm.toFixed(1)} ${sp ? "mm" : "px"}`, "#facc15")}</g>);
+          }
+          case "mrect": case "mellipse": {
+            const x0 = Math.min(X(a.pts[0]), X(a.pts[1])), y0 = Math.min(Y(a.pts[0]), Y(a.pts[1]));
+            const w = Math.abs(X(a.pts[1]) - X(a.pts[0])), h = Math.abs(Y(a.pts[1]) - Y(a.pts[0]));
+            return (
+              <g key={i} fill="none">
+                {a.kind === "mrect"
+                  ? <rect x={x0} y={y0} width={w} height={h} stroke="#facc15" strokeWidth={1.3} />
+                  : <ellipse cx={x0 + w / 2} cy={y0 + h / 2} rx={w / 2} ry={h / 2}
+                             stroke="#facc15" strokeWidth={1.3} />}
+                {a.value && T(x0, y0 - 5, a.value, "#facc15", 10.5)}</g>);
+          }
+          case "cobb": {
+            const a1 = Math.atan2(a.pts[1].y - a.pts[0].y, a.pts[1].x - a.pts[0].x);
+            const a2 = Math.atan2(a.pts[3].y - a.pts[2].y, a.pts[3].x - a.pts[2].x);
+            let d = Math.abs(a1 - a2) * 180 / Math.PI;
+            if (d > 180) d = 360 - d;
+            if (d > 90) d = 180 - d;
+            const m = mid(a.pts[1], a.pts[2]);
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#4ade80")}{L(a.pts[2], a.pts[3], "#4ade80")}
+                {L(mid(a.pts[0], a.pts[1]), mid(a.pts[2], a.pts[3]), "#4ade80", "4 4")}
+                {T(X(m) + 6, Y(m), `Cobb ${d.toFixed(1)}°`, "#4ade80")}</g>);
+          }
+          case "centerline": {
+            const m1 = mid(a.pts[0], a.pts[1]), m2 = mid(a.pts[2], a.pts[3]);
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#7dd3fc")}{L(a.pts[2], a.pts[3], "#7dd3fc")}
+                {L(m1, m2, "#facc15", "6 4")}
+                {T(X(mid(m1, m2)) + 5, Y(mid(m1, m2)) - 5, "Center", "#facc15")}</g>);
+          }
+          case "limb": {
+            const d1 = distLabel(a.pts[0], a.pts[1]), d2 = distLabel(a.pts[2], a.pts[3]);
+            const v1 = parseFloat(d1), v2 = parseFloat(d2);
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15")}{L(a.pts[2], a.pts[3], "#4ade80")}
+                {T(X(a.pts[1]) + 5, Y(a.pts[1]), `L1 ${d1}`, "#facc15")}
+                {T(X(a.pts[3]) + 5, Y(a.pts[3]), `L2 ${d2} (Δ${Math.abs(v1 - v2).toFixed(1)})`, "#4ade80")}</g>);
+          }
+          case "ctr": {
+            const heart = Math.hypot(a.pts[1].x - a.pts[0].x, a.pts[1].y - a.pts[0].y);
+            const thorax = Math.hypot(a.pts[3].x - a.pts[2].x, a.pts[3].y - a.pts[2].y);
+            const ratio = thorax > 0 ? (heart / thorax) * 100 : 0;
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#f97316")}{L(a.pts[2], a.pts[3], "#7dd3fc")}
+                {T(X(a.pts[3]) + 5, Y(a.pts[3]) - 5,
+                   `CTR ${ratio.toFixed(1)}%${ratio > 50 ? " ⚠" : ""}`, ratio > 50 ? "#f87171" : "#4ade80")}</g>);
+          }
+          case "lens": return (
+            <g key={i} stroke="#22d3ee" strokeWidth={1.3} fill="none">
+              <line x1={X(a.pts[0]) - 7} y1={Y(a.pts[0])} x2={X(a.pts[0]) + 7} y2={Y(a.pts[0])} />
+              <line x1={X(a.pts[0])} y1={Y(a.pts[0]) - 7} x2={X(a.pts[0])} y2={Y(a.pts[0]) + 7} />
+              {T(X(a.pts[0]) + 9, Y(a.pts[0]) - 4, a.value ?? "", "#22d3ee")}</g>);
+          case "profile": {
+            const vals = (a as Anno2 & { vals?: number[] }).vals ?? [];
+            if (!vals.length) return null;
+            const bx = Math.min(X(a.pts[0]), X(a.pts[1]));
+            const by = Math.max(Y(a.pts[0]), Y(a.pts[1])) + 8;
+            const bw = 130, bh = 42;
+            const mn = Math.min(...vals), mx = Math.max(...vals);
+            const pts = vals.map((v, k) =>
+              `${bx + (k / (vals.length - 1)) * bw},${by + bh - ((v - mn) / Math.max(1, mx - mn)) * bh}`).join(" ");
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15", "3 3")}
+                <rect x={bx - 2} y={by - 2} width={bw + 4} height={bh + 4} fill="#000a" stroke="#334155" />
+                <polyline points={pts} stroke="#facc15" strokeWidth={1.2} />
+                {T(bx, by - 5, `${mn.toFixed(0)}~${mx.toFixed(0)}`, "#facc15", 9.5)}</g>);
+          }
+          default: return null;
+        }
+      })}
       {pend.map((pt, i) => (
         <circle key={`p${i}`} cx={X(pt)} cy={Y(pt)} r={3} fill="#f87171" />
       ))}
+      {pend.length > 1 && (
+        <polyline points={pend.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
+                  stroke="#f87171" strokeWidth={1} strokeDasharray="3 3" fill="none" />
+      )}
+      {/* 3D Cursor 마커 */}
+      {cross && (
+        <g stroke="#f472b6" strokeWidth={1.6} fill="none">
+          <line x1={X(cross) - 12} y1={Y(cross)} x2={X(cross) + 12} y2={Y(cross)} />
+          <line x1={X(cross)} y1={Y(cross) - 12} x2={X(cross)} y2={Y(cross) + 12} />
+          <circle cx={X(cross)} cy={Y(cross)} r={5} />
+        </g>
+      )}
     </svg>
   );
 }
