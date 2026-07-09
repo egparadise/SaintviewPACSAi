@@ -22,3 +22,6 @@ deploy/orthanc-generated.json
 # 백업 출력물(런타임)
 backend/backup/
 deploy/scp-policy.env
+
+# Import 로컬 이미지 저장소(런타임)
+backend/storage/

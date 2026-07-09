@@ -231,16 +231,29 @@ async def import_dicom(
 
     원본 PiViewSTAR 'Import DICOM Files' 대응 — 파일별 결과(성공/중복/실패)를 반환한다.
     """
+    import io
+    import os
+    import re
+    from pathlib import Path
+
+    from pydicom import dcmread
+
     from app.dicom.orthanc import OrthancClient
     from app.models import AuditLog
-    from app.workers.ai_worker import sync_orthanc_once
+    from app.services.study_service import register_study
 
     client = OrthancClient()
     if not client.alive():
         raise HTTPException(status_code=503, detail="Orthanc 저장소에 연결할 수 없습니다")
 
+    # 로컬 폴더 저장소 — 환자ID/검사일_모달리티/SOP.dcm (SAINTVIEW_IMPORT_DIR 로 변경 가능)
+    import_root = Path(os.getenv("SAINTVIEW_IMPORT_DIR",
+                                 str(Path(__file__).resolve().parents[2] / "storage" / "import")))
+    safe = lambda s: re.sub(r"[^\w\-.]", "_", s or "UNKNOWN")[:64]  # noqa: E731
+
     results = []
     ok = 0
+    parent_studies: set[str] = set()   # 업로드된 인스턴스의 Orthanc StudyID — 즉시 등록용
     for f in files:
         data = await f.read()
         if not data:
@@ -251,33 +264,75 @@ async def import_dicom(
             status = "중복" if r.get("Status") == "AlreadyStored" else "성공"
             if status == "성공":
                 ok += 1
+            if r.get("ParentStudy"):
+                parent_studies.add(r["ParentStudy"])
+            # 로컬 폴더에 사본 저장 (중복 포함 — 파일 단위 실패는 격리)
+            try:
+                ds = dcmread(io.BytesIO(data), stop_before_pixels=True, force=True)
+                sub = import_root / safe(str(getattr(ds, "PatientID", ""))) \
+                    / f"{safe(str(getattr(ds, 'StudyDate', '')))}_{safe(str(getattr(ds, 'Modality', '')))}"
+                sub.mkdir(parents=True, exist_ok=True)
+                name = safe(str(getattr(ds, "SOPInstanceUID", "")) or f.filename or "instance")
+                (sub / f"{name}.dcm").write_bytes(data)
+            except Exception:  # noqa: BLE001 — 로컬 사본 실패는 Import 자체를 막지 않는다
+                pass
             results.append({"filename": f.filename, "size": len(data), "status": status})
         except Exception as e:  # noqa: BLE001 — 파일 단위 실패는 격리해 계속 진행
             results.append({"filename": f.filename, "size": len(data),
                             "status": f"실패: {str(e)[:60]}"})
-    client.close()
 
-    # 변경 피드 동기화 → studies 테이블 등록 (운영 워커와 동일 커서 재사용).
-    # Orthanc 는 마지막 인스턴스 도착 후 StableAge(기본 몇 초~수십 초) 뒤에야 StableStudy 를
-    # 발행하므로, 즉시 안 잡히면 짧게 대기하며 재시도(최대 ~10초). 그래도 안 잡히면
-    # 상주 워커(worker_loop)가 곧 이어서 등록한다.
-    import time
-
+    # 즉시 등록 — StableStudy 대기 없이 업로드된 검사들을 로컬 DB(studies)에 직접 upsert
     registered = 0
-    if ok:
-        for attempt in range(10):
-            cnt = sync_orthanc_once()
-            registered += cnt
-            if cnt:
-                break
-            time.sleep(1)
+    for sid in parent_studies:
+        try:
+            meta = client.study_metadata(sid)
+            tags = meta.get("MainDicomTags", {})
+            ptags = meta.get("PatientMainDicomTags", {})
+            register_study(
+                db,
+                study_uid=tags.get("StudyInstanceUID", ""),
+                patient_key=ptags.get("PatientID", "UNKNOWN"),
+                patient_name=ptags.get("PatientName", ""),
+                birth_date=ptags.get("PatientBirthDate", ""),
+                sex=ptags.get("PatientSex", ""),
+                accession_no=tags.get("AccessionNumber", ""),
+                study_date=tags.get("StudyDate", ""),
+                study_time=tags.get("StudyTime", ""),
+                modality=tags.get("ModalitiesInStudy", "").split("\\")[0]
+                if tags.get("ModalitiesInStudy") else "",
+                study_desc=tags.get("StudyDescription", ""),
+                institution=tags.get("InstitutionName", ""),
+                referring_physician=str(tags.get("ReferringPhysicianName", "")),
+                department=tags.get("InstitutionalDepartmentName", ""),
+                source_aet="IMPORT",
+                orthanc_id=sid,
+            )
+            registered += 1
+            # 수신 검사와 동일: 자동 AI 초안 큐잉(중복 가드)
+            from sqlalchemy import select as _select
+
+            from app.config import get_settings
+            from app.models import AiJob
+            from app.services.study_service import queue_ai_job
+
+            st = db.execute(_select(Study).where(
+                Study.study_uid == tags.get("StudyInstanceUID", ""))).scalar_one_or_none()
+            if st and st.status == "received" and get_settings().ai_auto_generate:
+                pending = db.execute(_select(AiJob.id).where(
+                    AiJob.study_id == st.id, AiJob.status.in_(["queued", "running"])).limit(1)).first()
+                if not pending:
+                    queue_ai_job(db, st)
+        except Exception:  # noqa: BLE001 — 검사 단위 등록 실패 격리(상주 워커가 재시도)
+            continue
+    client.close()
 
     db.add(AuditLog(account_id=user.get("uid"), action="import_dicom",
                     target_type="study", target_id="",
                     detail={"by": user["sub"], "files": len(files), "uploaded": ok,
-                            "registered": registered}))
+                            "registered": registered, "dir": str(import_root)}))
     db.commit()
-    return {"processed": len(files), "uploaded": ok, "registered": registered, "results": results}
+    return {"processed": len(files), "uploaded": ok, "registered": registered,
+            "saved_dir": str(import_root), "results": results}
 
 
 class KeyImagesBody(BaseModel):

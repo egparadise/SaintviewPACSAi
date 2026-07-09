@@ -258,7 +258,7 @@ export const api = {
   importDicom: (files: File[]) => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f, f.name);
-    return req<{ processed: number; uploaded: number; registered: number;
+    return req<{ processed: number; uploaded: number; registered: number; saved_dir?: string;
                  results: { filename: string; size: number; status: string }[] }>(
       "/api/import-dicom", { method: "POST", body: fd });
   },

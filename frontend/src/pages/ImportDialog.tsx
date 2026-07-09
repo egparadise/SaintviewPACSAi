@@ -13,6 +13,7 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
   const [source, setSource] = useState("");
   const [dcmOnly, setDcmOnly] = useState(false);   // 기본: 전체 파일에서 DICOM 자동 감지
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);   // 업로드 완료 — Start→완료 표시
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState("Total 0 files processed, 0 DICOM files imported");
 
@@ -32,6 +33,7 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
 
   const scan = async (all: File[], only = dcmOnly) => {
     setBusy(true);
+    setDone(false);
     setRows([]);
     try {
       const files: File[] = [];
@@ -66,18 +68,21 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
     try {
       // 대용량 대응: 50개 배치로 나눠 업로드 — 진행률·결과 누적 표시
       const BATCH = 50;
-      let processed = 0, uploaded = 0, registered = 0;
+      let processed = 0, uploaded = 0, registered = 0, savedDir = "";
       const acc: Row[] = [];
       for (let i = 0; i < picked.length; i += BATCH) {
         setSummary(`업로드 중… ${Math.min(i + BATCH, picked.length)}/${picked.length}`);
         const r = await api.importDicom(picked.slice(i, i + BATCH));
         processed += r.processed; uploaded += r.uploaded; registered += r.registered;
+        savedDir = r.saved_dir ?? savedDir;
         acc.push(...r.results);
         setRows([...acc]);
       }
       setSummary(`Total ${processed} files processed, ${uploaded} DICOM files imported` +
-                 ` — 검사 ${registered}건 로컬 DB 등록`);
-      if (registered) onDone();
+                 ` — 검사 ${registered}건 Local DB 등록` +
+                 (savedDir ? ` · 이미지 폴더: ${savedDir}` : ""));
+      setDone(true);
+      onDone();   // 워크리스트 즉시 갱신 — 환자·영상 표시
     } catch (e) {
       setSummary(e instanceof Error ? `실패: ${e.message}` : "Import 실패");
     } finally { setBusy(false); }
@@ -159,8 +164,12 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
         </fieldset>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button className="primary" style={B} disabled={busy || !picked.length} onClick={start}>Start</button>
-          <button style={B} onClick={onClose}>Close</button>
+          <button className="primary"
+                  style={{ ...B, ...(done ? { background: "#16a34a", borderColor: "#16a34a" } : {}) }}
+                  disabled={busy || done || !picked.length} onClick={start}>
+            {busy ? "진행 중…" : done ? "완료 ✓" : "Start"}
+          </button>
+          <button style={B} onClick={() => { onDone(); onClose(); }}>Close</button>
         </div>
       </div>
     </div>
