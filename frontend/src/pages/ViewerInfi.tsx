@@ -568,8 +568,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
            onWheel={(e) => onWheel(e, pi)}
            onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
+                    // 멀티 선택(Crosslink)=자주색, 활성=초록 (AI 전용 보라 #a78bfa 와는 구분되는 마젠타)
                     outline: active === pi ? "2px solid #4ade80"
-                      : selPanes.has(pi) ? "2px dashed #4ade80" : "1px solid #1e293b",
+                      : selPanes.has(pi) ? "2px solid #d946ef" : "1px solid #1e293b",
                     display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
                     gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
                     gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
