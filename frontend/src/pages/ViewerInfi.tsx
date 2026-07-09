@@ -722,24 +722,44 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // (scout=현재 이미지 1선, all_lines=시리즈 전체. 같은 시리즈·평행 평면은 제외)
   const scoutFor = (tileInst: InstanceNode, tileSeriesUid: string) => {
     if (!xlink.scout && !xlink.all_lines) return [];
-    const act = panes[active];
-    if (!act?.series || act.series.series_uid === tileSeriesUid) return [];
     const tg = geomOf(tileInst);
     if (!tg) return [];
-    const srcs = xlink.all_lines ? act.series.instances
-      : act.series.instances[act.index] ? [act.series.instances[act.index]] : [];
-    const total = act.series.instances.length;
-    const out: { x1: number; y1: number; x2: number; y2: number; current: boolean; label?: string }[] = [];
-    srcs.forEach((si, k) => {
-      const sg = geomOf(si);
-      if (!sg) return;
-      const seg = scoutSegment(sg, tg);
-      if (!seg) return;
-      const current = xlink.all_lines ? k === act.index : true;
-      out.push({ ...seg, current,
-                 // 현재 라인에 "현재/전체" 표기 (요청: 00/00 형식)
-                 label: current ? `${act.index + 1}/${total}` : undefined });
-    });
+    const act = panes[active];
+    const out: { x1: number; y1: number; x2: number; y2: number;
+                 current: boolean; cross?: boolean; label?: string }[] = [];
+    // 1) 활성(기준) 시리즈의 절단선 — 다른 시리즈 타일 위 (노랑=현재, 파랑=All Lines)
+    if (act?.series && act.series.series_uid !== tileSeriesUid) {
+      const srcs = xlink.all_lines ? act.series.instances
+        : act.series.instances[act.index] ? [act.series.instances[act.index]] : [];
+      const total = act.series.instances.length;
+      srcs.forEach((si, k) => {
+        const sg = geomOf(si);
+        if (!sg) return;
+        const seg = scoutSegment(sg, tg);
+        if (!seg) return;
+        const current = xlink.all_lines ? k === act.index : true;
+        out.push({ ...seg, current,
+                   label: current ? `${act.index + 1}/${total}` : undefined });   // "현재/전체"
+      });
+    }
+    // 2) 상호 참조 — 기준 페인 자신이거나 기준과 평행 평면(예: 같은 AX 축)이라 1)이 비면,
+    //    화면의 다른 페인들 '현재 이미지' 절단선을 시안색으로 표시 (INFINITT 상호 크로스링크)
+    if (!out.length) {
+      const seen = new Set([tileSeriesUid]);
+      for (const q of panes) {
+        const s = q?.series;
+        if (!s || seen.has(s.series_uid)) continue;
+        seen.add(s.series_uid);
+        const qi = s.instances[q.index];
+        if (!qi) continue;
+        const qg = geomOf(qi);
+        if (!qg) continue;
+        const seg = scoutSegment(qg, tg);
+        if (!seg) continue;
+        out.push({ ...seg, current: false, cross: true,
+                   label: `${q.index + 1}/${s.instances.length}` });
+      }
+    }
     return out;
   };
 
@@ -1037,7 +1057,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
 function TileAnno({ inst, pane, annos, pend, scout = [] }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
-  scout?: { x1: number; y1: number; x2: number; y2: number; current: boolean; label?: string }[];
+  scout?: { x1: number; y1: number; x2: number; y2: number;
+            current: boolean; cross?: boolean; label?: string }[];
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const [dim, setDim] = useState({ w: 0, h: 0 });
@@ -1076,13 +1097,15 @@ function TileAnno({ inst, pane, annos, pend, scout = [] }: {
         const e = p1.x >= p2.x ? p1 : p2;
         const lx = Math.min(Math.max(e.x - 34, 2), dim.w - 40);
         const ly = Math.min(Math.max(e.y - 4, 10), dim.h - 4);
+        const color = sc.current ? "#facc15" : sc.cross ? "#22d3ee" : "#38bdf8";
         return (
           <g key={`s${i}`}>
             <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                  stroke={sc.current ? "#facc15" : "#38bdf8"}
-                  strokeWidth={sc.current ? 1.6 : 0.7} opacity={sc.current ? 1 : 0.65} />
+                  stroke={color}
+                  strokeWidth={sc.current ? 1.6 : sc.cross ? 1.1 : 0.7}
+                  opacity={sc.current ? 1 : sc.cross ? 0.85 : 0.65} />
             {sc.label && (
-              <text x={lx} y={ly} fill="#facc15" fontSize={11} fontWeight={700}
+              <text x={lx} y={ly} fill={color} fontSize={11} fontWeight={700}
                     style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: 3 }}>
                 {sc.label}
               </text>
