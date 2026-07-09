@@ -632,11 +632,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     );
   };
 
-  // 썸네일 테두리 색 — 화면(어느 페인이든)에 출력 중=주황, 활성 페인의 시리즈=초록
+  // 썸네일 테두리 색 — 우선순위: 다중 선택(자주) > 활성(초록) > 출력 중(주황) > 기본
   const shownUids = new Set(panes.map((p) => p.series?.series_uid).filter(Boolean) as string[]);
+  const selUids = new Set([...selPanes].map((i) => panes[i]?.series?.series_uid)
+    .filter(Boolean) as string[]);
   const activeUid = panes[active]?.series?.series_uid;
   const thumbBorder = (uid: string, fallback: string) =>
-    uid === activeUid ? "2px solid #4ade80"
+    selUids.has(uid) ? `2px solid ${selColor}`
+      : uid === activeUid ? "2px solid #4ade80"
       : shownUids.has(uid) ? "2px solid #f97316"
       : fallback;
 
