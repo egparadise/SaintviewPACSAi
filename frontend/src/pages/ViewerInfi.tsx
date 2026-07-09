@@ -276,8 +276,21 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const applySLayout = (l: { r: number; c: number }) => {
     setSLayout(l);
     setMaximized(null);
-    setPanes((ps) => Array.from({ length: l.r * l.c }, (_, i) =>
-      ps[i] ?? { ...initPane(detail.study_uid), series: series[i % Math.max(series.length, 1)] ?? null }));
+    setPanes((ps) => {
+      // 시리즈가 레이아웃보다 적으면 순환 반복하지 않고 빈 페인으로 둔다.
+      // 유지되는 기존 페인이 이미 보여주는 시리즈는 건너뛰고 다음 미표시 시리즈를 순서대로 배치.
+      const n = l.r * l.c;
+      const used = new Set(
+        ps.slice(0, n).map((p) => p?.series?.series_uid).filter(Boolean) as string[]);
+      let cursor = 0;
+      return Array.from({ length: n }, (_, i) => {
+        if (ps[i]) return ps[i];
+        while (cursor < series.length && used.has(series[cursor].series_uid)) cursor += 1;
+        const s = series[cursor] ?? null;
+        if (s) { used.add(s.series_uid); cursor += 1; }
+        return { ...initPane(detail.study_uid), series: s };
+      });
+    });
   };
   // 과거검사 시리즈 로드 (Related Exam 버튼)
   const loadPrior = (reId: number, uid: string, label: string) => {
