@@ -2546,7 +2546,8 @@ export function Worklist() {
   };
   // 열린 문 로그아웃 아이콘 — 3D 스타일(그라데이션 문틀/나무 문짝/하이라이트), 이웃 이모지(22px)와 크기 정렬
   const openDoorIcon = (
-    <svg width="23" height="23" viewBox="0 0 24 24" style={{ display: "block", filter: "drop-shadow(0 1.5px 1.5px rgba(0,0,0,0.6))" }}>
+    <svg width="20" height="20" viewBox="0 0 24 24"
+         style={{ display: "block", filter: "drop-shadow(0 1.2px 1.2px rgba(0,0,0,0.6))" }}>
       <defs>
         <linearGradient id="svDoorFrame" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#7c8aa0" /><stop offset="1" stopColor="#3b4859" />

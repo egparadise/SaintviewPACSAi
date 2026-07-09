@@ -119,6 +119,9 @@ export function ReportWindow() {
     setDetail(d);
     setHosp(d.memo ?? "");
     setRelatedView(null);
+    setTplPreview(null);
+    setAppliedTpl(null);
+    tplBackup.current = null;
     document.title = `Reading — ${d.modality} ${d.patient_name} ${d.study_date}`;
     const r = await api.reports(id);
     setReports(r.items);
@@ -234,10 +237,30 @@ export function ReportWindow() {
     if (p.reading_text) { setReading((r) => join(r, p.reading_text)); setTouched(true); }
     if (p.text) setConclusion((c) => join(c, p.text));
   };
-  const applyTemplate = (p: PhraseRow) => {
-    if (!window.confirm(`템플릿 '${p.name}'으로 판독/결론을 교체할까요?`)) return;
+  // ── 템플릿: 클릭=하단 미리보기, 우측 동그라미 체크=적용(교체)·해제=원문 복원 ──
+  const [tplPreview, setTplPreview] = useState<PhraseRow | null>(null);
+  const [appliedTpl, setAppliedTpl] = useState<number | null>(null);
+  const tplBackup = useRef<{ reading: string; conclusion: string } | null>(null);
+  const toggleTemplate = (p: PhraseRow) => {
+    if (appliedTpl === p.id) {
+      // 체크 해제 — 적용 전 내용 복원
+      if (tplBackup.current) {
+        setReading(tplBackup.current.reading);
+        setConclusion(tplBackup.current.conclusion);
+      } else {
+        setReading("");
+        setConclusion("");
+      }
+      tplBackup.current = null;
+      setAppliedTpl(null);
+      setTouched(true);
+      return;
+    }
+    // 새 적용 — 첫 적용 시점의 원문만 백업(템플릿 간 전환에도 원문 유지)
+    if (appliedTpl === null) tplBackup.current = { reading, conclusion };
     setReading(p.reading_text);
     setConclusion(p.text);
+    setAppliedTpl(p.id);
     setTouched(true);
   };
 
@@ -480,12 +503,18 @@ export function ReportWindow() {
           </div>
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {phraseList.map((p) => (
-              <div key={p.id} onClick={() => rightTab === "std" ? insertPhrase(p) : applyTemplate(p)}
-                   title={`${p.reading_text ? `[판독] ${p.reading_text}\n` : ""}${p.text ? `[결론] ${p.text}` : ""}`}
+              <div key={p.id}
+                   onClick={() => rightTab === "std" ? insertPhrase(p)
+                     : setTplPreview((cur) => (cur?.id === p.id ? null : p))}   /* 1회 클릭 = 미리보기 토글 */
+                   title={rightTab === "std"
+                     ? `${p.reading_text ? `[판독] ${p.reading_text}\n` : ""}${p.text ? `[결론] ${p.text}` : ""}`
+                     : "클릭=아래 미리보기 · 우측 ◯=적용/해제"}
                    style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid #24282d",
-                            display: "flex", alignItems: "center", gap: 6 }}
+                            display: "flex", alignItems: "center", gap: 6,
+                            background: rightTab === "tpl" && tplPreview?.id === p.id ? "var(--accent-subtle)" : undefined }}
                    onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
-                   onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
+                   onMouseLeave={(ev) => (ev.currentTarget.style.background =
+                     rightTab === "tpl" && tplPreview?.id === p.id ? "var(--accent-subtle)" : "")}>
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {p.category && <span style={{ color: "var(--text-secondary)" }}>[{p.category}] </span>}
                   {p.name}
@@ -500,8 +529,37 @@ export function ReportWindow() {
                           }
                         }}>🗑️</span>
                 )}
+                {rightTab === "tpl" && (
+                  <span title={appliedTpl === p.id ? "체크 해제 — 적용 전 내용 복원" : "적용 — 판독/결론을 이 템플릿으로"}
+                        onClick={(e) => { e.stopPropagation(); toggleTemplate(p); }}
+                        style={{
+                          flexShrink: 0, width: 17, height: 17, borderRadius: "50%",
+                          display: "grid", placeItems: "center", fontSize: 11, fontWeight: 700,
+                          border: `2px solid ${appliedTpl === p.id ? "var(--accent)" : "#475569"}`,
+                          background: appliedTpl === p.id ? "var(--accent)" : "transparent",
+                          color: "#fff",
+                        }}>{appliedTpl === p.id ? "✓" : ""}</span>
+                )}
               </div>
             ))}
+            {/* 템플릿 미리보기 — 선택한 항목의 판독/결론 내용 */}
+            {rightTab === "tpl" && tplPreview && (
+              <div style={{ padding: 10, borderTop: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
+                <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 4 }}>
+                  [{tplPreview.name}] 미리보기 — 우측 ◯ 체크로 적용
+                </div>
+                {tplPreview.reading_text && (
+                  <div style={{ fontSize: 11.5, whiteSpace: "pre-wrap", color: "var(--text-secondary)", marginBottom: 6 }}>
+                    <b style={{ color: "var(--text-primary)" }}>판독</b><br />{tplPreview.reading_text}
+                  </div>
+                )}
+                {tplPreview.text && (
+                  <div style={{ fontSize: 11.5, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
+                    <b style={{ color: "var(--text-primary)" }}>결론</b><br />{tplPreview.text}
+                  </div>
+                )}
+              </div>
+            )}
             {phraseList.length === 0 && (
               <div style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)", textAlign: "center" }}>
                 등록된 {rightTab === "std" ? "단축키가" : "템플릿이"} 없습니다.
