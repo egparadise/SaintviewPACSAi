@@ -2510,6 +2510,20 @@ export function Worklist() {
   const infiTool = (act: string) => {
     switch (act) {
       case "import": setImportOpen(true); break;  // Import DICOM — USB/CD .dcm 등록
+      case "reading": {   // Report 창 — 판독 작성 (모니터 설정 반영, 선택 연동은 sync)
+        if (!selected) { alert("검사를 먼저 선택하세요"); break; }
+        void (async () => {
+          const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
+          const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
+          const features = await screenFeatures(mon != null && mon >= 0 ? [mon] : null,
+            "width=1280,height=860");
+          const w = window.open(
+            `${window.location.origin}${window.location.pathname}?report=1&study=${selected.id}`,
+            "sv_report", features);
+          w?.focus();
+        })();
+        break;
+      }
       case "csv": {   // Export — 현재 워크리스트를 CSV 로 (원본 Export result to file)
         const rows = [
           ["PatientID", "Name", "Sex", "Modality", "StudyDate", "Description", "Status"].join(","),
@@ -2548,6 +2562,7 @@ export function Worklist() {
     { i: "📤", l: "Export — 워크리스트 CSV 내보내기", a: "csv" },
     { i: "🖨", l: "Print — 화면 인쇄", a: "print" },
     { i: "📄", l: "Report — 판독서 PDF 내려받기", a: "pdf" },
+    { i: "📝", l: "Report 창 — 판독 작성 창 열기(선택 검사)", a: "reading" },
     { i: "🤖", l: "AI — 초안 재생성", a: "regen" },
     { i: "📋", l: "Batch — AI 일괄 검토 (B)", a: "batch" },
     { i: "🚨", l: "Emergency 토글 (E)", a: "emergency" },

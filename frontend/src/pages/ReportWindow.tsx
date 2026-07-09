@@ -29,6 +29,59 @@ export function ReportWindow() {
   const [msg, setMsg] = useState("");
   const report = reports[0] ?? null;
 
+  // ── 계정별 로컬 단축키·템플릿 — 1차 로컬(localStorage) 저장, 주기적으로 서버(user 스코프) 백업 ──
+  const user = localStorage.getItem("sv_user") ?? "anon";
+  const LP_KEY = `sv_phrases_${user}`;
+  const [localPhrases, setLocalPhrases] = useState<PhraseRow[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LP_KEY);
+      if (raw) { setLocalPhrases(JSON.parse(raw)); return; }
+    } catch { /* 초기화 */ }
+    // 로컬이 비어 있으면 서버 백업에서 복원 (PC 교체/재설치 대비)
+    api.getSetting("report.phrases_local").then((r) => {
+      const items = (r.value as { items?: PhraseRow[] }).items;
+      if (items?.length) {
+        setLocalPhrases(items);
+        localStorage.setItem(LP_KEY, JSON.stringify(items));
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const saveLocalPhrases = (items: PhraseRow[]) => {
+    setLocalPhrases(items);
+    try { localStorage.setItem(LP_KEY, JSON.stringify(items)); } catch { /* quota */ }
+  };
+  // 주기 백업 — 설정>판독 '백업 주기(분)' (0=끄기, 기본 10분)
+  useEffect(() => {
+    let timer: number | undefined;
+    api.getSetting("report.prefs").then((r) => {
+      const min = Number((r.value as { phrase_backup_min?: number }).phrase_backup_min ?? 10);
+      if (!min) return;
+      timer = window.setInterval(() => {
+        try {
+          const raw = localStorage.getItem(LP_KEY);
+          void api.putSetting("report.phrases_local",
+            { items: raw ? JSON.parse(raw) : [], at: new Date().toISOString() }, "user");
+        } catch { /* 무시 */ }
+      }, Math.max(1, min) * 60_000);
+    }).catch(() => {});
+    return () => { if (timer) window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const addLocalPhrase = () => {
+    const name = prompt(`새 ${rightTab === "std" ? "단축키" : "템플릿"} 이름`);
+    if (!name) return;
+    const reading = prompt("판독(Reading) 내용 — 비우면 생략") ?? "";
+    const concl = prompt("결론(Conclusion) 내용 — 비우면 생략") ?? "";
+    const shortcut = rightTab === "std" ? (prompt("Alt+? 단축키 문자 (예: A) — 비우면 없음") ?? "") : "";
+    saveLocalPhrases([...localPhrases, {
+      id: -Date.now(), name, text: concl, reading_text: reading,
+      modality: "", body_part: "", category: "내 항목", shortcut: shortcut.trim().toUpperCase().slice(0, 1),
+      kind: rightTab === "std" ? "phrase" : "template", created_by: user,
+    } as PhraseRow]);
+  };
+
   // 워크리스트에서 로그아웃하면 판독 창도 닫는다 (뷰어 창과 동일한 신호)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -232,7 +285,8 @@ export function ReportWindow() {
     color: on ? "var(--text-primary)" : "var(--text-secondary)",
     background: on ? undefined : "var(--bg-elevated)",
   });
-  const phraseList = phrases.filter((p) => p.kind === (rightTab === "std" ? "phrase" : "template"));
+  const phraseList = [...phrases, ...localPhrases]
+    .filter((p) => p.kind === (rightTab === "std" ? "phrase" : "template"));
   const relatedDone = detail.related_exams.filter((e) => e.status === "finalized");
 
   return (
@@ -296,10 +350,23 @@ export function ReportWindow() {
                              });
                            } catch { /* 무시 */ }
                          }}
-                         style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d" }}
+                         style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d",
+                                  display: "flex", alignItems: "center", gap: 6 }}
                          onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                          onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-                      🗂 {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        🗂 {e.study_date} {e.modality}{" "}
+                        <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+                      </span>
+                      <span title="이 과거검사 영상 열기 (뷰어)"
+                            style={{ flexShrink: 0, fontSize: 14 }}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              const w = window.open(
+                                `${window.location.origin}${window.location.pathname}?viewer=2d&study=${e.id}`,
+                                "sv_viewer");
+                              w?.focus();
+                            }}>🎞️</span>
                     </div>
                   ))}
                   {relatedView && (
@@ -399,26 +466,42 @@ export function ReportWindow() {
         {/* 우측 사이드바: 단축키 | 템플릿 */}
         <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "stretch", borderBottom: "1px solid var(--border)" }}>
             <div style={sideTabStyle(rightTab === "std")} onClick={() => setRightTab("std")}>단축키</div>
             <div style={sideTabStyle(rightTab === "tpl")} onClick={() => setRightTab("tpl")}>템플릿</div>
+            <button title={`내 ${rightTab === "std" ? "단축키" : "템플릿"} 추가 (계정 로컬 저장 · 주기 서버 백업)`}
+                    onClick={addLocalPhrase}
+                    style={{ width: 34, border: "none", background: "var(--bg-elevated)",
+                             color: "var(--accent)", fontSize: 15, cursor: "pointer" }}>＋</button>
           </div>
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {phraseList.map((p) => (
               <div key={p.id} onClick={() => rightTab === "std" ? insertPhrase(p) : applyTemplate(p)}
                    title={`${p.reading_text ? `[판독] ${p.reading_text}\n` : ""}${p.text ? `[결론] ${p.text}` : ""}`}
-                   style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid #24282d" }}
+                   style={{ padding: "8px 12px", fontSize: 12.5, cursor: "pointer", borderBottom: "1px solid #24282d",
+                            display: "flex", alignItems: "center", gap: 6 }}
                    onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                    onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-                {p.category && <span style={{ color: "var(--text-secondary)" }}>[{p.category}] </span>}
-                {p.name}
-                {p.shortcut && <span style={{ color: "var(--accent)", float: "right" }}>Alt+{p.shortcut}</span>}
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.category && <span style={{ color: "var(--text-secondary)" }}>[{p.category}] </span>}
+                  {p.name}
+                </span>
+                {p.shortcut && <span style={{ color: "var(--accent)", flexShrink: 0 }}>Alt+{p.shortcut}</span>}
+                {p.id < 0 && (
+                  <span title="내 항목 삭제" style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`'${p.name}' 항목을 삭제할까요?`)) {
+                            saveLocalPhrases(localPhrases.filter((x) => x.id !== p.id));
+                          }
+                        }}>🗑️</span>
+                )}
               </div>
             ))}
             {phraseList.length === 0 && (
               <div style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)", textAlign: "center" }}>
                 등록된 {rightTab === "std" ? "단축키가" : "템플릿이"} 없습니다.
-                <br />설정 &gt; 판독(Reading)에서 등록
+                <br />위 ＋ 로 내 항목 추가(계정 저장) 또는 설정 &gt; 판독(Reading)에서 등록
               </div>
             )}
           </div>

@@ -1231,8 +1231,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           <div style={{ display: "flex", gap: 2 }}>
             <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>🗂</button>
-            <button title="Report — 현재 검사 판독 열기/닫기" onClick={() => setReportDock((v) => !v)}
+            <button title="Report 도크 — 판독 요약 패널 열기/닫기" onClick={() => setReportDock((v) => !v)}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0", background: reportDock ? "var(--accent)" : undefined }}>📄</button>
+            <button title="Report 창 — 판독 작성 창(별도 웹창) 열기"
+                    onClick={() => {
+                      const w = window.open(
+                        `${window.location.origin}${window.location.pathname}?report=1&study=${curD.id}`,
+                        "sv_report", "width=1280,height=860");
+                      w?.focus();
+                    }}
+                    style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>📝</button>
           </div>
           <span style={{ position: "relative" }}>
             <button title="Close — 검사 닫기(현재/전체) 후 워크리스트로" onClick={() => setCloseMenu((v) => !v)}

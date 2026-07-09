@@ -109,7 +109,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // 판독(Reading) 페이지 — 기본/단축키/템플릿 3탭 + 레포트 옵션(report.prefs)
   const [rdTab, setRdTab] = useState<"basic" | "shortcut" | "template">("basic");
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({
-    always_report_window: false,
+    always_report_window: false, phrase_backup_min: 10,
     open_next_after_save: false, save_alert: false, auto_insert_prior: false,
     cvr_notice: false, sidebar_tab: "history", panel_tab: "shortcut",
     insert_pos: "end", key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A",
@@ -717,6 +717,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                           {label}
                         </label>
                       ))}
+                      <Row label="상용구 백업 주기">
+                        <input type="number" min={0} max={1440} style={{ width: 70 }}
+                               value={Number(rdOpts.phrase_backup_min ?? 10)}
+                               onChange={(e) => setRdOpts((p) => ({ ...p, phrase_backup_min: Number(e.target.value) }))} />
+                        <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
+                          분 — 판독창의 내 단축키·템플릿(계정 로컬)을 주기적으로 서버에 백업 (0=끄기)
+                        </span>
+                      </Row>
                       <Row label="사이드바 기본 탭">
                         <select value={String(rdOpts.sidebar_tab ?? "history")}
                                 onChange={(e) => setRdOpts((p) => ({ ...p, sidebar_tab: e.target.value }))}>

@@ -24,6 +24,7 @@ ALLOWED_KEYS = {
     "viewer.hp",             # 행잉 프로토콜 규칙 (장비×부위×Projection → Series/Image layout)
     "report.prefs",          # 리포트 구성 (AI 패널 표시·자동 적용 — UBPACS Report Composition)
     "server.network",        # 서버 네트워크 (로컬 공유 디렉토리·웹서버 IP/Port/Name/AET — 전역)
+    "report.phrases_local",  # 계정별 로컬 단축키·템플릿의 서버 백업(주기 — 설정>판독)
 }
 
 
