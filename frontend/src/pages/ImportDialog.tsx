@@ -8,39 +8,76 @@ type Row = { filename: string; size: number; status: string };
 export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
+  const allRef = useRef<File[]>([]);   // 마지막 선택 전체 — 필터 토글 시 재스캔용
   const [picked, setPicked] = useState<File[]>([]);
   const [source, setSource] = useState("");
-  const [dcmOnly, setDcmOnly] = useState(true);
+  const [dcmOnly, setDcmOnly] = useState(false);   // 기본: 전체 파일에서 DICOM 자동 감지
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState("Total 0 files processed, 0 DICOM files imported");
 
-  // .dcm 만(확장자 없는 DICOM 도 흔하므로 옵션) 필터
-  const filterDcm = (all: File[]) =>
-    dcmOnly ? all.filter((f) => /\.dcm$/i.test(f.name)) : all;
+  // DICOM 판별 — 확장자 무관: 프리앰블 128바이트 뒤 'DICM' 시그니처(Part 10),
+  // 시그니처 없는 구형 raw 파일은 그룹 0008 리틀엔디언 시작으로 감지 (PA000000/IM000000 류 CD 대응)
+  const sniffDicom = async (f: File): Promise<boolean> => {
+    if (/\.dcm$/i.test(f.name)) return true;
+    if (f.name.toUpperCase() === "DICOMDIR") return false;   // 디렉토리 레코드는 제외
+    if (f.size < 132) return false;
+    try {
+      const magic = new Uint8Array(await f.slice(128, 132).arrayBuffer());
+      if (String.fromCharCode(...magic) === "DICM") return true;
+      const head = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+      return head[0] === 0x08 && head[1] === 0x00;
+    } catch { return false; }
+  };
+
+  const scan = async (all: File[], only = dcmOnly) => {
+    setBusy(true);
+    setRows([]);
+    try {
+      const files: File[] = [];
+      if (only) {
+        files.push(...all.filter((f) => /\.dcm$/i.test(f.name)));
+      } else {
+        let done = 0;
+        for (const f of all) {
+          if (await sniffDicom(f)) files.push(f);
+          done += 1;
+          if (done % 50 === 0) setSummary(`스캔 중… ${done}/${all.length}`);
+        }
+      }
+      setPicked(files);
+      setSummary(`${files.length} DICOM files ready (${all.length} scanned)`);
+    } finally { setBusy(false); }
+  };
 
   const onFiles = (list: FileList | null, dir: boolean) => {
     if (!list) return;
     const all = Array.from(list);
-    const files = filterDcm(all);
-    setPicked(files);
-    // 첫 파일 경로로 소스 표시(디렉토리 선택 시 webkitRelativePath 존재)
+    allRef.current = all;
     const rel = (all[0] as File & { webkitRelativePath?: string })?.webkitRelativePath;
-    setSource(dir && rel ? rel.split("/")[0] + "/ …" : `${all.length}개 선택 (${files.length} DICOM)`);
-    setRows([]);
-    setSummary(`${files.length} DICOM files ready (${all.length} selected)`);
+    setSource(dir && rel ? `${rel.split("/")[0]}/ … (${all.length}개 파일)` : `${all.length}개 선택`);
+    void scan(all);
   };
 
   const start = async () => {
-    if (!picked.length) { alert(".dcm 파일 또는 폴더를 먼저 선택하세요"); return; }
+    if (!picked.length) { alert("DICOM 파일 또는 폴더를 먼저 선택하세요"); return; }
     setBusy(true);
-    setSummary("업로드 중…");
+    setRows([]);
     try {
-      const r = await api.importDicom(picked);
-      setRows(r.results);
-      setSummary(`Total ${r.processed} files processed, ${r.uploaded} DICOM files imported` +
-                 ` — 검사 ${r.registered}건 로컬 DB 등록`);
-      if (r.registered) onDone();
+      // 대용량 대응: 50개 배치로 나눠 업로드 — 진행률·결과 누적 표시
+      const BATCH = 50;
+      let processed = 0, uploaded = 0, registered = 0;
+      const acc: Row[] = [];
+      for (let i = 0; i < picked.length; i += BATCH) {
+        setSummary(`업로드 중… ${Math.min(i + BATCH, picked.length)}/${picked.length}`);
+        const r = await api.importDicom(picked.slice(i, i + BATCH));
+        processed += r.processed; uploaded += r.uploaded; registered += r.registered;
+        acc.push(...r.results);
+        setRows([...acc]);
+      }
+      setSummary(`Total ${processed} files processed, ${uploaded} DICOM files imported` +
+                 ` — 검사 ${registered}건 로컬 DB 등록`);
+      if (registered) onDone();
     } catch (e) {
       setSummary(e instanceof Error ? `실패: ${e.message}` : "Import 실패");
     } finally { setBusy(false); }
@@ -71,8 +108,12 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
           </div>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
             <input type="checkbox" checked={dcmOnly}
-                   onChange={(e) => setDcmOnly(e.target.checked)} />
-            Extension *.dcm Files Only (해제 시 확장자 없는 DICOM 도 포함)
+                   onChange={(e) => {
+                     setDcmOnly(e.target.checked);
+                     // 선택돼 있으면 즉시 재스캔 — 기본(해제)은 하위 모든 파일에서 DICM 시그니처 자동 감지
+                     if (allRef.current.length) void scan(allRef.current, e.target.checked);
+                   }} />
+            Extension *.dcm Files Only (기본 해제 — 폴더 이하 <b>모든 파일</b>에서 DICOM 자동 감지)
           </label>
           {/* 숨은 파일 입력 — 폴더(webkitdirectory)·다중 파일 */}
           <input ref={dirRef} type="file" multiple hidden
