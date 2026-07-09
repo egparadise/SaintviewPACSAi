@@ -51,26 +51,35 @@ function geomOf(inst: InstanceNode): Geom | null {
   return { pos: inst.position, row, col, rs: inst.pixel_spacing[0], cs: inst.pixel_spacing[1],
            n: vcross(row, col), rows: inst.rows || 1, cols: inst.cols || 1 };
 }
-/** 소스 평면(src)의 이미지 사각형을 타깃(tgt) 픽셀좌표에 투영 → 절단선 세그먼트. 평행 평면이면 null */
+/** 소스 평면(src)과 타깃(tgt) 평면의 **정확한 교차선**을 타깃 픽셀좌표로 반환.
+ *  타깃 이미지 경계를 약간(5%) 넘는 범위로 클리핑 — 상하/좌우 전체를 관통하는 풀 레인지 라인.
+ *  평행 평면이면 null. (기존 모서리 투영 근사는 대각선 오류가 있어 폐기) */
 function scoutSegment(src: Geom, tgt: Geom): { x1: number; y1: number; x2: number; y2: number } | null {
-  const nA = Math.hypot(...src.n), nB = Math.hypot(...tgt.n);
-  if (Math.abs(vdot(src.n, tgt.n) / (nA * nB)) > 0.98) return null;   // 평행 → 절단선 없음
-  const corner = (r: number, c: number): V3 => [
-    src.pos[0] + src.row[0] * src.cs * c + src.col[0] * src.rs * r,
-    src.pos[1] + src.row[1] * src.cs * c + src.col[1] * src.rs * r,
-    src.pos[2] + src.row[2] * src.cs * c + src.col[2] * src.rs * r,
-  ];
-  const pts = [corner(0, 0), corner(0, src.cols - 1), corner(src.rows - 1, 0), corner(src.rows - 1, src.cols - 1)]
-    .map((q) => {
-      const d = vsub(q, tgt.pos);
-      return { x: vdot(d, tgt.row) / tgt.cs, y: vdot(d, tgt.col) / tgt.rs };
-    });
-  let best: [number, number] = [0, 1], bd = -1;
-  for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+  const nsLen = Math.hypot(...src.n), ntLen = Math.hypot(...tgt.n);
+  if (nsLen < 1e-9 || ntLen < 1e-9) return null;
+  if (Math.abs(vdot(src.n, tgt.n) / (nsLen * ntLen)) > 0.999) return null;   // 평행
+  // 타깃 평면 위 점 Q(x,y) = pos + (x·cs)·row + (y·rs)·col 가 소스 평면 위에 있을 조건:
+  //   A·x + B·y + C = 0  (x=열 px, y=행 px)
+  const A = vdot(src.n, tgt.row) * tgt.cs;
+  const B = vdot(src.n, tgt.col) * tgt.rs;
+  const C = vdot(src.n, vsub(tgt.pos, src.pos));
+  // 이미지 경계 + 5% 여유로 클리핑
+  const mx = Math.max(2, (tgt.cols - 1) * 0.05), my = Math.max(2, (tgt.rows - 1) * 0.05);
+  const X0 = -mx, X1 = (tgt.cols - 1) + mx, Y0 = -my, Y1 = (tgt.rows - 1) + my;
+  const pts: { x: number; y: number }[] = [];
+  const add = (x: number, y: number) => {
+    if (x >= X0 - 1e-6 && x <= X1 + 1e-6 && y >= Y0 - 1e-6 && y <= Y1 + 1e-6) pts.push({ x, y });
+  };
+  if (Math.abs(B) > 1e-9) { add(X0, (-C - A * X0) / B); add(X1, (-C - A * X1) / B); }
+  if (Math.abs(A) > 1e-9) { add((-C - B * Y0) / A, Y0); add((-C - B * Y1) / A, Y1); }
+  if (pts.length < 2) return null;
+  let bi: [number, number] = [0, 1], bd = -1;
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
     const d = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y);
-    if (d > bd) { bd = d; best = [i, j]; }
+    if (d > bd) { bd = d; bi = [i, j]; }
   }
-  return { x1: pts[best[0]].x, y1: pts[best[0]].y, x2: pts[best[1]].x, y2: pts[best[1]].y };
+  if (bd < 1e-6) return null;
+  return { x1: pts[bi[0]].x, y1: pts[bi[0]].y, x2: pts[bi[1]].x, y2: pts[bi[1]].y };
 }
 
 function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string): string {
@@ -668,12 +677,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     if (!tg) return [];
     const srcs = xlink.all_lines ? act.series.instances
       : act.series.instances[act.index] ? [act.series.instances[act.index]] : [];
-    const out: { x1: number; y1: number; x2: number; y2: number; current: boolean }[] = [];
+    const total = act.series.instances.length;
+    const out: { x1: number; y1: number; x2: number; y2: number; current: boolean; label?: string }[] = [];
     srcs.forEach((si, k) => {
       const sg = geomOf(si);
       if (!sg) return;
       const seg = scoutSegment(sg, tg);
-      if (seg) out.push({ ...seg, current: xlink.all_lines ? k === act.index : true });
+      if (!seg) return;
+      const current = xlink.all_lines ? k === act.index : true;
+      out.push({ ...seg, current,
+                 // 현재 라인에 "현재/전체" 표기 (요청: 00/00 형식)
+                 label: current ? `${act.index + 1}/${total}` : undefined });
     });
     return out;
   };
@@ -972,7 +986,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
 function TileAnno({ inst, pane, annos, pend, scout = [] }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
-  scout?: { x1: number; y1: number; x2: number; y2: number; current: boolean }[];
+  scout?: { x1: number; y1: number; x2: number; y2: number; current: boolean; label?: string }[];
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const [dim, setDim] = useState({ w: 0, h: 0 });
@@ -1004,13 +1018,27 @@ function TileAnno({ inst, pane, annos, pend, scout = [] }: {
   return (
     <svg ref={ref} style={svgStyle}>
       {/* Scout lines — 현재 이미지 선은 진한 노랑, All Lines 는 가는 파랑 */}
-      {scout.map((sc, i) => (
-        <line key={`s${i}`}
-              x1={X({ x: sc.x1, y: sc.y1 })} y1={Y({ x: sc.x1, y: sc.y1 })}
-              x2={X({ x: sc.x2, y: sc.y2 })} y2={Y({ x: sc.x2, y: sc.y2 })}
-              stroke={sc.current ? "#facc15" : "#38bdf8"}
-              strokeWidth={sc.current ? 1.6 : 0.7} opacity={sc.current ? 1 : 0.65} />
-      ))}
+      {scout.map((sc, i) => {
+        const p1 = { x: X({ x: sc.x1, y: sc.y1 }), y: Y({ x: sc.x1, y: sc.y1 }) };
+        const p2 = { x: X({ x: sc.x2, y: sc.y2 }), y: Y({ x: sc.x2, y: sc.y2 }) };
+        // 라벨은 라인의 오른쪽 끝에 — 화면 밖으로 나가지 않게 클램프
+        const e = p1.x >= p2.x ? p1 : p2;
+        const lx = Math.min(Math.max(e.x - 34, 2), dim.w - 40);
+        const ly = Math.min(Math.max(e.y - 4, 10), dim.h - 4);
+        return (
+          <g key={`s${i}`}>
+            <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                  stroke={sc.current ? "#facc15" : "#38bdf8"}
+                  strokeWidth={sc.current ? 1.6 : 0.7} opacity={sc.current ? 1 : 0.65} />
+            {sc.label && (
+              <text x={lx} y={ly} fill="#facc15" fontSize={11} fontWeight={700}
+                    style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: 3 }}>
+                {sc.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
       {annos.map((a, i) => a.kind === "line" ? (
         <g key={i} stroke="#facc15" strokeWidth={1.5} fill="none">
           <line x1={X(a.pts[0])} y1={Y(a.pts[0])} x2={X(a.pts[1])} y2={Y(a.pts[1])} />
