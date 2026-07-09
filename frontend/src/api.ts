@@ -258,9 +258,11 @@ export const api = {
   importDicom: (files: File[]) => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f, f.name);
+    // 선택 병원 귀속 — 병원 스코프 워크리스트에서도 Import 검사가 보이도록
+    const hid = localStorage.getItem("sv_active_hospital");
     return req<{ processed: number; uploaded: number; registered: number; saved_dir?: string;
                  results: { filename: string; size: number; status: string }[] }>(
-      "/api/import-dicom", { method: "POST", body: fd });
+      `/api/import-dicom${hid ? `?hospital_id=${hid}` : ""}`, { method: "POST", body: fd });
   },
   seriesTree: (studyId: number) =>
     req<{ study_uid: string; series: SeriesNode[] }>(`/api/studies/${studyId}/series-tree`),

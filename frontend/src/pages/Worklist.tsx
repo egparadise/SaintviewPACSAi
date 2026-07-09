@@ -2572,7 +2572,13 @@ export function Worklist() {
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
       {importOpen && (
         <Suspense fallback={null}>
-          <ImportDialog onClose={() => setImportOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />
+          <ImportDialog onClose={() => setImportOpen(false)}
+                        onDone={() => {
+                          // CD 영상은 검사일이 과거인 경우가 많아 기간 필터를 '전체'로 풀어 바로 보이게 한다
+                          setDatePreset("all");
+                          setFilters((f) => ({ ...f, tree_from: "", date_from_iso: "", date_to_iso: "" }));
+                          setRefreshKey((k) => k + 1);
+                        }} />
         </Suspense>
       )}
       {/* 자체 뷰어(Viewer2D)는 새 창(?viewer=2d)으로 열린다 — openV2 참조 */}

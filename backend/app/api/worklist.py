@@ -224,6 +224,7 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
 @router.post("/import-dicom")
 async def import_dicom(
     files: list[UploadFile] = File(...),
+    hospital_id: int = Query(0, description="선택 병원 귀속(시스템 관리자용, 0=자동)"),
     db: Session = Depends(get_db),
     user: dict = Depends(current_user),
 ):
@@ -317,6 +318,11 @@ async def import_dicom(
 
             st = db.execute(_select(Study).where(
                 Study.study_uid == tags.get("StudyInstanceUID", ""))).scalar_one_or_none()
+            # 병원 귀속 — Import 는 장비 AET 매핑이 없어 hospital_id=None 이 되므로,
+            # 요청자 병원(hid) 또는 선택 병원으로 귀속해 병원 스코프 워크리스트에서도 보이게 한다
+            eff_hid = user.get("hid") or hospital_id or None
+            if st and st.hospital_id is None and eff_hid:
+                st.hospital_id = eff_hid
             if st and st.status == "received" and get_settings().ai_auto_generate:
                 pending = db.execute(_select(AiJob.id).where(
                     AiJob.study_id == st.id, AiJob.status.in_(["queued", "running"])).limit(1)).first()
