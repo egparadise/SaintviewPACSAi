@@ -371,6 +371,41 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
     localStorage.setItem("sv_shortcuts", JSON.stringify(list));
     setFavTick(favTick + 1);
   };
+
+  // ── 기간·Search Filter 사용자 편집 (계정 저장: worklist.prefs) ──
+  const [dpCustom, setDpCustom] = useState<{ key: string; label: string; days: number }[] | null>(null);
+  const [modList, setModList] = useState<string[] | null>(null);   // null = 자동(데이터 집계)
+  useEffect(() => {
+    api.getSetting("worklist.prefs").then((r) => {
+      const v = r.value as { date_presets?: { key: string; label: string; days: number }[]; mod_filters?: string[] };
+      if (v.date_presets?.length) setDpCustom(v.date_presets);
+      if (v.mod_filters) setModList(v.mod_filters);
+    }).catch(() => {});
+  }, []);
+  const persistRail = (patch: Record<string, unknown>) => {
+    api.getSetting("worklist.prefs").then((r) =>
+      api.putSetting("worklist.prefs", { ...r.value, ...patch }, "user")).catch(() => {});
+  };
+  const presets = dpCustom ?? DATE_PRESETS;
+  const askPreset = (init?: { label: string; days: number }) => {
+    const label = prompt("기간 이름", init?.label ?? "");
+    if (!label) return null;
+    const ds = prompt("일수 (0=오늘, 숫자=최근 N일, -1=전체)", String(init?.days ?? 7));
+    if (ds === null) return null;
+    const days = Number(ds);
+    if (Number.isNaN(days)) { alert("숫자를 입력하세요"); return null; }
+    return { label, days };
+  };
+  const saveDp = (next: { key: string; label: string; days: number }[]) => {
+    setDpCustom(next);
+    persistRail({ date_presets: next });
+  };
+  const shownMods = modList ?? Object.keys(mods).sort((a, b) => a.localeCompare(b));
+  const saveMods = (next: string[]) => {
+    setModList(next);
+    persistRail({ mod_filters: next });
+  };
+
   const pick = (p: { key: string; days: number }) => {
     if (p.days < 0) return onPick(p.key, "");
     const d = new Date();
@@ -382,25 +417,60 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
       width, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
       padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, minHeight: 0,
     }}>
-      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px" }}>
+      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px",
+                    display: "flex", alignItems: "center" }}>
         기간
+        <button title="기간 프리셋 추가" style={{ marginLeft: "auto", padding: "0 6px", fontSize: 10.5 }}
+                onClick={() => {
+                  const r = askPreset();
+                  if (r) saveDp([...presets, { key: `c${Math.random().toString(36).slice(2, 8)}`, ...r }]);
+                }}>＋</button>
       </div>
-      {DATE_PRESETS.map((p) => (
+      {presets.map((p, i) => (
         <div key={p.key} onClick={() => pick(p)}
              style={{
                padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
+               display: "flex", alignItems: "center", gap: 4,
                background: active === p.key ? "var(--accent-subtle)" : undefined,
                color: active === p.key ? "var(--text-primary)" : "var(--text-secondary)",
              }}>
-          {p.label}
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {p.label}
+          </span>
+          <span title="수정" style={{ flexShrink: 0, fontSize: 10 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = askPreset(p);
+                  if (r) saveDp(presets.map((x, k) => (k === i ? { ...x, ...r } : x)));
+                }}>수정</span>
+          <span title="삭제" style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`'${p.label}' 기간을 삭제할까요?`)) {
+                    saveDp(presets.filter((_, k) => k !== i));
+                  }
+                }}>✕</span>
         </div>
       ))}
       {/* INFINITT User Guide p.5 ⑦ Search Filter — 모달리티 트리 */}
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
         padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
+        display: "flex", alignItems: "center",
       }}>
         Search Filter
+        <button title="모달리티 필터 추가 (예: US, MG)" style={{ marginLeft: "auto", padding: "0 6px", fontSize: 10.5 }}
+                onClick={() => {
+                  const code = prompt("추가할 Modality 코드 (예: US, MG, XA)");
+                  if (!code) return;
+                  const c = code.trim().toUpperCase();
+                  if (shownMods.includes(c)) { alert("이미 목록에 있습니다"); return; }
+                  saveMods([...shownMods, c]);
+                }}>＋</button>
+        {modList && (
+          <button title="자동 목록으로 되돌리기 (데이터 집계)" style={{ padding: "0 6px", fontSize: 10.5 }}
+                  onClick={() => { setModList(null); persistRail({ mod_filters: null }); }}>↺</button>
+        )}
       </div>
       {/* 항목이 늘어나도 섹션 안에서 스크롤 */}
       <div style={{ maxHeight: "30vh", overflowY: "auto", flexShrink: 0 }}>
@@ -413,15 +483,32 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
              }}>
           <span>📁 전체</span><span style={{ fontSize: 11 }}>{total}</span>
         </div>
-        {Object.entries(mods).sort(([a], [b]) => a.localeCompare(b)).map(([m, n]) => (
+        {shownMods.map((m, i) => (
           <div key={m} onClick={() => onMod(activeMod === m ? "" : m)}
                style={{
                  padding: "3px 8px 3px 18px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
-                 display: "flex", justifyContent: "space-between",
+                 display: "flex", alignItems: "center", gap: 4,
                  background: activeMod === m ? "var(--accent-subtle)" : undefined,
                  color: activeMod === m ? "var(--text-primary)" : "var(--text-secondary)",
                }}>
-            <span>{m || "(없음)"}</span><span style={{ fontSize: 11 }}>{n}</span>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {m || "(없음)"}
+            </span>
+            <span style={{ fontSize: 11, flexShrink: 0 }}>{mods[m] ?? 0}</span>
+            <span title="코드 수정" style={{ flexShrink: 0, fontSize: 10 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const code = prompt("Modality 코드 수정", m);
+                    if (!code || code.trim().toUpperCase() === m) return;
+                    saveMods(shownMods.map((x, k) => (k === i ? code.trim().toUpperCase() : x)));
+                  }}>수정</span>
+            <span title="목록에서 제거" style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`'${m || "(없음)"}' 필터를 목록에서 제거할까요?`)) {
+                      saveMods(shownMods.filter((_, k) => k !== i));
+                    }
+                  }}>✕</span>
           </div>
         ))}
       </div>
@@ -429,8 +516,15 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
         padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
+        display: "flex", alignItems: "center",
       }}>
         Favorites
+        <button title="현재 검색조건을 바로가기로 추가 (툴바 ★저장과 동일)"
+                style={{ marginLeft: "auto", padding: "0 6px", fontSize: 10.5 }}
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("sv-save-shortcut"));
+                  setTimeout(() => setFavTick((t) => t + 1), 300);   // 저장 후 목록 갱신
+                }}>＋</button>
       </div>
       <div style={{ maxHeight: "22vh", overflowY: "auto", flexShrink: 0 }}>
         {favs.length === 0 && (
@@ -2350,6 +2444,7 @@ export function Worklist() {
       }
       case "print": window.print(); break;
       case "logout":
+        localStorage.setItem("sv_logout", String(Date.now()));   // 뷰어 창도 닫기
         localStorage.removeItem("sv_token"); sessionStorage.removeItem("sv_token");
         location.href = "/"; break;
       default: void doAction(act);

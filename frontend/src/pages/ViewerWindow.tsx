@@ -20,6 +20,14 @@ export function ViewerWindow() {
   const woIds = (params.get("wo_ids") ?? "").split(",").map(Number).filter(Boolean);
 
   const [detail, setDetail] = useState<StudyDetail | null>(null);
+  // 워크리스트에서 로그아웃하면 뷰어 창도 닫는다 (localStorage 신호 — 같은 출처 창 간 전파)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "sv_logout" || (e.key === "sv_token" && !e.newValue)) window.close();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
   const [addDetail, setAddDetail] = useState<StudyDetail | null>(null);
   const [stackDetail, setStackDetail] = useState<StudyDetail | null>(null);
   const [err, setErr] = useState("");

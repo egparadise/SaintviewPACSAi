@@ -79,6 +79,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const logout = () => {
+    localStorage.setItem("sv_logout", String(Date.now()));   // 뷰어 창(sv_viewer)도 닫히도록 신호
     setToken(null);
     ["sv_user", "sv_role", "sv_mode", "sv_active_hospital", "sv_hname"].forEach((k) => localStorage.removeItem(k));
     setSession(null); setAuthView("landing");
