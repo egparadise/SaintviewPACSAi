@@ -9,6 +9,8 @@ import { Splitter } from "../lib/Splitter";
 
 // Setting(p.12 'Open the setting window of Viewer') — 워크리스트 헤더의 설정과 동일한 설정 창
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
+// 3D — Cornerstone3D MPR/MIP 볼륨 뷰어 (전체 오버레이)
+const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_PALETTE, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
@@ -138,6 +140,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [report, setReport] = useState<Report | null>(null);
   // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [show3d, setShow3d] = useState(false);   // 정보바 3D 버튼 — 현재 검사 MPR/MIP
   const [role, setRole] = useState("user");
   useEffect(() => { api.profile().then((p) => setRole(p.role)).catch(() => {}); }, []);
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
@@ -856,6 +859,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             )}
             <option value="custom">직접 입력(00 x 00)…</option>
           </select>
+          <button title="3D — 현재 검사의 MPR/MIP 볼륨 뷰어 열기"
+                  onClick={() => setShow3d(true)}
+                  style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
+            3D
+          </button>
         </span>
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
         <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
@@ -1046,6 +1054,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         )}
       </div>
+
+      {/* ── 3D MPR/MIP — 활성 페인 검사의 볼륨 뷰어 (전체 오버레이) ── */}
+      {show3d && (
+        <Suspense fallback={
+          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200,
+                        display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
+            3D 뷰어 로딩…
+          </div>
+        }>
+          <Viewer3D studyUid={panes[active]?.studyUid || curD.study_uid}
+                    onClose={() => setShow3d(false)} />
+        </Suspense>
+      )}
 
       {/* ── Setting — 앱 공통 설정 창 (워크리스트 '설정' 버튼과 동일 기능) ── */}
       {settingsOpen && (
