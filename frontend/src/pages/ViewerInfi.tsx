@@ -13,7 +13,47 @@ const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ defaul
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
-import { IN_PALETTE, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+
+// 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
+const ANATOMY_ICONS: Record<string, React.ReactNode> = {
+  ctr: (   // 흉곽 속 심장 — 심흉비
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="12" rx="10" ry="8.6" fill="none" stroke="#94a3b8" strokeWidth="1.5" />
+      <path d="M12 17.5 C7.5 14 6 11.5 7.4 9.4 C8.6 7.7 11 8 12 10 C13 8 15.4 7.7 16.6 9.4 C18 11.5 16.5 14 12 17.5 Z"
+            fill="#ef4444" stroke="#7f1d1d" strokeWidth="0.7" />
+      <line x1="2" y1="12" x2="22" y2="12" stroke="#38bdf8" strokeWidth="0.9" strokeDasharray="2 1.6" />
+    </svg>
+  ),
+  spine: (   // 척추 — 추체 스택
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      {[3.4, 7.2, 11, 14.8, 18.6].map((y, i) => (
+        <g key={i}>
+          <rect x="8.6" y={y} width="6.8" height="2.9" rx="1.2" fill="#e7d8b8" stroke="#8a744a" strokeWidth="0.7" />
+          <rect x="15.8" y={y + 0.6} width="3.2" height="1.7" rx="0.8" fill="#cbb58c" />
+        </g>
+      ))}
+      <path d="M12 2.6 V21.4" stroke="#8a744a" strokeWidth="0.6" opacity="0.5" />
+    </svg>
+  ),
+  cobb: (   // 측만 척추 + 각도선
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      <path d="M11 2.5 C15 6 8.5 10 12.5 13.5 C15.5 16 11.5 19 12.5 21.5"
+            fill="none" stroke="#e7d8b8" strokeWidth="2.6" strokeLinecap="round" />
+      <line x1="4" y1="6" x2="18" y2="3.4" stroke="#4ade80" strokeWidth="1.2" />
+      <line x1="5" y1="19.6" x2="19" y2="17.6" stroke="#4ade80" strokeWidth="1.2" />
+    </svg>
+  ),
+  limb: (   // 골반 + 양다리 — 다리 길이/골반 기준선
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      <path d="M5 4.5 C7 3 10 3.6 12 5 C14 3.6 17 3 19 4.5 C20 6.5 18 8.6 15.6 9 L14.4 7.4 L12 8.6 L9.6 7.4 L8.4 9 C6 8.6 4 6.5 5 4.5 Z"
+            fill="#e7d8b8" stroke="#8a744a" strokeWidth="0.7" />
+      <rect x="7.6" y="9.4" width="2.7" height="11" rx="1.3" fill="#dcc9a2" stroke="#8a744a" strokeWidth="0.6" />
+      <rect x="13.7" y="9.4" width="2.7" height="11" rx="1.3" fill="#dcc9a2" stroke="#8a744a" strokeWidth="0.6" />
+      <line x1="3.4" y1="6.4" x2="20.6" y2="6.4" stroke="#38bdf8" strokeWidth="0.9" strokeDasharray="2 1.6" />
+    </svg>
+  ),
+};
 
 interface Pane {
   series: SeriesNode | null;
@@ -777,6 +817,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [selColor, setSelColor] = useState("#d946ef");
   // 툴바 사용자화 — 설정에서 끈 툴은 팔레트에서 숨김 (viewer.prefs.infi_toolbar)
   const [tbShow, setTbShow] = useState<Record<string, boolean>>({});
+  // 팔레트 표시 옵션(설정>뷰어): 열 수(1/2/3) · 이름 표시 · 아이콘 크기(px)
+  const [toolCols, setToolCols] = useState(2);
+  const [toolLabels, setToolLabels] = useState(true);
+  const [toolSize, setToolSize] = useState(34);
   const tHeld = useRef(false);
   const persistTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -787,6 +831,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (v.infi_overlay_visible !== undefined) setOvlVisible(v.infi_overlay_visible);
       if (v.infi_sel_color) setSelColor(v.infi_sel_color);
       if (v.infi_toolbar) setTbShow(v.infi_toolbar);
+      const tv = r.value as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number };
+      if (tv.infi_tool_cols) setToolCols(tv.infi_tool_cols);
+      if (tv.infi_tool_labels !== undefined) setToolLabels(tv.infi_tool_labels);
+      if (tv.infi_tool_size) setToolSize(tv.infi_tool_size);
     }).catch(() => {});
   }, []);
   const persistPrefs = (patch: Record<string, unknown>) => {
@@ -1259,39 +1307,57 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             )}
           </span>
           <div style={{ borderTop: "1px solid var(--border)" }} />
-          {/* 툴 목록 — 3열 그리드: 큰 입체 아이콘 + 아래 작은 이름 */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 3, overflowY: "auto" }}>
-            {PALETTE.filter((t) => tbShow[t.id] !== false).map((t) => {
-              const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
-                || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
-                || (t.id === "dictation" && recording);
-              const name = t.label.split("—")[0].trim();
+          {/* 툴 목록 — 기능별 구획 + 설정 반영(열 수·이름 표시·아이콘 크기) */}
+          <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
+            {IN_PALETTE_GROUPS.map((grp) => {
+              const items = PALETTE.filter((t) => (t.group ?? "기타") === grp && tbShow[t.id] !== false);
+              if (!items.length) return null;
               return (
-                <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
-                        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-                                 padding: "4px 1px 3px",
-                                 opacity: t.impl ? 1 : 0.32,
-                                 background: activeBtn ? "rgba(56,189,248,0.14)" : "transparent",
-                                 color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
-                                 border: "none", borderRadius: 7,
-                                 cursor: t.impl ? "pointer" : "default" }}>
-                  {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
-                  <span style={{
-                    width: 34, height: 34, flexShrink: 0, display: "grid", placeItems: "center",
-                    fontSize: 18, borderRadius: 9,
-                    color: activeBtn ? "#fff" : "#cbd5e1",
-                    background: activeBtn
-                      ? "linear-gradient(145deg, #1e40af, #38bdf8)"
-                      : "linear-gradient(145deg, #3b4759, #171d29)",
-                    boxShadow: activeBtn
-                      ? "inset 2px 2px 5px rgba(0,0,0,0.55), inset -1px -1px 2px rgba(255,255,255,0.15)"
-                      : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
-                    textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
-                  }}>{t.icon}</span>
-                  <span style={{ fontSize: 8.5, lineHeight: 1.1, textAlign: "center", width: "100%",
-                                 overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
-                                 WebkitBoxOrient: "vertical" }}>{name}</span>
-                </button>
+                <div key={grp}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, margin: "5px 1px 3px" }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b",
+                                   whiteSpace: "nowrap" }}>{grp}</span>
+                    <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${toolCols}, 1fr)`, gap: 3 }}>
+                    {items.map((t) => {
+                      const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
+                        || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
+                        || (t.id === "dictation" && recording);
+                      const name = t.label.split("—")[0].trim();
+                      return (
+                        <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
+                                style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                                         gap: 2, padding: "3px 1px",
+                                         opacity: t.impl ? 1 : 0.32,
+                                         background: activeBtn ? "rgba(56,189,248,0.14)" : "transparent",
+                                         color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
+                                         border: "none", borderRadius: 7,
+                                         cursor: t.impl ? "pointer" : "default" }}>
+                          {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
+                          <span style={{
+                            width: toolSize, height: toolSize, flexShrink: 0,
+                            display: "grid", placeItems: "center",
+                            fontSize: Math.round(toolSize * 0.53), borderRadius: Math.round(toolSize * 0.26),
+                            color: activeBtn ? "#fff" : "#cbd5e1",
+                            background: activeBtn
+                              ? "linear-gradient(145deg, #1e40af, #38bdf8)"
+                              : "linear-gradient(145deg, #3b4759, #171d29)",
+                            boxShadow: activeBtn
+                              ? "inset 2px 2px 5px rgba(0,0,0,0.55), inset -1px -1px 2px rgba(255,255,255,0.15)"
+                              : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
+                            textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
+                          }}>{ANATOMY_ICONS[t.id] ?? t.icon}</span>
+                          {toolLabels && (
+                            <span style={{ fontSize: 8.5, lineHeight: 1.1, textAlign: "center", width: "100%",
+                                           overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
+                                           WebkitBoxOrient: "vertical" }}>{name}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>

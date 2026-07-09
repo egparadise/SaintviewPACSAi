@@ -86,6 +86,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infOvlVisible, setInfOvlVisible] = useState(true);
   // In Viewer 툴바 사용자화(표시/숨김) + Modality 기본 레이아웃(행잉과 별도)
   const [infTb, setInfTb] = useState<Record<string, boolean>>({});
+  // 팔레트 표시: 열 수(1/2/3)·이름 표시·아이콘 크기
+  const [infToolCols, setInfToolCols] = useState(2);
+  const [infToolLabels, setInfToolLabels] = useState(true);
+  const [infToolSize, setInfToolSize] = useState(34);
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
@@ -195,6 +199,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (iv.infi_overlay_font) setInfOvlFont(iv.infi_overlay_font);
       if (iv.infi_overlay_visible !== undefined) setInfOvlVisible(iv.infi_overlay_visible);
       if (iv.infi_toolbar) setInfTb(iv.infi_toolbar);
+      const tv = v as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number };
+      if (tv.infi_tool_cols) setInfToolCols(tv.infi_tool_cols);
+      if (tv.infi_tool_labels !== undefined) setInfToolLabels(tv.infi_tool_labels);
+      if (tv.infi_tool_size) setInfToolSize(tv.infi_tool_size);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
         setDefLay(Object.fromEntries(Object.entries(iv.infi_default_layout)
@@ -283,6 +291,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       client_viewer: clientViewer,
       infi_sel_color: infSelColor, infi_overlay_font: infOvlFont, infi_overlay_visible: infOvlVisible,
       infi_toolbar: infTb,
+      infi_tool_cols: infToolCols, infi_tool_labels: infToolLabels, infi_tool_size: infToolSize,
       infi_default_layout: Object.fromEntries(Object.entries(defLay)
         .map(([k, v]) => {
           const parse = (s: string) => {
@@ -1045,6 +1054,27 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   검사를 열 때 해당 Modality 의 Series(페인)/Image(타일) 분할이 자동 적용됩니다.
                   '자동' = 기존 규칙(CT/MR 다층 3x3). 행잉 프로토콜(F-18)과는 별개 설정입니다.
+                </div>
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="툴 팔레트 표시 (In Viewer)">
+                <Row label="열 수">
+                  <select value={infToolCols} onChange={(e) => setInfToolCols(Number(e.target.value))}>
+                    <option value={1}>1열</option><option value={2}>2열</option><option value={3}>3열</option>
+                  </select>
+                  <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12, marginLeft: 14 }}>
+                    <input type="checkbox" checked={infToolLabels}
+                           onChange={(e) => setInfToolLabels(e.target.checked)} />
+                    아이콘 아래 이름 표시
+                  </label>
+                </Row>
+                <Row label="아이콘 크기">
+                  <input type="range" min={24} max={52} step={2} value={infToolSize}
+                         onChange={(e) => setInfToolSize(Number(e.target.value))} /> {infToolSize}px
+                </Row>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  팔레트는 기능별 구획(영상 조정 · 측정 · 주석 · 셔터 · 선택·연동 · 기타)으로 표시됩니다.
                 </div>
               </Group>
             )}
