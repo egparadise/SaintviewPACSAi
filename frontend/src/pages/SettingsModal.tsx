@@ -287,7 +287,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       </button>
       <div style={{
         background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-        width: 860, height: 580, display: "flex", flexDirection: "column", overflow: "hidden",
+        width: "min(860px, 96vw)", height: "min(580px, 92vh)", display: "flex", flexDirection: "column", overflow: "hidden",
       }}>
         <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", background: "var(--bg-elevated)" }}>
           <b>{SCOPE_TITLE[scope]}</b>

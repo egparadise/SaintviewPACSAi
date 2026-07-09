@@ -155,7 +155,8 @@ export function FolderEditModal({ title, init, onSave, onClose }: {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
          onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-                    width: 420, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                    width: 560, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto",
+                    padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
         <b style={{ fontSize: 13 }}>{title}</b>
         <Row name="이름 *">
           <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)}
