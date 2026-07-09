@@ -257,14 +257,20 @@ async def import_dicom(
                             "status": f"실패: {str(e)[:60]}"})
     client.close()
 
-    # 변경 피드 동기화 → studies 테이블 등록 (운영 워커와 동일 커서 재사용)
+    # 변경 피드 동기화 → studies 테이블 등록 (운영 워커와 동일 커서 재사용).
+    # Orthanc 는 마지막 인스턴스 도착 후 StableAge(기본 몇 초~수십 초) 뒤에야 StableStudy 를
+    # 발행하므로, 즉시 안 잡히면 짧게 대기하며 재시도(최대 ~10초). 그래도 안 잡히면
+    # 상주 워커(worker_loop)가 곧 이어서 등록한다.
+    import time
+
     registered = 0
     if ok:
-        for _ in range(40):
+        for attempt in range(10):
             cnt = sync_orthanc_once()
             registered += cnt
-            if cnt == 0:
+            if cnt:
                 break
+            time.sleep(1)
 
     db.add(AuditLog(account_id=user.get("uid"), action="import_dicom",
                     target_type="study", target_id="",
