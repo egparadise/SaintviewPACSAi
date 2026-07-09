@@ -272,8 +272,8 @@ export function FolderTreeEditor({ nodes, onChange, selectedId, onSelect, applyH
                 onClick={() => setModal({ mode: "add-root" })}>＋루트</button>
         <button title="선택 폴더 아래에 하위 폴더 추가" style={{ padding: "1px 6px", fontSize: 10.5 }}
                 disabled={!selected} onClick={() => setModal({ mode: "add-child" })}>＋하위</button>
-        <button title="선택 폴더 조건 수정" style={{ padding: "1px 6px", fontSize: 10.5 }}
-                disabled={!selected} onClick={() => setModal({ mode: "edit" })}>✏</button>
+        <button title="선택 폴더 이름·조건 수정" style={{ padding: "1px 6px", fontSize: 10.5 }}
+                disabled={!selected} onClick={() => setModal({ mode: "edit" })}>수정</button>
         <button title="선택 폴더 삭제(하위 포함)" style={{ padding: "1px 6px", fontSize: 10.5 }}
                 disabled={!selected}
                 onClick={() => {

@@ -36,6 +36,8 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   { key: "users", label: "사용자 관리", admin: true, scope: "system" },
   { key: "storage", label: "저장·백업 (Storage)", admin: true, scope: "system" },
   { key: "servernet", label: "서버 네트워크", admin: true, scope: "system" },
+  // 관리자에게는 사용자 설정 창에서도 노출 — Local Server 공유 루트(디렉토리) 설정 접근성
+  { key: "servernet", label: "서버 네트워크 (공유 루트)", admin: true, scope: "viewer" },
   // 병원 — 병원별 배치 구성
   { key: "modality", label: "장비·수신 (Modality)", admin: true, scope: "hospital" },
   { key: "network", label: "네트워크 (DICOM)", scope: "hospital" },
@@ -822,8 +824,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                           <td>{t.label}</td>
                           <td style={{ color: "var(--text-secondary)" }}>{folderSummary(t.filter)}</td>
                           <td style={{ whiteSpace: "nowrap" }}>
-                            <button style={{ padding: "0 6px", fontSize: 11 }} title="조건 수정"
-                                    onClick={() => setTabModal({ index: i })}>✏</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} title="이름·검색 조건 수정"
+                                    onClick={() => setTabModal({ index: i })}>수정</button>
                             <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title="위로"
                                     onClick={() => {
                                       const next = [...wlTabs];
