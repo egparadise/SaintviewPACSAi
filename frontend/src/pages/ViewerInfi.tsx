@@ -4,7 +4,8 @@
 //         B/W Inverse/Sharpen/Average/Pseudo/Auto Scroll/Calibrate/Measure 2D Line/Measure 2D Angle
 // 미구현(반투명): Magnification/3D Cursor/Dictation 계열/Select All 계열/Shutter 3종/CT Ratio/
 //         Limb Length/Center Line/Profile/2D Table/Spine Label/Volume/3D 주석/2D 주석·ROI 계열/Cobb/Marking/Lens
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Splitter } from "../lib/Splitter";
 
 // Setting(p.12 'Open the setting window of Viewer') — 워크리스트 헤더의 설정과 동일한 설정 창
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
@@ -459,8 +460,83 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     api.reports(curD.id).then((r) => setReport(r.items[0] ?? null)).catch(() => setReport(null));
   }, [reportDock, curD.id]);
 
-  const paneIdxs = maximized !== null ? [maximized] : panes.map((_, i) => i);
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
+
+  // 페인 크기 분율(fr) — 경계 스플리터 드래그로 좌우(colFr)/상하(rowFr) 조절. 레이아웃 변경 시 초기화
+  const vpRef = useRef<HTMLDivElement>(null);
+  const [colFr, setColFr] = useState<number[]>([1]);
+  const [rowFr, setRowFr] = useState<number[]>([1]);
+  useEffect(() => {
+    setColFr(Array(sLayout.c).fill(1));
+    setRowFr(Array(sLayout.r).fill(1));
+  }, [sLayout.r, sLayout.c]);
+  const adjFr = (set: React.Dispatch<React.SetStateAction<number[]>>, i: number,
+                 deltaPx: number, totalPx: number) =>
+    set((fr) => {
+      const sum = fr.reduce((a, b) => a + b, 0) || 1;
+      const d = (deltaPx / Math.max(totalPx, 1)) * sum;
+      const next = [...fr];
+      next[i] = Math.max(0.15, (next[i] ?? 1) + d);
+      next[i + 1] = Math.max(0.15, (next[i + 1] ?? 1) - d);
+      return next;
+    });
+
+  // Series 페인 렌더 — 뷰포트 중첩 flex(경계 스플리터) 안에서 사용
+  const renderPane = (pi: number) => {
+    const p = panes[pi];
+    if (!p) return <div style={{ flex: 1 }} />;
+    const insts = p.series?.instances ?? [];
+    const wlText = p.wl ? p.wl.replace(",", " / ") : "기본";
+    return (
+      <div onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
+           onWheel={(e) => onWheel(e, pi)}
+           onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
+           style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
+                    outline: active === pi ? "1px solid #4ade80" : "1px solid #1e293b",
+                    display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
+                    gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
+                    gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
+        {Array.from({ length: tilesOf(p) }, (_, t) => {
+          const idx = p.index + t;
+          const inst = insts[idx];
+          return (
+            <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
+                 onMouseDown={(e) => {
+                   if ((tool === "mline" || tool === "mangle") && e.button === 0 && p.series && inst) {
+                     measureClick(e, e.currentTarget, p, inst);
+                   }
+                 }}>
+              {p.series && inst ? (() => {
+                const pd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+                return (
+                <>
+                  <img src={instUrl(p.studyUid || pd.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
+                       style={{ position: "absolute", inset: 0, width: "100%", height: "100%",
+                                objectFit: "contain",
+                                transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
+                                filter: paneFilter(p), userSelect: "none" }} />
+                  <TileAnno inst={inst} pane={p}
+                            annos={annos[inst.sop_uid] ?? []}
+                            pend={pend?.sop === inst.sop_uid ? pend.pts : []}
+                            scout={scoutFor(inst, p.series.series_uid)} />
+                  <div style={ovl("tl")}>{pd.patient_name}<br />{pd.patient_key}</div>
+                  <div style={ovl("tr")}>{pd.modality} {pd.study_date}</div>
+                  <div style={ovl("bl")}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
+                  <div style={ovl("br")}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
+                </>
+                );
+              })() : p.series ? null : (
+                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12 }}>
+                  상단 썸네일에서 시리즈 선택
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {insts.length > 1 && <ScrollBar index={p.index} total={insts.length} />}
+      </div>
+    );
+  };
 
   // 좌측 세로 썸네일 열 (원본 이미지4 — 툴바 옆 세로 스택)
   const thumbCol = (
@@ -628,19 +704,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* ── 좌측 2열 아이콘 툴바 (p.11~14 전 툴) ── */}
-        <div style={{ width: 94, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
-                      display: "flex", flexDirection: "column", padding: "6px 4px", gap: 4, flexShrink: 0 }}>
+        <div style={{ width: 126, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
+                      display: "flex", flexDirection: "column", padding: "6px 5px", gap: 5, flexShrink: 0 }}>
           {/* §3.1 툴바 상단(원본 이미지2): Prev/Next · Crosslink · 행잉 · Worklist/Report · Close */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <button title="Prev — 워크리스트의 위 검사 열기" onClick={() => void nav(-1)}
-                    style={{ fontSize: 12, padding: "1px 7px" }}>◀</button>
-            <span style={{ fontSize: 13 }}>👤</span>
+                    style={{ fontSize: 16, padding: "3px 12px" }}>◀</button>
+            <span style={{ fontSize: 18 }}>👤</span>
             <button title="Next — 워크리스트의 아래 검사 열기" onClick={() => void nav(1)}
-                    style={{ fontSize: 12, padding: "1px 7px" }}>▶</button>
+                    style={{ fontSize: 16, padding: "3px 12px" }}>▶</button>
           </div>
           <button title="Crosslink 마스터 토글 (§3.3)"
                   onClick={() => setXlink((x) => ({ ...x, crosslink: !x.crosslink }))}
-                  style={{ fontSize: 10, background: xlink.crosslink ? "var(--accent)" : undefined,
+                  style={{ fontSize: 12.5, padding: "5px 0", background: xlink.crosslink ? "var(--accent)" : undefined,
                            color: xlink.crosslink ? "#fff" : undefined }}>
             ⛓ Crosslink
           </button>
@@ -659,13 +735,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </select>
           <div style={{ display: "flex", gap: 2 }}>
             <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
-                    style={{ flex: 1, fontSize: 12 }}>🗂</button>
+                    style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>🗂</button>
             <button title="Report — 현재 검사 판독 열기/닫기" onClick={() => setReportDock((v) => !v)}
-                    style={{ flex: 1, fontSize: 12, background: reportDock ? "var(--accent)" : undefined }}>📄</button>
+                    style={{ flex: 1, fontSize: 18, padding: "5px 0", background: reportDock ? "var(--accent)" : undefined }}>📄</button>
           </div>
           <span style={{ position: "relative" }}>
             <button title="Close — 검사 닫기(현재/전체) 후 워크리스트로" onClick={() => setCloseMenu((v) => !v)}
-                    style={{ width: "100%", fontSize: 10.5 }}>⊠ Close</button>
+                    style={{ width: "100%", fontSize: 12.5, padding: "5px 0" }}>⊠ Close</button>
             {closeMenu && (
               <div style={{ position: "absolute", left: 0, top: "105%", zIndex: 30, background: "var(--bg-elevated)",
                             border: "1px solid var(--border)", borderRadius: 4, minWidth: 150, fontSize: 11.5 }}>
@@ -680,13 +756,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             )}
           </span>
           <div style={{ borderTop: "1px solid var(--border)" }} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, overflowY: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, overflowY: "auto" }}>
             {PALETTE.map((t) => {
               const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
                 || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id);
               return (
                 <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
-                        style={{ height: 28, fontSize: 13, padding: 0,
+                        style={{ height: 42, fontSize: 20, padding: 0,
                                  opacity: t.impl ? 1 : 0.32,
                                  background: activeBtn ? "var(--accent)" : "var(--bg-elevated)",
                                  color: activeBtn ? "#fff" : "var(--text-secondary)",
@@ -699,13 +775,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
           <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
             <button title="W/L Preset 패널 토글" onClick={() => setWlPanel((v) => !v)}
-                    style={{ fontSize: 10.5, background: wlPanel ? "var(--accent)" : undefined,
+                    style={{ fontSize: 12.5, padding: "5px 0", background: wlPanel ? "var(--accent)" : undefined,
                              color: wlPanel ? "#fff" : undefined }}>
               W/L
             </button>
             <button title="Setting — 뷰어 설정 창 열기 (워크리스트의 설정과 동일)"
                     onClick={() => setSettingsOpen(true)}
-                    style={{ fontSize: 10.5, background: settingsOpen ? "var(--accent)" : undefined,
+                    style={{ fontSize: 12.5, padding: "5px 0", background: settingsOpen ? "var(--accent)" : undefined,
                              color: settingsOpen ? "#fff" : undefined }}>
               Setting
             </button>
@@ -715,68 +791,35 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         {/* ── 세로 시리즈 썸네일 열 (원본 이미지4) ── */}
         {thumbCol}
 
-        {/* ── 뷰포트 ── */}
-        <div style={{ flex: 1, display: "grid", minWidth: 0,
-                      gridTemplateColumns: `repeat(${maximized !== null ? 1 : sLayout.c}, 1fr)`,
-                      gridTemplateRows: `repeat(${maximized !== null ? 1 : sLayout.r}, 1fr)`, gap: 1 }}>
-          {paneIdxs.map((pi) => {
-            const p = panes[pi];
-            if (!p) return <div key={pi} />;
-            const insts = p.series?.instances ?? [];
-            const wlText = p.wl ? p.wl.replace(",", " / ") : "기본";
-            return (
-              <div key={pi}
-                   onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
-                   onWheel={(e) => onWheel(e, pi)}
-                   onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
-                   style={{ position: "relative", minWidth: 0, minHeight: 0, background: "#000",
-                            outline: active === pi ? "1px solid #4ade80" : "1px solid #1e293b",
-                            display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
-                            gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
-                            gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
-                {Array.from({ length: tilesOf(p) }, (_, t) => {
-                  const idx = p.index + t;
-                  const inst = insts[idx];
-                  return (
-                    <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
-                         onMouseDown={(e) => {
-                           if ((tool === "mline" || tool === "mangle") && e.button === 0 && p.series && inst) {
-                             measureClick(e, e.currentTarget, p, inst);
-                           }
-                         }}>
-                      {p.series && inst ? (() => {
-                        const pd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
-                        return (
-                        <>
-                          <img src={instUrl(p.studyUid || pd.study_uid, p.series, inst, p.wl)} alt="" draggable={false}
-                               style={{ position: "absolute", inset: 0, width: "100%", height: "100%",
-                                        objectFit: "contain",
-                                        transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
-                                        filter: paneFilter(p), userSelect: "none" }} />
-                          <TileAnno inst={inst} pane={p}
-                                    annos={annos[inst.sop_uid] ?? []}
-                                    pend={pend?.sop === inst.sop_uid ? pend.pts : []}
-                                    scout={scoutFor(inst, p.series.series_uid)} />
-                          <div style={ovl("tl")}>{pd.patient_name}<br />{pd.patient_key}</div>
-                          <div style={ovl("tr")}>{pd.modality} {pd.study_date}</div>
-                          <div style={ovl("bl")}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
-                          <div style={ovl("br")}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
-                        </>
-                        );
-                      })() : p.series ? null : (
-                        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12 }}>
-                          상단 썸네일에서 시리즈 선택
-                        </div>
-                      )}
+        {/* ── 뷰포트: Series 페인 — 경계 스플리터로 좌우/상하 크기 조절 ── */}
+        <div ref={vpRef} style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+          {(maximized !== null
+            ? [[maximized]]
+            : Array.from({ length: sLayout.r }, (_, ri) =>
+                Array.from({ length: sLayout.c }, (_, ci) => ri * sLayout.c + ci))
+          ).map((rowPanes, ri) => (
+            <Fragment key={ri}>
+              {ri > 0 && (
+                <Splitter dir="h" onEnd={() => {}}
+                          onDrag={(dy) => adjFr(setRowFr, ri - 1, dy, vpRef.current?.clientHeight ?? 600)} />
+              )}
+              <div style={{ display: "flex", flex: maximized !== null ? 1 : (rowFr[ri] ?? 1), minHeight: 0, minWidth: 0 }}>
+                {rowPanes.map((pi, ci) => (
+                  <Fragment key={pi}>
+                    {ci > 0 && (
+                      <Splitter dir="v" onEnd={() => {}}
+                                onDrag={(dx) => adjFr(setColFr, ci - 1, dx, vpRef.current?.clientWidth ?? 800)} />
+                    )}
+                    <div style={{ flex: maximized !== null ? 1 : (colFr[ci] ?? 1),
+                                  minWidth: 0, minHeight: 0, display: "flex" }}>
+                      {renderPane(pi)}
                     </div>
-                  );
-                })}
-                {insts.length > 1 && <ScrollBar index={p.index} total={insts.length} />}
+                  </Fragment>
+                ))}
               </div>
-            );
-          })}
+            </Fragment>
+          ))}
         </div>
-
         {/* ── W/L Preset 패널 (Setting 토글) ── */}
         {wlPanel && (
           <div style={{ width: 108, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
