@@ -2036,6 +2036,12 @@ export function Worklist() {
     });
   }, []);
 
+  // 워크리스트 창에 이름 부여 — 뷰어의 🗂 버튼이 window.open("", "sv_worklist") 로
+  // 이 창을 전면으로 올릴 수 있게 한다 (opener.focus() 는 브라우저가 무시하는 경우가 많음)
+  useEffect(() => {
+    if (!window.name || window.name === "sv_worklist") window.name = "sv_worklist";
+  }, []);
+
   // 사용자 환경설정 로드 (화면분석 §5.4/§5.5)
   useEffect(() => {
     loadHangingPrefs();

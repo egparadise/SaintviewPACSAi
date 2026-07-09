@@ -465,8 +465,18 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       else say(dir < 0 ? "워크리스트에 위 검사가 없습니다" : "워크리스트에 아래 검사가 없습니다");
     } catch { say("워크리스트 조회 실패"); }
   };
-  // Worklist 버튼(§3.1) — 워크리스트 화면으로
+  // Worklist 버튼(§3.1) — 워크리스트 창을 최전면으로 (다른 모니터에 있어도)
+  // named window 재-open 은 브라우저가 해당 창을 raise 한다 (opener.focus() 는 대부분 무시됨)
   const gotoWorklist = () => {
+    const w = window.open("", "sv_worklist");
+    if (w) {
+      try {
+        // 워크리스트가 닫혀 있어 빈 창이 새로 열린 경우 → 홈으로 이동
+        if (w.location.href === "about:blank") w.location.href = `${window.location.origin}/`;
+      } catch { /* 접근 제약 시 무시 */ }
+      w.focus();
+      return;
+    }
     if (window.opener && !window.opener.closed) window.opener.focus();
     else window.open("/", "_blank");
   };
