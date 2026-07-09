@@ -151,6 +151,16 @@ export const DEFAULT_COLUMNS = [
   "status", "ai", "patient_key", "patient_name", "sex", "study_date",
   "modality", "body_part", "study_desc", "impression", "series_count", "instance_count", "priority",
 ];
+// Infi(INFINITT) 컬럼 순서 — 원본 Exam List: Status | ID | Name | Sex | Study Date | MOD | Srs | Img | Body | Desc | AETitle
+export const INFI_COLUMNS = [
+  "status", "patient_key", "patient_name", "sex", "study_date",
+  "modality", "series_count", "instance_count", "body_part", "study_desc", "source_aet",
+];
+// 컬럼별 폭(px) — Infi 그리드 비율 (없으면 auto)
+const INFI_COL_WIDTH: Record<string, number> = {
+  status: 74, patient_key: 96, patient_name: 130, sex: 40, study_date: 92,
+  modality: 46, series_count: 42, instance_count: 46, body_part: 84, source_aet: 90,
+};
 
 /* ── [A] 액션 툴바 ─────────────────────────────── */
 function ActionToolbar({
@@ -570,7 +580,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
 
 /* ── [C] 메인 검사 그리드 (컬럼 구성형) ───────────── */
 function StudyGrid({
-  items, columns, selectedId, onSelect, onOpen, onContext,
+  items, columns, selectedId, onSelect, onOpen, onContext, variant,
 }: {
   items: StudyRow[];
   columns: string[];
@@ -578,14 +588,20 @@ function StudyGrid({
   onSelect: (row: StudyRow) => void;
   onOpen: (row: StudyRow) => void;
   onContext: (e: React.MouseEvent, row: StudyRow) => void;
+  variant?: "infi";
 }) {
+  const infi = variant === "infi";
   return (
     <div style={{ overflow: "auto", flex: 1, minWidth: 0 }}>
-      <table className="grid-table">
+      <table className={infi ? "grid-table grid-infi" : "grid-table"}>
         <thead>
           <tr>
             <th style={{ width: 30 }}>#</th>
-            {columns.map((c) => <th key={c}>{COLUMN_DEFS[c]?.label ?? c}</th>)}
+            {columns.map((c) => (
+              <th key={c} style={infi && INFI_COL_WIDTH[c] ? { width: INFI_COL_WIDTH[c] } : undefined}>
+                {COLUMN_DEFS[c]?.label ?? c}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -2387,17 +2403,17 @@ export function Worklist() {
             </div>
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0, minHeight: 0 }}>
-            <div style={{ flex: 2.2, minHeight: 0, display: "flex" }}>
-              <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
+            <div style={{ flex: 3, minHeight: 0, display: "flex" }}>
+              <StudyGrid items={items} columns={INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
                          onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                          onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
             </div>
-            <div style={{ height: 108, flexShrink: 0, display: "flex" }}>
+            <div style={{ height: 96, flexShrink: 0, display: "flex" }}>
               <PriorStudiesGrid detail={selected}
                                 onAddCompare={(e) => setCompareSet((prev) =>
                                   prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
             </div>
-            <div style={{ flex: 1.6, minHeight: 0, display: "flex" }}>
+            <div style={{ flex: 2, minHeight: 0, display: "flex" }}>
               <InfiReport detail={selected} />
             </div>
           </div>

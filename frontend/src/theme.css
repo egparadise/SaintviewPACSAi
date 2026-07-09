@@ -90,6 +90,27 @@ body {
   box-shadow: inset 3px 0 0 var(--stat-emergency);
 }
 
+/* ── INFINITT(Infi) 스타일 그리드 — 시안 헤더, 청색 얼룩·선택, 촘촘한 행 ── */
+.grid-table.grid-infi { font-size: 12px; }
+.grid-table.grid-infi th {
+  background: linear-gradient(#243447, #1b2735);
+  color: #7dd3fc;
+  border-bottom: 1px solid #33506e;
+  padding: 4px 8px;
+}
+.grid-table.grid-infi td {
+  height: 24px;
+  padding: 2px 8px;
+  border-bottom: 1px solid #1a2432;
+}
+.grid-table.grid-infi tbody tr:nth-child(even) { background: rgba(56, 108, 173, 0.06); }
+.grid-table.grid-infi tbody tr:hover { background: rgba(56, 189, 248, 0.12); }
+.grid-table.grid-infi tbody tr.selected {
+  background: #2b4a6b;
+  box-shadow: inset 2px 0 0 #38bdf8;
+}
+.grid-table.grid-infi tbody tr.emergency { box-shadow: inset 3px 0 0 var(--stat-emergency); }
+
 /* 상태 배지 */
 .badge {
   display: inline-block;
