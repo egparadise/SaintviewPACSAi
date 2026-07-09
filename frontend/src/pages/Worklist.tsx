@@ -2283,6 +2283,20 @@ export function Worklist() {
       setInfiMode((r.value as { client_viewer?: string }).client_viewer === "infi");
     }).catch(() => {});
   }, [refreshKey]);
+  // Infi 레이아웃 패널 크기(px) — 각 경계 스플리터로 드래그 조절 후 계정 저장
+  const [infiSz, setInfiSz] = useState({ prevH: 220, priorH: 96, repH: 260 });
+  useEffect(() => {
+    api.getSetting("worklist.prefs").then((r) => {
+      const s = (r.value as { infi_sizes?: typeof infiSz }).infi_sizes;
+      if (s) setInfiSz((p) => ({ ...p, ...s }));
+    }).catch(() => {});
+  }, []);
+  const persistInfiSz = useCallback(() => {
+    api.getSetting("worklist.prefs").then((r) =>
+      api.putSetting("worklist.prefs", { ...r.value, infi_sizes: infiSzRef.current }, "user")).catch(() => {});
+  }, []);
+  const infiSzRef = useRef(infiSz);
+  useEffect(() => { infiSzRef.current = infiSz; }, [infiSz]);
 
   // In 모드 ① 상단 아이콘 툴바 (INFINITT 원본 13종) — 기존 doAction + 특수 동작 매핑
   const infiTool = (act: string) => {
@@ -2383,9 +2397,10 @@ export function Worklist() {
       {/* ── In 모드 배치 (INFINITT Worklist 원본 7구역): 좌열=⑦Search Filter+⑤Preview,
              우열=③Study Grid→④Related Exam→⑥Report. ①툴바/②검색콤보는 상단 공용 ── */}
       {infiMode && (
-        <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 3, padding: 3 }}>
-          <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", gap: 3, flexShrink: 0, minHeight: 0 }}>
-            <div style={{ flex: 1.1, minHeight: 0, overflow: "auto", display: "flex" }}>
+        <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 0, padding: 3 }}>
+          {/* 좌열: Search Filter(위) ─h스플리터─ Preview(아래, prevH) */}
+          <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 40, overflow: "auto", display: "flex" }}>
               <SearchRail width={sizes.railW} active={datePreset}
                           mods={modCounts} activeMod={filters.modality ?? ""}
                           onMod={(m) => setFilters((f) => ({ ...f, modality: m }))}
@@ -2397,24 +2412,34 @@ export function Worklist() {
                                   selectedId={selNodeId} onSelect={applyFolder} applyHint />
               } />
             </div>
+            <Splitter dir="h" onEnd={persistInfiSz}
+                      onDrag={(dy) => setInfiSz((s) => ({ ...s, prevH: clampSz(s.prevH - dy, 80, 600) }))} />
             {/* ⑤ Preview — 선택 검사 미리보기 (원본 좌하단 흑배경) */}
-            <div style={{ flex: 1, minHeight: 0, background: "#000", border: "1px solid var(--border)",
+            <div style={{ height: infiSz.prevH, flexShrink: 0, background: "#000", border: "1px solid var(--border)",
                           borderRadius: 4, overflow: "hidden", display: "flex" }}>
               <ThumbnailPanel detail={selected} onOpen={() => void doAction("viewdraft")} />
             </div>
           </div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0, minHeight: 0 }}>
-            <div style={{ flex: 3, minHeight: 0, display: "flex" }}>
+          {/* 좌|우 세로 스플리터 (railW) */}
+          <Splitter dir="v" onEnd={persistSizes}
+                    onDrag={(dx) => setSizes((s) => ({ ...s, railW: clampSz(s.railW + dx, 100, 460) }))} />
+          {/* 우열: Grid(위) ─h─ Related(priorH) ─h─ Report(repH) */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 60, display: "flex" }}>
               <StudyGrid items={items} columns={INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
                          onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                          onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
             </div>
-            <div style={{ height: 96, flexShrink: 0, display: "flex" }}>
+            <Splitter dir="h" onEnd={persistInfiSz}
+                      onDrag={(dy) => setInfiSz((s) => ({ ...s, priorH: clampSz(s.priorH - dy, 48, 320) }))} />
+            <div style={{ height: infiSz.priorH, flexShrink: 0, display: "flex" }}>
               <PriorStudiesGrid detail={selected}
                                 onAddCompare={(e) => setCompareSet((prev) =>
                                   prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
             </div>
-            <div style={{ flex: 2, minHeight: 0, display: "flex" }}>
+            <Splitter dir="h" onEnd={persistInfiSz}
+                      onDrag={(dy) => setInfiSz((s) => ({ ...s, repH: clampSz(s.repH - dy, 80, 640) }))} />
+            <div style={{ height: infiSz.repH, flexShrink: 0, display: "flex" }}>
               <InfiReport detail={selected} />
             </div>
           </div>
