@@ -148,13 +148,13 @@ const PALETTE: { id: string; icon: string; label: string; impl: boolean; mode?: 
   { id: "clrAnno", icon: "🧹", label: "측정 전체 지우기", impl: true },
 ];
 
-export function ViewerInfi({ detail, onClose }: {
+export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
   detail: StudyDetail;
   onClose: () => void;
-  addDetail?: StudyDetail | null;
-  stackDetail?: StudyDetail | null;
-  keySops?: string[] | null;
-  withOpen?: { mode: "add" | "stack"; ids: number[] } | null;
+  addDetail?: StudyDetail | null;    // ② Add View: 기존 유지 + 이 검사를 분할 추가
+  stackDetail?: StudyDetail | null;  // ③ Stack View: 기존 유지 + 이 검사를 같은 페인에 중첩
+  keySops?: string[] | null;         // ⑤ Key Image View: 이 SOP 목록만 표시 (F-16)
+  withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open
 }) {
   const [series, setSeries] = useState<SeriesNode[]>([]);
   // 과거검사(Related Exam) 시리즈 — Sync With Other Exams 용 (클릭 시 로드)
@@ -195,17 +195,44 @@ export function ViewerInfi({ detail, onClose }: {
     let ids: number[] = [];
     try { ids = JSON.parse(localStorage.getItem(EXAMS_KEY) ?? "[]"); } catch { /* 초기화 */ }
     if (!ids.includes(detail.id)) ids.push(detail.id);
+    // ② Add / ③ Stack: 대상 검사도 목록에 추가 (기존 유지). Study With Open 은 지정 id 들 일괄 추가
+    for (const ex of [addDetail, stackDetail]) {
+      if (ex && !ids.includes(ex.id)) ids.push(ex.id);
+    }
+    for (const wid of withOpen?.ids ?? []) {
+      if (!ids.includes(wid)) ids.push(wid);
+    }
     localStorage.setItem(EXAMS_KEY, JSON.stringify(ids));
     Promise.all(ids.map(async (id) => {
       const d = id === detail.id ? detail : await api.study(id);
       const t = await api.seriesTree(id);
       return { d, series: t.series };
     })).then((list) => {
+      // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
+      if (keySops?.length) {
+        const prim = list.find((e) => e.d.id === detail.id);
+        if (prim) {
+          prim.series = prim.series
+            .map((s) => ({ ...s, series_desc: `[KEY] ${s.series_desc}`,
+                           instances: s.instances.filter((i) => keySops.includes(i.sop_uid)) }))
+            .filter((s) => s.instances.length > 0);
+        }
+      }
       setExams(list);
       const ai = Math.max(0, list.findIndex((e) => e.d.id === detail.id));
       setActiveExam(ai);
       setSeries(list[ai]?.series ?? []);
-      // 새 검사는 오른쪽으로 — 검사 수만큼 Series 페인 확장, 각 페인에 각 검사의 첫 시리즈
+      // ③ Stack View: 페인을 늘리지 않고(1x1 유지) 활성 페인에 스택 검사를 중첩 — 탭으로 전환
+      if (stackDetail) {
+        const si = list.findIndex((e) => e.d.id === stackDetail.id);
+        const st = list[si];
+        setSLayout({ r: 1, c: 1 });
+        setPanes([{ ...initPane(st?.d.study_uid ?? detail.study_uid), series: st?.series[0] ?? null }]);
+        if (si >= 0) { setActiveExam(si); setSeries(st.series); }
+        setActive(0);
+        return;
+      }
+      // ①②: 검사 수만큼 Series 페인 확장(오른쪽 누적), 각 페인에 각 검사의 첫 시리즈
       const n = Math.max(1, list.length);
       const c = Math.min(n, 4), r = Math.ceil(n / c);
       setSLayout({ r, c });

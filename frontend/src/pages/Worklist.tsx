@@ -1961,8 +1961,13 @@ export function Worklist() {
         }
         break;
       case "viewer2d": case "ub_view":
-        // ① View: 기존 영상을 닫고 선택 검사를 그 자리에 표시
-        if (target) { const d = await api.study(target.id); selectAndSync(d); openV2({ detail: d }); }
+        // ① View: 기존 영상을 닫고 선택 검사를 그 자리에 표시 — In Viewer 누적 목록 초기화(교체 시맨틱)
+        if (target) {
+          const d = await api.study(target.id);
+          selectAndSync(d);
+          localStorage.setItem("sv_infi_exams", "[]");
+          openV2({ detail: d });
+        }
         break;
       case "ub_add": {
         // ② Add View: 기존 영상(마지막 오픈)은 닫지 않고 선택 검사를 분할 추가
