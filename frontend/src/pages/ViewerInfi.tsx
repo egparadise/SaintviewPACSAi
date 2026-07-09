@@ -291,6 +291,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     setPanes((ps) => ps.map((p, k) => (k === i ? { ...p, ...patch } : p)));
   }, []);
 
+  // ── 멀티 페인 선택 (Crosslink 연동 조작) ──
+  // Shift+클릭=처음~클릭 페인 범위, Ctrl+클릭=활성+클릭 페인 토글, 'A'=전체 선택.
+  // 선택된 페인들은 Zoom/Pan/W-L(드래그·프리셋·툴)이 함께 동작. 휠 스크롤은 기존(다음 이미지).
+  const [selPanes, setSelPanes] = useState<Set<number>>(new Set());
+  const updMany = useCallback((idxs: number[], f: (p: Pane) => Partial<Pane>) => {
+    setPanes((ps) => ps.map((p, k) => (idxs.includes(k) && p.series ? { ...p, ...f(p) } : p)));
+  }, []);
+  const targetsOf = (pi: number): number[] =>
+    xlink.crosslink && selPanes.size > 1 && selPanes.has(pi) ? [...selPanes] : [pi];
+
   const scroll = useCallback((i: number, delta: number) => {
     setPanes((ps) => ps.map((p, k) => {
       // §3.3: crosslink 마스터 ON 일 때 — auto_sync=같은 검사 페인, sync_other=다른 검사(과거) 페인 동기
@@ -319,13 +329,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const p = panes[active];
     if (!p) return;
     switch (id) {
-      case "fit": upd(active, { zoom: 1, tx: 0, ty: 0 }); break;
-      case "invert": upd(active, { invert: !p.invert }); break;
-      case "flipH": upd(active, { flipH: !p.flipH }); break;
-      case "flipV": upd(active, { flipV: !p.flipV }); break;
-      case "rotL": upd(active, { rot: (p.rot + 270) % 360 }); break;
-      case "rotR": upd(active, { rot: (p.rot + 90) % 360 }); break;
-      case "rot180": upd(active, { rot: (p.rot + 180) % 360 }); break;
+      case "fit": updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })); break;
+      case "invert": updMany(targetsOf(active), (q) => ({ invert: !q.invert })); break;
+      case "flipH": updMany(targetsOf(active), (q) => ({ flipH: !q.flipH })); break;
+      case "flipV": updMany(targetsOf(active), (q) => ({ flipV: !q.flipV })); break;
+      case "rotL": updMany(targetsOf(active), (q) => ({ rot: (q.rot + 270) % 360 })); break;
+      case "rotR": updMany(targetsOf(active), (q) => ({ rot: (q.rot + 90) % 360 })); break;
+      case "rot180": updMany(targetsOf(active), (q) => ({ rot: (q.rot + 180) % 360 })); break;
       case "sharpen": upd(active, { fx: p.fx === "sharpen" ? "" : "sharpen" }); break;
       case "smooth": upd(active, { fx: p.fx === "smooth" ? "" : "smooth" }); break;
       case "pseudo": upd(active, { fx: p.fx === "pseudo" ? "" : "pseudo" }); break;
@@ -397,6 +407,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   };
 
   const onPaneMouseDown = (e: React.MouseEvent, i: number) => {
+    if (e.shiftKey) {
+      // 처음(첫 페인)부터 클릭한 페인까지 순서대로 범위 선택
+      setSelPanes(new Set(Array.from({ length: i + 1 }, (_, k) => k)));
+    } else if (e.ctrlKey) {
+      // 활성 페인과 클릭한 페인을 크로스링크 집합으로 토글
+      setSelPanes((s) => {
+        const n = new Set(s.size ? s : [active]);
+        if (n.has(i) && i !== active) n.delete(i); else n.add(i);
+        return n;
+      });
+    } else if (selPanes.size && !selPanes.has(i)) {
+      setSelPanes(new Set());   // 일반 클릭 — 선택 집합 밖이면 해제
+    }
     setActive(i);
     const measuring = (tool === "mline" || tool === "mangle") && e.button === 0;
     if (!measuring && (e.button === 0 || e.button === 2)) {
@@ -411,18 +434,21 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const p = panes[d.pane];
     if (!p) return;
     const mode: Tool = d.btn === 2 ? "wl" : tool;
-    if (mode === "pan") upd(d.pane, { tx: p.tx + dx, ty: p.ty + dy });
-    else if (mode === "zoom") upd(d.pane, { zoom: Math.max(0.05, Math.min(30, p.zoom * (1 - dy / 200))) });
+    const tg = targetsOf(d.pane);   // Crosslink 선택 집합이면 함께 조작
+    if (mode === "pan") updMany(tg, (q) => ({ tx: q.tx + dx, ty: q.ty + dy }));
+    else if (mode === "zoom") updMany(tg, (q) => ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (1 - dy / 200))) }));
     else if (mode === "wl") {
-      const [c0, w0] = p.wl ? p.wl.split(",").map(Number) : [128, 256];
-      upd(d.pane, { wl: `${Math.round(c0 + dy)},${Math.max(1, Math.round(w0 + dx))}` });
+      updMany(tg, (q) => {
+        const [c0, w0] = q.wl ? q.wl.split(",").map(Number) : [128, 256];
+        return { wl: `${Math.round(c0 + dy)},${Math.max(1, Math.round(w0 + dx))}` };
+      });
     }
   };
   const endDrag = () => { drag.current = null; };
   const onWheel = (e: React.WheelEvent, i: number) => {
     if (e.ctrlKey) {
-      const p = panes[i];
-      if (p) upd(i, { zoom: Math.max(0.05, Math.min(30, p.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) });
+      updMany(targetsOf(i), (q) =>
+        ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) }));
     } else {
       const p = panes[i];
       scroll(i, (e.deltaY > 0 ? 1 : -1) * (p && tilesOf(p) > 1 ? p.il.c : 1));
@@ -480,7 +506,24 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   useEffect(() => {
     setColFr(Array(sLayout.c).fill(1));
     setRowFr(Array(sLayout.r).fill(1));
+    setSelPanes(new Set());   // 레이아웃 변경 — 멀티 선택 초기화
   }, [sLayout.r, sLayout.c]);
+
+  // 'A' = 현재 레이아웃의 모든 페인 선택(연동 조작), Esc = 선택 해제
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setSelPanes(new Set(panes.map((_, i) => i)));
+      } else if (e.key === "Escape") {
+        setSelPanes(new Set());
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [panes.length]);
   const adjFr = (set: React.Dispatch<React.SetStateAction<number[]>>, i: number,
                  deltaPx: number, totalPx: number) =>
     set((fr) => {
@@ -503,7 +546,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
            onWheel={(e) => onWheel(e, pi)}
            onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
-                    outline: active === pi ? "1px solid #4ade80" : "1px solid #1e293b",
+                    outline: active === pi ? "2px solid #4ade80"
+                      : selPanes.has(pi) ? "2px dashed #4ade80" : "1px solid #1e293b",
                     display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
                     gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
                     gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
@@ -859,7 +903,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               W/L ({detail.modality === "MR" ? "MR" : "CT"})
             </div>
             {wlPresets.map((w) => (
-              <div key={w.key} onClick={() => upd(active, { wl: w.q })}
+              <div key={w.key} onClick={() => updMany(targetsOf(active), () => ({ wl: w.q }))}
                    title={w.q ? `W/L ${w.q}` : "서버 기본"}
                    style={{ padding: "3px 6px", borderRadius: 3, cursor: "pointer",
                             background: panes[active]?.wl === w.q ? "var(--accent-subtle)" : undefined }}>
