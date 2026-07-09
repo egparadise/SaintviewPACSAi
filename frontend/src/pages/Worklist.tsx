@@ -1440,6 +1440,60 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+/* ── Infi 판독 정보 뷰 (INFINITT 원본 하단 Report 블록 재현) ──
+   Accession/환자/검사일·상태/코멘트/성별·나이 + Creator·Dictator·Transcriber·Approver·Approver2 + 판독문 */
+function InfiReport({ detail }: { detail: StudyDetail | null }) {
+  const [rep, setRep] = useState<Report | null>(null);
+  useEffect(() => {
+    if (!detail) { setRep(null); return; }
+    api.reports(detail.id).then((r) => setRep(r.items[0] ?? null)).catch(() => setRep(null));
+  }, [detail]);
+  if (!detail) {
+    return <PanelBox title="Report"><div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>
+      검사를 선택하세요.</div></PanelBox>;
+  }
+  const age = (() => {
+    const b = detail.birth_date?.replaceAll("-", "");
+    const s = detail.study_date?.replaceAll("-", "");
+    if (b?.length === 8 && s?.length === 8) {
+      let a = +s.slice(0, 4) - +b.slice(0, 4);
+      if (s.slice(4) < b.slice(4)) a--;
+      return `${a}Y`;
+    }
+    return "";
+  })();
+  const sig = (rep?.diff_metrics as { signature?: { name?: string }; confirm2?: { by?: string } } | undefined);
+  const L = ({ k, v }: { k: string; v: React.ReactNode }) => (
+    <div style={{ display: "flex", gap: 6 }}>
+      <span style={{ width: 118, color: "#7dd3fc", flexShrink: 0 }}>{k}</span>
+      <span style={{ color: "var(--text-primary)" }}>{v || "-"}</span>
+    </div>
+  );
+  return (
+    <PanelBox title="Report">
+      <div style={{ padding: "8px 12px", fontSize: 12, lineHeight: 1.7, overflow: "auto", fontFamily: "monospace" }}>
+        <L k="Accession No" v={detail.accession_no} />
+        <L k="Patient Name / ID" v={`${detail.patient_name} / ${detail.patient_key}`} />
+        <L k="Exam Date" v={`${detail.study_date} ${detail.study_time ?? ""} [ ${STATUS_LABEL[detail.status] ?? detail.status} ]`} />
+        <L k="Study Comment" v={detail.clinical_info} />
+        <L k="Sex / Age" v={`${detail.sex} / ${age}`} />
+        <div style={{ height: 8 }} />
+        <L k="Creator" v={rep?.created_by === "ai" ? "AI (초안)" : rep?.created_by} />
+        <L k="Dictator" v={rep?.created_by === "ai" ? "AI(claude-opus-4-8)" : rep?.created_by} />
+        <L k="Transcriber" v={rep?.reviewed_by} />
+        <L k="Approver" v={sig?.signature?.name} />
+        <L k="Approver2" v={sig?.confirm2?.by} />
+        <div style={{ height: 8 }} />
+        <L k="Report Date" v={rep?.finalized_at ? rep.finalized_at.slice(0, 10) : ""} />
+        <div style={{ borderTop: "1px solid var(--border)", margin: "8px 0", paddingTop: 8,
+                      whiteSpace: "pre-wrap", fontFamily: "inherit", color: "var(--text-secondary)" }}>
+          {rep?.narrative_text || "판독 없음"}
+        </div>
+      </div>
+    </PanelBox>
+  );
+}
+
 /* ── Thumbnail Window — Series Layout / Image Layout 분할 선택 (UBPACS) ── */
 function ThumbnailPanel({ detail, onOpen }: { detail: StudyDetail | null; onOpen: () => void }) {
   const [tree, setTree] = useState<SeriesNode[]>([]);
@@ -2344,7 +2398,7 @@ export function Worklist() {
                                   prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
             </div>
             <div style={{ flex: 1.6, minHeight: 0, display: "flex" }}>
-              <ReportPanel detail={selected} onChanged={onChanged} insertRef={insertRef} onNav={navPatient} />
+              <InfiReport detail={selected} />
             </div>
           </div>
         </div>
