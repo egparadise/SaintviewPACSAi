@@ -468,6 +468,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   };
   const endDrag = () => { drag.current = null; };
   const onWheel = (e: React.WheelEvent, i: number) => {
+    if (tHeld.current) {   // T+스크롤 — 오버레이 글자 크기 (계정 저장)
+      const nf = Math.min(24, Math.max(6, ovlFont + (e.deltaY < 0 ? 0.5 : -0.5)));
+      setOvlFont(nf);
+      persistPrefs({ infi_overlay_font: nf });
+      return;
+    }
     if (e.ctrlKey) {
       updMany(targetsOf(i), (q) =>
         ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) }));
@@ -510,6 +516,29 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
 
+  // ── 표시 설정 (계정별 viewer.prefs 로밍): 오버레이 글자 크기/표시, 멀티선택 색 ──
+  // 단축키: T+마우스스크롤=글자 크기, T+Del=오버레이 숨김/표시 토글. 변경은 자동 저장.
+  const [ovlFont, setOvlFont] = useState(9.5);
+  const [ovlVisible, setOvlVisible] = useState(true);
+  const [selColor, setSelColor] = useState("#d946ef");
+  const tHeld = useRef(false);
+  const persistTimer = useRef<number | null>(null);
+  useEffect(() => {
+    api.getSetting("viewer.prefs").then((r) => {
+      const v = r.value as { infi_overlay_font?: number; infi_overlay_visible?: boolean; infi_sel_color?: string };
+      if (v.infi_overlay_font) setOvlFont(v.infi_overlay_font);
+      if (v.infi_overlay_visible !== undefined) setOvlVisible(v.infi_overlay_visible);
+      if (v.infi_sel_color) setSelColor(v.infi_sel_color);
+    }).catch(() => {});
+  }, []);
+  const persistPrefs = (patch: Record<string, unknown>) => {
+    if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    persistTimer.current = window.setTimeout(() => {
+      api.getSetting("viewer.prefs").then((r) =>
+        api.putSetting("viewer.prefs", { ...r.value, ...patch }, "user")).catch(() => {});
+    }, 600);
+  };
+
   // 기능 영역(툴바/썸네일/W-L/Report) 폭 — 경계 스플리터로 조절, localStorage 보존
   const UI_KEY = "sv_infi_ui";
   const [ui, setUi] = useState<{ toolW: number; thumbW: number; wlW: number; dockW: number }>(() => {
@@ -531,11 +560,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     setSelPanes(new Set());   // 레이아웃 변경 — 멀티 선택 초기화
   }, [sLayout.r, sLayout.c]);
 
-  // 'A' = 현재 레이아웃의 모든 페인 선택(연동 조작), Esc = 선택 해제
+  // 'A' = 전체 페인 선택, Esc = 해제, T(홀드)+스크롤 = 오버레이 글자 크기, T+Del = 오버레이 토글
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key.toLowerCase() === "t") { tHeld.current = true; return; }
+      if (e.key === "Delete" && tHeld.current) {
+        e.preventDefault();
+        setOvlVisible((v) => {
+          persistPrefs({ infi_overlay_visible: !v });
+          return !v;
+        });
+        return;
+      }
       if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         setSelPanes(new Set(panes.map((_, i) => i)));
@@ -543,8 +581,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         setSelPanes(new Set());
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "t") tHeld.current = false;
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panes.length]);
   const adjFr = (set: React.Dispatch<React.SetStateAction<number[]>>, i: number,
                  deltaPx: number, totalPx: number) =>
@@ -568,9 +614,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
            onWheel={(e) => onWheel(e, pi)}
            onDoubleClick={() => setMaximized((m) => (m === null ? pi : null))}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
-                    // 멀티 선택(Crosslink)=자주색, 활성=초록 (AI 전용 보라 #a78bfa 와는 구분되는 마젠타)
+                    // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록
                     outline: active === pi ? "2px solid #4ade80"
-                      : selPanes.has(pi) ? "2px solid #d946ef" : "1px solid #1e293b",
+                      : selPanes.has(pi) ? `2px solid ${selColor}` : "1px solid #1e293b",
                     display: "grid", cursor: (tool === "mline" || tool === "mangle") ? "copy" : "crosshair",
                     gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
                     gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
@@ -597,10 +643,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                             annos={annos[inst.sop_uid] ?? []}
                             pend={pend?.sop === inst.sop_uid ? pend.pts : []}
                             scout={scoutFor(inst, p.series.series_uid)} />
-                  <div style={ovl("tl")}>{pd.patient_name}<br />{pd.patient_key}</div>
-                  <div style={ovl("tr")}>{pd.modality} {pd.study_date}</div>
-                  <div style={ovl("bl")}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
-                  <div style={ovl("br")}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
+                  {ovlVisible && (
+                    <>
+                      <div style={ovl("tl", ovlFont)}>{pd.patient_name}<br />{pd.patient_key}</div>
+                      <div style={ovl("tr", ovlFont)}>{pd.modality} {pd.study_date}</div>
+                      <div style={ovl("bl", ovlFont)}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
+                      <div style={ovl("br", ovlFont)}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
+                    </>
+                  )}
                 </>
                 );
               })() : p.series ? null : (
@@ -1062,9 +1112,9 @@ function TileAnno({ inst, pane, annos, pend, scout = [] }: {
 }
 const svgStyle: React.CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 2 };
 
-function ovl(corner: "tl" | "tr" | "bl" | "br"): React.CSSProperties {
+function ovl(corner: "tl" | "tr" | "bl" | "br", fs = 9.5): React.CSSProperties {
   return {
-    position: "absolute", fontSize: 9.5, lineHeight: 1.3, color: "#7dd3fc", pointerEvents: "none",
+    position: "absolute", fontSize: fs, lineHeight: 1.3, color: "#7dd3fc", pointerEvents: "none",
     textShadow: "0 0 3px #000", zIndex: 2,
     top: corner[0] === "t" ? 3 : undefined, bottom: corner[0] === "b" ? 3 : undefined,
     left: corner[1] === "l" ? 5 : undefined, right: corner[1] === "r" ? 5 : undefined,

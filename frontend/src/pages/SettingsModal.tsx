@@ -79,6 +79,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [hangingMR, setHangingMR] = useState("default");
   // 선택 뷰어 — Client Viewer 레지스트리(TY Viewer=현행 Viewer2D, Infi Viewer=개발 중)
   const [clientViewer, setClientViewer] = useState(DEFAULT_CLIENT_VIEWER);
+  // In Viewer 표시 — 멀티선택 색, 오버레이 글자 크기/표시 (계정 로밍, 뷰어 T+스크롤/T+Del 연동)
+  const [infSelColor, setInfSelColor] = useState("#d946ef");
+  const [infOvlFont, setInfOvlFont] = useState(9.5);
+  const [infOvlVisible, setInfOvlVisible] = useState(true);
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
   const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
@@ -178,6 +182,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (cv && CLIENT_VIEWERS.some((x) => x.id === cv)) setClientViewer(cv);
       const mk = (v as { mode_key?: string }).mode_key;
       if (mk) setModeSel(mk);
+      const iv = v as { infi_sel_color?: string; infi_overlay_font?: number; infi_overlay_visible?: boolean };
+      if (iv.infi_sel_color) setInfSelColor(iv.infi_sel_color);
+      if (iv.infi_overlay_font) setInfOvlFont(iv.infi_overlay_font);
+      if (iv.infi_overlay_visible !== undefined) setInfOvlVisible(iv.infi_overlay_visible);
       if (v.paletteSide) setPaletteSide(v.paletteSide);
       if (v.thumbSide) setThumbSide(v.thumbSide);
       if (v.thumbSize) setThumbSize(v.thumbSize);
@@ -259,6 +267,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       hanging: { CT: hangingCT, MR: hangingMR },
       hanging2d: { CT: h2dCT, MR: h2dMR },
       client_viewer: clientViewer,
+      infi_sel_color: infSelColor, infi_overlay_font: infOvlFont, infi_overlay_visible: infOvlVisible,
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
@@ -947,6 +956,30 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     {CLIENT_VIEWERS.find((v) => v.id === clientViewer)?.desc}
                   </span>
                 </Row>
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="In Viewer 표시 (계정별 저장)">
+                <Row label="멀티선택 색">
+                  <input type="color" value={infSelColor}
+                         onChange={(e) => setInfSelColor(e.target.value)}
+                         title="Crosslink 멀티 선택 페인 테두리 색" />
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
+                    Shift/Ctrl/A 로 선택된 페인 테두리 (기본 자주색)
+                  </span>
+                </Row>
+                <Row label="오버레이 글자">
+                  <input type="range" min={6} max={24} step={0.5} value={infOvlFont}
+                         onChange={(e) => setInfOvlFont(Number(e.target.value))} /> {infOvlFont}px
+                  <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12, marginLeft: 12 }}>
+                    <input type="checkbox" checked={infOvlVisible}
+                           onChange={(e) => setInfOvlVisible(e.target.checked)} />
+                    표시
+                  </label>
+                </Row>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  단축키(뷰어): <b>T + 마우스 스크롤</b> = 글자 크기 조절 · <b>T + Del</b> = 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.
+                </div>
               </Group>
             )}
             {page === "viewer" && (
