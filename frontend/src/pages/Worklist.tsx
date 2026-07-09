@@ -2544,13 +2544,29 @@ export function Worklist() {
       default: void doAction(act);
     }
   };
-  // 열린 문 로그아웃 아이콘 (문틀 + 열린 문짝 + 나가는 화살표)
+  // 열린 문 로그아웃 아이콘 — 3D 스타일(그라데이션 문틀/나무 문짝/하이라이트), 이웃 이모지(22px)와 크기 정렬
   const openDoorIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M4 3 h9 v18 h-9 z" />                             {/* 문틀 */}
-      <path d="M13 4.5 L19 2.5 V19.5 L13 21.5 Z" fill="rgba(56,189,248,0.25)" />  {/* 열린 문짝 */}
-      <circle cx="15" cy="12" r="0.9" fill="currentColor" />      {/* 손잡이 */}
-      <path d="M6.5 12 H11 M9.2 9.6 L11.6 12 L9.2 14.4" />        {/* 나가는 화살표 */}
+    <svg width="23" height="23" viewBox="0 0 24 24" style={{ display: "block", filter: "drop-shadow(0 1.5px 1.5px rgba(0,0,0,0.6))" }}>
+      <defs>
+        <linearGradient id="svDoorFrame" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7c8aa0" /><stop offset="1" stopColor="#3b4859" />
+        </linearGradient>
+        <linearGradient id="svDoorWood" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#d99a4e" /><stop offset="0.5" stopColor="#b06f2c" />
+          <stop offset="1" stopColor="#7a4718" />
+        </linearGradient>
+        <linearGradient id="svDoorIn" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0f172a" /><stop offset="1" stopColor="#020617" />
+        </linearGradient>
+      </defs>
+      <rect x="2.6" y="2" width="11.4" height="20" rx="1.2" fill="url(#svDoorFrame)" />   {/* 문틀 */}
+      <rect x="4.1" y="3.6" width="8.4" height="16.8" fill="url(#svDoorIn)" />            {/* 열린 안쪽 */}
+      <path d="M12.5 3 L21 0.8 V21.2 L12.5 23.4 Z" fill="url(#svDoorWood)" stroke="#5b3617" strokeWidth="0.6" />  {/* 열린 문짝 */}
+      <path d="M12.5 3 L21 0.8 L21 2.6 L12.5 4.8 Z" fill="#f0c078" opacity="0.85" />       {/* 윗면 하이라이트 */}
+      <path d="M12.5 21.4 L21 19.2 L21 21.2 L12.5 23.4 Z" fill="#4a2c10" opacity="0.9" />  {/* 아랫면 음영 */}
+      <circle cx="14.6" cy="12.6" r="1" fill="#f8e3b0" stroke="#8a5a20" strokeWidth="0.4" /> {/* 손잡이 */}
+      <path d="M5.4 12 H10 M8.2 9.7 L10.6 12 L8.2 14.3" stroke="#38bdf8" strokeWidth="1.7"
+            fill="none" strokeLinecap="round" strokeLinejoin="round" />                     {/* 나가는 화살표 */}
     </svg>
   );
   const INFI_ICONS: { i: React.ReactNode; l: string; a: string }[] = [

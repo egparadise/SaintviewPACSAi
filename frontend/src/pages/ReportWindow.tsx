@@ -178,7 +178,11 @@ export function ReportWindow() {
     const next = navTargetIdx(visual);
     if (next < 0) return;
     setNavIdx(next);
-    await loadStudy(navList[next]);
+    const id = navList[next];
+    await loadStudy(id);   // postStudySync → 워크리스트 선택도 따라감
+    // 이미지도 함께 — 뷰어 창(sv_viewer)을 그 검사로 열기/전환 (닫혀 있으면 새로 연다)
+    window.open(`${window.location.origin}${window.location.pathname}?viewer=2d&study=${id}`, "sv_viewer");
+    setTimeout(() => window.focus(), 120);   // 판독창 포커스 유지(계속 넘기며 판독)
   };
 
   const buildSr = (): Report["sr_json"] | null => {

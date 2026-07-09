@@ -1259,8 +1259,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             )}
           </span>
           <div style={{ borderTop: "1px solid var(--border)" }} />
-          {/* 툴 목록 — 아이콘(입체) + 이름 행 (첨부 레퍼런스 디자인) */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
+          {/* 툴 목록 — 3열 그리드: 큰 입체 아이콘 + 아래 작은 이름 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 3, overflowY: "auto" }}>
             {PALETTE.filter((t) => tbShow[t.id] !== false).map((t) => {
               const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && cine)
                 || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
@@ -1268,17 +1268,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               const name = t.label.split("—")[0].trim();
               return (
                 <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
-                        style={{ display: "flex", alignItems: "center", gap: 8, height: 32,
-                                 padding: "0 5px", textAlign: "left",
+                        style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                                 padding: "4px 1px 3px",
                                  opacity: t.impl ? 1 : 0.32,
-                                 background: activeBtn ? "rgba(56,189,248,0.16)" : "transparent",
+                                 background: activeBtn ? "rgba(56,189,248,0.14)" : "transparent",
                                  color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
-                                 border: "none", borderRadius: 6,
+                                 border: "none", borderRadius: 7,
                                  cursor: t.impl ? "pointer" : "default" }}>
                   {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
                   <span style={{
-                    width: 26, height: 26, flexShrink: 0, display: "grid", placeItems: "center",
-                    fontSize: 13.5, borderRadius: 7,
+                    width: 34, height: 34, flexShrink: 0, display: "grid", placeItems: "center",
+                    fontSize: 18, borderRadius: 9,
                     color: activeBtn ? "#fff" : "#cbd5e1",
                     background: activeBtn
                       ? "linear-gradient(145deg, #1e40af, #38bdf8)"
@@ -1288,8 +1288,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
                     textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
                   }}>{t.icon}</span>
-                  <span style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis",
-                                 whiteSpace: "nowrap" }}>{name}</span>
+                  <span style={{ fontSize: 8.5, lineHeight: 1.1, textAlign: "center", width: "100%",
+                                 overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
+                                 WebkitBoxOrient: "vertical" }}>{name}</span>
                 </button>
               );
             })}
