@@ -1,6 +1,7 @@
 // 워크리스트 워크스페이스 — 디자인 명세 §3 5구역 레이아웃 충실 구현
 // [A]툴바 [B]필터 [C-좌]날짜트리|[C]메인그리드 [D]과거검사|비교세트 [E]상용구|리포트|오더 + 컨텍스트메뉴
 import {
+  Fragment,
   Suspense,
   lazy,
   useCallback,
@@ -767,11 +768,39 @@ function StudyGrid({
   variant?: "infi";
 }) {
   const infi = variant === "infi";
+  // Exam → Series → Image 계층 확장: '＋' 클릭=아래로 전개('−'로 전환), 다시 클릭=접기
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expSeries, setExpSeries] = useState<Set<string>>(new Set());
+  const [trees, setTrees] = useState<Record<number, SeriesNode[] | null>>({});   // null=로딩 중
+  const toggleExam = (id: number) => {
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) { n.delete(id); return n; }
+      n.add(id);
+      if (trees[id] === undefined) {
+        setTrees((t) => ({ ...t, [id]: null }));
+        api.seriesTree(id)
+          .then((r) => setTrees((t) => ({ ...t, [id]: r.series })))
+          .catch(() => setTrees((t) => ({ ...t, [id]: [] })));
+      }
+      return n;
+    });
+  };
+  const toggleSeries = (uid: string) => setExpSeries((prev) => {
+    const n = new Set(prev);
+    if (n.has(uid)) n.delete(uid); else n.add(uid);
+    return n;
+  });
+  const span = columns.length + 2;   // 토글 + # + 컬럼들
+  const markStyle: React.CSSProperties = {
+    cursor: "pointer", color: "var(--accent)", fontWeight: 700, userSelect: "none",
+  };
   return (
     <div style={{ overflow: "auto", flex: 1, minWidth: 0 }}>
       <table className={infi ? "grid-table grid-infi" : "grid-table"}>
         <thead>
           <tr>
+            <th style={{ width: 22 }} />
             <th style={{ width: 30 }}>#</th>
             {columns.map((c) => (
               <th key={c} style={infi && INFI_COL_WIDTH[c] ? { width: INFI_COL_WIDTH[c] } : undefined}>
@@ -782,17 +811,67 @@ function StudyGrid({
         </thead>
         <tbody>
           {items.map((row, i) => (
-            <tr key={row.id}
-                className={[row.id === selectedId ? "selected" : "", row.emergency ? "emergency" : ""].join(" ")}
-                onClick={() => onSelect(row)}
-                onDoubleClick={() => onOpen(row)}
-                onContextMenu={(e) => { e.preventDefault(); onSelect(row); onContext(e, row); }}>
-              <td style={{ color: "var(--text-secondary)" }}>{i + 1}</td>
-              {columns.map((c) => <td key={c}>{COLUMN_DEFS[c]?.render(row)}</td>)}
-            </tr>
+            <Fragment key={row.id}>
+              <tr className={[row.id === selectedId ? "selected" : "", row.emergency ? "emergency" : ""].join(" ")}
+                  onClick={() => onSelect(row)}
+                  onDoubleClick={() => onOpen(row)}
+                  onContextMenu={(e) => { e.preventDefault(); onSelect(row); onContext(e, row); }}>
+                <td style={{ ...markStyle, textAlign: "center" }}
+                    title={expanded.has(row.id) ? "접기" : "Series/Image 펼치기"}
+                    onClick={(e) => { e.stopPropagation(); toggleExam(row.id); }}
+                    onDoubleClick={(e) => e.stopPropagation()}>
+                  {expanded.has(row.id) ? "−" : "＋"}
+                </td>
+                <td style={{ color: "var(--text-secondary)" }}>{i + 1}</td>
+                {columns.map((c) => <td key={c}>{COLUMN_DEFS[c]?.render(row)}</td>)}
+              </tr>
+              {/* 1단계: Series 행들 */}
+              {expanded.has(row.id) && (
+                trees[row.id] === null ? (
+                  <tr><td /><td colSpan={span - 1}
+                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    시리즈 로딩…
+                  </td></tr>
+                ) : (trees[row.id] ?? []).length === 0 ? (
+                  <tr><td /><td colSpan={span - 1}
+                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    시리즈 없음
+                  </td></tr>
+                ) : (trees[row.id] ?? []).map((s) => (
+                  <Fragment key={s.series_uid}>
+                    <tr style={{ background: "rgba(56,108,173,0.10)" }}
+                        onDoubleClick={() => onOpen(row)}>
+                      <td />
+                      <td colSpan={span - 1} style={{ paddingLeft: 26, fontSize: 12 }}>
+                        <span style={{ ...markStyle, marginRight: 7 }}
+                              title={expSeries.has(s.series_uid) ? "Image 접기" : "Image 펼치기"}
+                              onClick={(e) => { e.stopPropagation(); toggleSeries(s.series_uid); }}
+                              onDoubleClick={(e) => e.stopPropagation()}>
+                          {expSeries.has(s.series_uid) ? "−" : "＋"}
+                        </span>
+                        📚 Series {s.series_number} · {s.modality} · {s.instances.length}장
+                        <span style={{ color: "var(--text-secondary)" }}> {s.series_desc}</span>
+                      </td>
+                    </tr>
+                    {/* 2단계: Image(인스턴스) 행들 */}
+                    {expSeries.has(s.series_uid) && s.instances.map((inst) => (
+                      <tr key={inst.sop_uid} onDoubleClick={() => onOpen(row)}>
+                        <td />
+                        <td colSpan={span - 1}
+                            style={{ paddingLeft: 58, fontSize: 11.5, color: "var(--text-secondary)" }}>
+                          🖼 Image {inst.instance_number}
+                          {inst.rows ? ` · ${inst.rows}×${inst.cols}px` : ""}
+                          <span style={{ opacity: 0.6 }}> · …{inst.sop_uid.slice(-12)}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))
+              )}
+            </Fragment>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={columns.length + 1}
+            <tr><td colSpan={span}
                     style={{ color: "var(--text-secondary)", textAlign: "center", padding: 24 }}>
               검사가 없습니다
             </td></tr>
