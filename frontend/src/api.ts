@@ -428,6 +428,42 @@ export const api = {
   purge: (retention_days: number) =>
     req<{ ok: boolean; deleted: number; orthanc_removed: number }>(
       "/api/admin/storage/purge", { method: "POST", body: JSON.stringify({ retention_days, confirm: true }) }),
+
+  // ── 서버 유지보수 (14개 요구 — 레인 F/B 공통 계약, 백엔드는 레인 B 병렬 구현) ──
+  /** 저장 공간 현황 — DB/Image/Backup 크기·디스크 여유 */
+  maintStorage: () => req<MaintStorage>("/api/maintenance/storage"),
+  /** 백업 정책(확장) — 반복 5종·시:분:초·quota·미러·DB백업 */
+  maintBackupPolicy: () => req<MaintBackupPolicy>("/api/maintenance/backup-policy"),
+  putMaintBackupPolicy: (body: MaintBackupPolicy) =>
+    req<MaintBackupPolicy>("/api/maintenance/backup-policy", { method: "PUT", body: JSON.stringify(body) }),
+  /** 지금 백업 실행 — kind: dicom | db | both (응답 items = 생성된 작업들) */
+  maintBackupRun: (kind: "dicom" | "db" | "both") =>
+    req<{ ok: boolean; detail?: string; items?: MaintBackupItem[] }>("/api/maintenance/backup-run", { method: "POST", body: JSON.stringify({ kind }) }),
+  /** 백업 이력 */
+  maintBackups: () => req<{ items: MaintBackupItem[] }>("/api/maintenance/backups"),
+  /** 복원 — dry=true 는 복원 요약만(미리보기) */
+  maintRestore: (body: { backup_id: number | string; scope: "system" | "hospital"; hid?: number; dry?: boolean }) =>
+    req<MaintRestoreResult>("/api/maintenance/restore", { method: "POST", body: JSON.stringify(body) }),
+  /** 데이터 지우기(파괴적) — confirm 은 반드시 'WIPE' 문자열 */
+  maintWipe: (body: { scope: "hospital" | "system"; hid?: number; confirm: string }) =>
+    req<{ ok: boolean; detail?: string; deleted?: number; orthanc_removed?: number }>(
+      "/api/maintenance/wipe", { method: "POST", body: JSON.stringify(body) }),
+  /** 시스템 미러링 실행 */
+  maintMirrorRun: () =>
+    req<{ ok: boolean; detail?: string; copied?: number; skipped?: number; errors?: string[] }>(
+      "/api/maintenance/mirror-run", { method: "POST" }),
+
+  // ── 서버 인사이트 (DB 구조 · 시스템 로그 · 사용량 통계) ──
+  /** DB 구조(read-only introspection) — 테이블/컬럼/행수 */
+  insightsDbSchema: () => req<DbSchemaResp>("/api/insights/db-schema"),
+  /** 외부 DB 도구 서버측 실행 — 설정키 server.dbtool(path) */
+  insightsDbToolOpen: () => req<{ ok: boolean; detail?: string }>("/api/insights/db-tool-open", { method: "POST" }),
+  /** 시스템 로그 — type=event|network|dicom, 날짜·검색·병원 필터 */
+  insightsLogs: (params: Record<string, string>) =>
+    req<{ items: LogItem[] }>(`/api/insights/logs?${new URLSearchParams(params)}`),
+  /** 사용량 통계 — group=hospital|modality|department|report_status */
+  insightsStats: (params: Record<string, string>) =>
+    req<StatsResp>(`/api/insights/stats?${new URLSearchParams(params)}`),
 };
 
 // ── 저장공간/백업 타입 ──
@@ -869,6 +905,85 @@ export async function sttTranscribe(blob: Blob): Promise<{ text: string; engine:
     throw new Error(body.detail ?? `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+// ── 서버 유지보수·인사이트 타입 (레인 F/B 공통 계약) ──
+export interface MaintStorage {
+  db: { size_mb: number; detail?: string };
+  image: { size_mb: number; instances: number; disk_free_gb: number; disk_total_gb: number };
+  backup: { path: string; size_mb: number; quota_gb: number };
+}
+export type MaintRepeat = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+export interface MaintBackupPolicy {
+  enabled: boolean;
+  at: string;                 // 'HH:MM:SS'
+  repeat: MaintRepeat;
+  weekday?: number;           // repeat=weekly (0=월 … 6=일)
+  day?: number;               // repeat=monthly/quarterly/yearly — 일(day of month)
+  retention_days: number;
+  format: string;             // 압축 포맷(기존 backup_service 키 유지)
+  path: string;
+  quota_gb?: number;          // 백업 용량 상한(GB, 0=무제한)
+  mirror_path?: string;       // 시스템 미러링 대상 경로
+  db_backup: boolean;         // DB 백업 포함
+}
+export interface MaintBackupItem {
+  id: number | string; kind: string; ts: string; size_mb: number; path: string; status: string;
+}
+export interface MaintRestoreResult {
+  ok: boolean; dry?: boolean; executed?: boolean; kind?: string;
+  summary?: string;           // 사람이 읽는 한 줄 요약(백엔드 계약)
+  detail?: string;
+  guidance?: string;          // DB 복원 시 수동 절차 안내(자동 실행 안 함 — 우아 강등)
+  prepared_file?: string;     // DB 복원 준비 파일 경로
+  files_found?: number; size_mb?: number; studies?: number; instances?: number;
+  uploaded?: number; failed?: number; studies_registered?: number;
+}
+export interface DbSchemaResp {
+  tables: { name: string; rows: number; columns: { name: string; type: string }[] }[];
+}
+export interface LogItem {
+  ts: string; type: string; actor: string; hospital_id: number | null; action: string;
+  detail: Record<string, unknown>;  // 백엔드는 객체(dict)로 반환 — 표시 시 문자열화 필요
+}
+export interface StatsRow { key: string; label: string; studies: number; reports: number; unreported: number }
+export interface StatsResp { group: string; rows: StatsRow[] }
+/** 가입 환경 설정 필드 정의 — settings 키 signup.fields.hospital|client|modality */
+export interface SignupFieldDef { key: string; label: string; enabled: boolean; required: boolean }
+export interface SignupFieldsCfg { fields: SignupFieldDef[] }
+/** AI 등록 항목 — settings 키 ai.providers ({items:[…]}) */
+export interface AiProvider {
+  name: string; kind: "oss" | "api"; endpoint: string; model: string;
+  api_key_ref: string; enabled: boolean; note: string;
+}
+
+/** 시스템 로그 CSV 다운로드 — 인증 헤더 필요라 fetch→blob 방식 */
+export async function downloadLogsCsv(params: Record<string, string>) {
+  const res = await fetch(`${BASE}/api/insights/logs.csv?${new URLSearchParams(params)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) throw new Error(`CSV 다운로드 실패 (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `logs_${params.type ?? "all"}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** 가입 필드 설정 로드(가입 화면용) — 실패/미설정=null(기존 폼 그대로).
+ *  가입 화면은 무인증(공개)이므로 인증이 필요한 /api/settings 대신
+ *  공개 엔드포인트 GET /api/signup/fields/{kind} 를 사용한다(빈 목록=미설정=null). */
+export async function fetchSignupFields(kind: "hospital" | "client" | "modality"): Promise<SignupFieldsCfg | null> {
+  try {
+    const res = await fetch(`${BASE}/api/signup/fields/${kind}`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { fields?: SignupFieldDef[] };
+    return Array.isArray(body?.fields) && body.fields.length > 0 ? { fields: body.fields } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** PDF 다운로드 — 인증 헤더가 필요하므로 fetch→blob 방식 */

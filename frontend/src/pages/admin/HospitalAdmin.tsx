@@ -6,6 +6,8 @@ import {
   api, type ClientRow, type HospitalRow, type HospitalScu, type HospitalUsage,
   type ModalityNode, type PermMatrixResp, type StudyAdminActionKind, type StudyRow,
 } from "../../api";
+import { LogsPanel, StatsPanel } from "./ServerInsights";
+import { DataWipePanel, RestorePanel } from "./ServerMaintenance";
 
 // ── 공통 상수/소형 UI (기존 AdminConsole 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -611,6 +613,23 @@ export function StudyAdminTab({ hid, hospitals }: { hid: number; hospitals: Hosp
         복제는 DB 사본이며 영상은 원본과 같은 저장소 검사를 공유합니다(원본 삭제 시 영상도 삭제될 수 있음).
       </div>
       <Msg text={msg} />
+    </div>
+  );
+}
+
+// ════════════════════════════ ⑧ 로그 · ⑨ 통계 · ⑩ 데이터 (병원별 — 서버 섹션과 동일 패널, hid 고정) ════════════════════════════
+export function HospitalLogsTab({ hid }: { hid: number }) {
+  return <LogsPanel hid={hid} />;
+}
+export function HospitalStatsTab({ hid }: { hid: number }) {
+  return <StatsPanel hid={hid} />;
+}
+/** 병원별 데이터 관리 — 해당 병원만 지우기 + 백업 시점 복원 (동일 안전장치: 'WIPE' 확인 + 2단계 + dry 미리보기) */
+export function HospitalDataTab({ hid, hospitals }: { hid: number; hospitals: HospitalRow[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <DataWipePanel hospitals={hospitals} fixedHid={hid} />
+      <RestorePanel hospitals={hospitals} fixedHid={hid} />
     </div>
   );
 }

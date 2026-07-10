@@ -125,3 +125,19 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
 def signup_enabled():
     """홈/가입 화면이 가입 가능 여부를 확인."""
     return {"enabled": get_settings().signup_enabled}
+
+
+# 가입 환경 설정(관리자 콘솔 ⑦)의 공개 조회 — 가입 화면은 무인증이므로 /api/settings 대신 여기서 읽는다.
+# 노출 정보는 입력 항목의 표시/필수 플래그뿐(민감정보 없음). 미설정=빈 목록 → 화면은 기존 기본 폼 유지.
+SIGNUP_FIELD_KINDS = ("hospital", "client", "modality")
+
+
+@router.get("/fields/{kind}")
+def signup_fields(kind: str, db: Session = Depends(get_db)):
+    if kind not in SIGNUP_FIELD_KINDS:
+        raise HTTPException(status_code=404, detail="kind는 hospital|client|modality")
+    from app.services.settings_service import get_setting
+
+    value = get_setting(db, f"signup.fields.{kind}", default={}) or {}
+    fields = value.get("fields")
+    return {"kind": kind, "fields": fields if isinstance(fields, list) else []}

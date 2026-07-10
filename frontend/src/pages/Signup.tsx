@@ -1,6 +1,8 @@
 // 가입 — 병원 정보 · 라이선스 · 가입자(초기 관리자) · 결재 (가입 흐름도)
-import { useState } from "react";
-import { api } from "../api";
+// 가입 환경 설정(signup.fields.hospital — 관리자 콘솔 [가입 환경 설정])을 소비해
+// 병원 정보 입력 항목의 표시/필수를 반영한다. 미설정·로드 실패 시 기존 폼 그대로.
+import { useEffect, useState } from "react";
+import { api, fetchSignupFields } from "../api";
 
 const inp: React.CSSProperties = {
   width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
@@ -37,11 +39,28 @@ export function Signup({ onDone, onCancel }: { onDone: (username: string) => voi
   });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // 가입 환경 설정 — 병원 정보 필드의 표시/필수 (미설정=null=기존 그대로)
+  const [fieldCfg, setFieldCfg] = useState<Record<string, { enabled: boolean; required: boolean; label: string }> | null>(null);
+  useEffect(() => {
+    fetchSignupFields("hospital").then((cfg) => {
+      if (cfg) setFieldCfg(Object.fromEntries(cfg.fields.map((x) => [x.key, { enabled: x.enabled, required: x.required, label: x.label }])));
+    });
+  }, []);
+  const show = (k: string) => !fieldCfg || (fieldCfg[k]?.enabled ?? true);
+  const reqd = (k: string) => !!fieldCfg?.[k]?.required;
   const set = (k: string, v: unknown) => setF((p) => ({ ...p, [k]: v }));
 
   const submit = async () => {
     setErr("");
     if (!f.name.trim()) return setErr("병원 이름을 입력하세요");
+    // 가입 환경 설정의 필수 항목 검증 (표시 중인 항목만)
+    if (fieldCfg) {
+      for (const [k, cfg] of Object.entries(fieldCfg)) {
+        if (!cfg.enabled || !cfg.required) continue;
+        const v = (f as Record<string, unknown>)[k];
+        if (v == null || String(v).trim() === "") return setErr(`${cfg.label || k} 항목은 필수입니다`);
+      }
+    }
     if (!f.username.trim()) return setErr("관리자 ID를 입력하세요");
     if (f.password.length < 8) return setErr("비밀번호는 8자 이상이어야 합니다");
     if (f.password !== f.password_confirm) return setErr("비밀번호 확인이 일치하지 않습니다");
@@ -78,13 +97,13 @@ export function Signup({ onDone, onCancel }: { onDone: (username: string) => voi
 
         <Section title="병원 정보">
           <Field label="병원 이름" req><input style={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field label="진료과 (콤마 구분)"><input style={inp} placeholder="영상의학과,내과" value={f.departments} onChange={(e) => set("departments", e.target.value)} /></Field>
-          <Field label="주소"><input style={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
-          <Field label="홈페이지"><input style={inp} value={f.homepage} onChange={(e) => set("homepage", e.target.value)} /></Field>
-          <Field label="연락처"><input style={inp} value={f.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-          <Field label="Fax"><input style={inp} value={f.fax} onChange={(e) => set("fax", e.target.value)} /></Field>
-          <Field label="License — Client(뷰어) 수"><input style={inp} type="number" min={1} value={f.license_clients} onChange={(e) => set("license_clients", e.target.value)} /></Field>
-          <Field label="연결할 Modality 수 (0=무제한)"><input style={inp} type="number" min={0} value={f.modality_limit} onChange={(e) => set("modality_limit", e.target.value)} /></Field>
+          {show("departments") && <Field label="진료과 (콤마 구분)" req={reqd("departments")}><input style={inp} placeholder="영상의학과,내과" value={f.departments} onChange={(e) => set("departments", e.target.value)} /></Field>}
+          {show("address") && <Field label="주소" req={reqd("address")}><input style={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>}
+          {show("homepage") && <Field label="홈페이지" req={reqd("homepage")}><input style={inp} value={f.homepage} onChange={(e) => set("homepage", e.target.value)} /></Field>}
+          {show("phone") && <Field label="연락처" req={reqd("phone")}><input style={inp} value={f.phone} onChange={(e) => set("phone", e.target.value)} /></Field>}
+          {show("fax") && <Field label="Fax" req={reqd("fax")}><input style={inp} value={f.fax} onChange={(e) => set("fax", e.target.value)} /></Field>}
+          {show("license_clients") && <Field label="License — Client(뷰어) 수" req={reqd("license_clients")}><input style={inp} type="number" min={1} value={f.license_clients} onChange={(e) => set("license_clients", e.target.value)} /></Field>}
+          {show("modality_limit") && <Field label="연결할 Modality 수 (0=무제한)" req={reqd("modality_limit")}><input style={inp} type="number" min={0} value={f.modality_limit} onChange={(e) => set("modality_limit", e.target.value)} /></Field>}
         </Section>
 
         <Section title="가입자 등록 (초기 관리자 — admin)">

@@ -13,6 +13,7 @@ from app.api import (
     auth,
     hospital_admin,
     hospitals,
+    maintenance,
     management,
     orders,
     phrases,
@@ -23,6 +24,13 @@ from app.api import (
     stt,
     worklist,
 )
+
+# insights 라우터(시스템 로그·통계·DB 구조 — 파일명 계약: app/api/insights.py).
+# 병렬 레인(B2)이 생성하므로 아직 없으면 건너뛰고, 병합 후 자동 등록된다.
+try:
+    from app.api import insights as insights_api
+except ImportError:
+    insights_api = None
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.services.auth_service import ensure_default_admin
@@ -82,6 +90,9 @@ app.include_router(orders.router)
 app.include_router(phrases.router)
 app.include_router(stt.router)
 app.include_router(share.router)
+app.include_router(maintenance.router)
+if insights_api is not None:
+    app.include_router(insights_api.router)
 
 
 @app.get("/api/health")

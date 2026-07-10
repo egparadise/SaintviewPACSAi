@@ -9,8 +9,15 @@ import {
   HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel,
 } from "./admin/ServerAdmin";
 import {
-  AccountsTab, ConnDashboardTab, HospitalModalityTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
+  AccountsTab, ConnDashboardTab, HospitalDataTab, HospitalLogsTab, HospitalModalityTab,
+  HospitalStatsTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
 } from "./admin/HospitalAdmin";
+import {
+  BackupMirrorPanel, DataWipePanel, MaintStoragePanel, RestorePanel, ServerConfigPanel,
+} from "./admin/ServerMaintenance";
+import {
+  AdminAccountsPanel, AiProvidersPanel, DbSchemaPanel, LogsPanel, SignupFieldsPanel, StatsPanel,
+} from "./admin/ServerInsights";
 
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
 
@@ -140,6 +147,9 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     { key: "usage", label: "⑤ 사용량 (DB·Storage)" },
     { key: "conn", label: "⑥ 연결 대시보드" },
     { key: "dbimg", label: "⑦ DB·영상 관리" },
+    { key: "logs", label: "⑧ 로그" },
+    { key: "stats", label: "⑨ 통계" },
+    { key: "data", label: "⑩ 데이터 (지우기·복원)" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -159,6 +169,23 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   else if (sel === "hospitals") content = <HospitalsPanel />;
   else if (sel === "users") content = <UsersPanel />;
   else if (sel === "overview") content = <OverviewPanel />;
+  // 서버 유지보수·인사이트 (14개 요구 — 레인 F)
+  else if (sel === "srv-config") content = <ServerConfigPanel />;
+  else if (sel === "srv-space") content = <MaintStoragePanel />;
+  else if (sel === "srv-backup") content = <BackupMirrorPanel />;
+  else if (sel === "srv-restore") content = <RestorePanel hospitals={hosps} />;
+  else if (sel === "srv-wipe") content = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <DataWipePanel hospitals={hosps} />
+      <RestorePanel hospitals={hosps} />
+    </div>
+  );
+  else if (sel === "srv-dbschema") content = <DbSchemaPanel />;
+  else if (sel === "srv-signup") content = <SignupFieldsPanel />;
+  else if (sel === "srv-admins") content = <AdminAccountsPanel />;
+  else if (sel === "srv-logs") content = <LogsPanel />;
+  else if (sel === "srv-stats") content = <StatsPanel />;
+  else if (sel === "srv-ai") content = <AiProvidersPanel />;
   else if (sel.startsWith("h:")) {
     const [, hidStr, sub] = sel.split(":");
     const hid = Number(hidStr);
@@ -170,6 +197,9 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     else if (sub === "usage") content = <UsageTab hid={hid} />;
     else if (sub === "conn") content = <ConnDashboardTab hid={hid} />;
     else if (sub === "dbimg") content = <StudyAdminTab hid={hid} hospitals={hosps} />;
+    else if (sub === "logs") content = <HospitalLogsTab hid={hid} />;
+    else if (sub === "stats") content = <HospitalStatsTab hid={hid} />;
+    else if (sub === "data") content = <HospitalDataTab hid={hid} hospitals={hosps} />;
   }
 
   return (
@@ -189,8 +219,19 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
           {isSystemAdmin && <>
             <Head>서버</Head>
             <div style={itemStyle(sel === "server-status")} onClick={() => setSel("server-status")}>🖥️ 서버 상태</div>
+            <div style={itemStyle(sel === "srv-config")} onClick={() => setSel("srv-config")}>⚙️ 서버 설정 (IP·Port·AE·Name)</div>
+            <div style={itemStyle(sel === "srv-space")} onClick={() => setSel("srv-space")}>📦 저장 공간 (DB·Image·Backup)</div>
             <div style={itemStyle(sel === "server-storage")} onClick={() => setSel("server-storage")}>💾 서버 Storage</div>
             <div style={itemStyle(sel === "server-db")} onClick={() => setSel("server-db")}>🗄️ 서버 Database</div>
+            <div style={itemStyle(sel === "srv-backup")} onClick={() => setSel("srv-backup")}>🗓️ 백업 · 미러링</div>
+            <div style={itemStyle(sel === "srv-restore")} onClick={() => setSel("srv-restore")}>⏪ 복원 (백업 시점)</div>
+            <div style={itemStyle(sel === "srv-wipe")} onClick={() => setSel("srv-wipe")}>🧹 데이터 관리 (지우고 복원)</div>
+            <div style={itemStyle(sel === "srv-dbschema")} onClick={() => setSel("srv-dbschema")}>🧬 DB 구조 · DB 도구</div>
+            <div style={itemStyle(sel === "srv-signup")} onClick={() => setSel("srv-signup")}>📝 가입 환경 설정</div>
+            <div style={itemStyle(sel === "srv-admins")} onClick={() => setSel("srv-admins")}>🛡️ 관리자 계정</div>
+            <div style={itemStyle(sel === "srv-logs")} onClick={() => setSel("srv-logs")}>📜 시스템 로그</div>
+            <div style={itemStyle(sel === "srv-stats")} onClick={() => setSel("srv-stats")}>📈 사용량 통계</div>
+            <div style={itemStyle(sel === "srv-ai")} onClick={() => setSel("srv-ai")}>🤖 AI 등록</div>
             <div style={itemStyle(sel === "overview")} onClick={() => setSel("overview")}>📊 운영 현황(감독)</div>
             <div style={itemStyle(sel === "users")} onClick={() => setSel("users")}>👤 사용자 관리</div>
           </>}

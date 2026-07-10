@@ -254,6 +254,9 @@ def create_account(body: AccountCreate, db: Session = Depends(get_db),
     if db.execute(select(Account).where(Account.username == username)).scalar_one_or_none():
         raise HTTPException(status_code=409, detail="이미 존재하는 아이디입니다")
     _validate_role_hospital(db, body.role, body.hospital_id)
+    # 관리자 계정 등록은 시스템 관리자만 — users.manage 가 위임되어도 admin 생성은 불가(권한 상승 방지)
+    if body.role == "admin" and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="관리자 계정은 시스템 관리자만 등록할 수 있습니다")
     # 라이선스(병원 계정 수) 검사
     if body.hospital_id is not None:
         h = db.get(Hospital, body.hospital_id)
@@ -295,6 +298,9 @@ def update_account(aid: int, body: AccountUpdate, db: Session = Depends(get_db),
         new_role = body.role if body.role is not None else a.role
         new_hid = body.hospital_id if body.hospital_id is not None else a.hospital_id
         _validate_role_hospital(db, new_role, new_hid)
+        # 관리자 승격도 시스템 관리자만 (생성 가드와 동일한 권한 상승 방지)
+        if new_role == "admin" and a.role != "admin" and user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="관리자 승격은 시스템 관리자만 할 수 있습니다")
         # 마지막 관리자 보호
         if a.role == "admin" and new_role != "admin":
             other_admin = db.execute(

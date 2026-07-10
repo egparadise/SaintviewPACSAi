@@ -25,10 +25,23 @@ ALLOWED_KEYS = {
     "report.prefs",          # 리포트 구성 (AI 패널 표시·자동 적용 — UBPACS Report Composition)
     "server.network",        # 서버 네트워크 (로컬 공유 디렉토리·웹서버 IP/Port/Name/AET — 전역)
     "report.phrases_local",  # 계정별 로컬 단축키·템플릿의 서버 백업(주기 — 설정>판독)
+    # 관리자 콘솔 서버 섹션(14개 요구) — 가입 환경·AI 등록·DB 도구(전역/관리자 전용)
+    "signup.fields.hospital",  # 가입 환경 — 병원 입력 항목 {fields:[{key,label,enabled,required}]}
+    "signup.fields.client",    # 가입 환경 — Client 입력 항목
+    "signup.fields.modality",  # 가입 환경 — Modality 입력 항목
+    "ai.providers",            # AI 등록 항목(오픈소스+상업 API, RAG — placeholder) {items:[...]}
+    "server.dbtool",           # DB 프로그램 열기 — 서버측 외부 도구 경로 {path}
     # 병원(hospital) 스코프 키 — 전용 엔드포인트(/api/hospitals/{hid}/...)로 읽고 쓴다
     "perm.matrix",           # 병원별 등급 권한 매트릭스 (GET|PUT /hospitals/{hid}/perm-matrix)
     "modality.nodes",        # 병원별 SCP Modality 등록 (GET|PUT /hospitals/{hid}/modalities)
     "hospital.scu",          # 병원 SCU IP/Port (GET|PUT /hospitals/{hid}/scu)
+}
+
+# 전역(global) 스코프만 허용하는 키 — 관리자 전용 서버 설정(사용자 스코프 오염 방지)
+GLOBAL_ONLY_KEYS = {
+    "mode.profiles", "dicom.nodes", "server.network",
+    "signup.fields.hospital", "signup.fields.client", "signup.fields.modality",
+    "ai.providers", "server.dbtool",
 }
 
 
@@ -55,7 +68,7 @@ def write_setting(
 ):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
-    if key in ("mode.profiles", "dicom.nodes", "server.network") and body.scope != "global":
+    if key in GLOBAL_ONLY_KEYS and body.scope != "global":
         raise HTTPException(status_code=400, detail=f"{key}는 전역(global) 설정만 허용")
     if key == "worklist.tabs" and len(body.value.get("items", [])) > 10:
         raise HTTPException(status_code=400, detail="워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)")

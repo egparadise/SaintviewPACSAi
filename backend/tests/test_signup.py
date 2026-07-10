@@ -60,3 +60,30 @@ def test_admin_overview(client, auth_headers):
     assert "hospitals" in body and "totals" in body and "server" in body
     assert any(h["name"] == "감독병원" for h in body["hospitals"])
     assert body["server"]["api"] is True
+
+
+# ────────────────────────────── 가입 환경 설정 공개 조회 (요구 7) ──────────────────────────────
+def test_signup_fields_public_endpoint(client, auth_headers):
+    """가입 화면은 무인증이므로 signup.fields.* 를 공개 엔드포인트로 읽는다.
+
+    미설정=빈 목록(기존 폼 회귀 0) · 관리자 저장분 무인증 왕복 · 알 수 없는 kind 404.
+    """
+    # 미설정 → 빈 목록 (프론트는 null 처리 → 기존 기본 폼 유지)
+    r = client.get("/api/signup/fields/client")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"kind": "client", "fields": []}
+
+    # 관리자가 설정(전역) → 무인증으로 그대로 조회 가능
+    cfg = {"fields": [
+        {"key": "name", "label": "병원 이름", "enabled": True, "required": True},
+        {"key": "fax", "label": "Fax", "enabled": False, "required": False},
+    ]}
+    r = client.put("/api/settings/signup.fields.hospital", headers=auth_headers,
+                   json={"value": cfg, "scope": "global"})
+    assert r.status_code == 200, r.text
+    r2 = client.get("/api/signup/fields/hospital")  # 무인증
+    assert r2.status_code == 200
+    assert r2.json()["fields"] == cfg["fields"]
+
+    # 알 수 없는 kind → 404 (임의 설정 키 노출 방지)
+    assert client.get("/api/signup/fields/nope").status_code == 404
