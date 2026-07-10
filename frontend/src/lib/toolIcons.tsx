@@ -43,11 +43,19 @@ const ICONS: Record<string, ReactNode> = {
 const LAYER_LIGHT: CSSProperties = { color: "#fff" };
 const LAYER_DARK: CSSProperties = { color: "#000" };
 
-export function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
+export function ToolIcon({ id, size = 17, flat = false }: { id: string; size?: number; flat?: boolean }) {
   // SVG 인스턴스가 여러 개 렌더되므로 gradient/filter/mask id 충돌 방지 — 인스턴스별 고유 id
   const rawId = useId();
   const icon = ICONS[id];
   if (!icon) return null;
+  // 플랫(평면) 렌더 — 설정>뷰어(TY) ty_icon_3d=false: 3D 레이어(섀도/베벨/그라디언트) 없이 본체만
+  if (flat) {
+    return (
+      <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden style={{ display: "block", overflow: "visible" }}>
+        {icon}
+      </svg>
+    );
+  }
   const uid = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
   const shadowId = `t3d-sh-${uid}`;
   const glossId = `t3d-gl-${uid}`;

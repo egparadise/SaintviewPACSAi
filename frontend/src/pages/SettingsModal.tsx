@@ -61,7 +61,10 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   { key: "worklist", label: "워크리스트", scope: "viewer" },
   { key: "report", label: "리포트", scope: "viewer" },
   { key: "reading", label: "판독 (Reading)", scope: "viewer" },
-  { key: "viewer", label: "뷰어", scope: "viewer" },
+  // 뷰어 설정 3분리 — 공통(선택/모드/OHIF) · TY Viewer 전용 · In Viewer 전용 (키 이름은 기존 유지 — 로밍 호환)
+  { key: "viewer", label: "뷰어 공통", scope: "viewer" },
+  { key: "viewerTy", label: "뷰어 — TY Viewer", scope: "viewer" },
+  { key: "viewerIn", label: "뷰어 — In Viewer", scope: "viewer" },
   { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
   { key: "hp", label: "행잉 (HP)", scope: "viewer" },
@@ -69,6 +72,45 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
 const SCOPE_TITLE: Record<SettingsScope, string> = {
   system: "시스템 설정", hospital: "병원 설정", viewer: "뷰어 설정",
 };
+
+// 사용 패턴 TOP10 표시용 — 툴 id → 표시 이름 (TY=TOOLBAR_DEFS, In=IN_PALETTE)
+const TY_TOOL_LABEL: Record<string, string> = Object.fromEntries(
+  TOOLBAR_DEFS.flatMap((s) => s.items.map((t) => [t.id, t.label])));
+const IN_TOOL_LABEL: Record<string, string> = Object.fromEntries(
+  IN_PALETTE.map((t) => [t.id, t.label.split(" — ")[0]]));
+
+/** 자주 쓰는 툴 TOP10 (읽기 전용) + [기록 초기화] — ty_usage/infi_usage 표시 */
+function UsageTop({ usage, labelOf, onReset }: {
+  usage: Record<string, number>;
+  labelOf: (id: string) => string;
+  onReset: () => void;
+}) {
+  const top = Object.entries(usage).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)" }}>
+          자주 쓰는 툴 TOP10 (사용 횟수순)
+        </span>
+        <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={onReset}>기록 초기화</button>
+      </div>
+      {top.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          기록 없음 — 뷰어에서 툴을 사용하면 집계됩니다.
+        </div>
+      ) : (
+        <ol style={{ margin: 0, paddingLeft: 22, fontSize: 12,
+                     display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 16px" }}>
+          {top.map(([id, n]) => (
+            <li key={id}>
+              {labelOf(id)} <span style={{ color: "var(--text-secondary)" }}>— {n}회</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
 
 /** SCP/SCU 장비 노드 (dicom.nodes — AE Title/IP/Port, 추가·삭제·확장 가능) */
 interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: string; ip: string; port: number }
@@ -103,6 +145,21 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infToolLabels, setInfToolLabels] = useState(true);
   const [infToolSize, setInfToolSize] = useState(34);
   const [infCineSec, setInfCineSec] = useState(0.5);   // 시네 기본 간격(초)
+  // In Viewer 신규 (viewer.prefs 키 계약) — ★Quick 행·사용 패턴 기록·판독 도크 기본 열림
+  const [infQuickRow, setInfQuickRow] = useState(true);
+  const [infUsageRec, setInfUsageRec] = useState(true);
+  const [infUsage, setInfUsage] = useState<Record<string, number>>({});
+  const [infUsageReset, setInfUsageReset] = useState(false);  // 초기화 눌렀을 때만 저장에 포함(뷰어 집계 덮어쓰기 방지)
+  const [infRptDock, setInfRptDock] = useState(false);
+  // TY Viewer 신규 (viewer.prefs ty_* 키 계약) — 아이콘 크기/라벨/3D·★Quick·사용 패턴·오버레이 글자
+  const [tyToolSize, setTyToolSize] = useState(17);
+  const [tyToolLabels, setTyToolLabels] = useState(true);
+  const [tyIcon3d, setTyIcon3d] = useState(true);
+  const [tyQuickRow, setTyQuickRow] = useState(true);
+  const [tyUsageRec, setTyUsageRec] = useState(true);
+  const [tyUsage, setTyUsage] = useState<Record<string, number>>({});
+  const [tyUsageReset, setTyUsageReset] = useState(false);
+  const [tyOvlFont, setTyOvlFont] = useState(10.5);  // Viewer2D 기본(ov() 10.5px)과 일치 — 키 계약
   const [ohifOn, setOhifOn] = useState(false);         // OHIF 아이콘 표시·동작 (기본 꺼짐)
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
@@ -219,6 +276,22 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (tv.infi_tool_labels !== undefined) setInfToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setInfToolSize(tv.infi_tool_size);
       if (tv.infi_cine_sec) setInfCineSec(tv.infi_cine_sec);
+      const nf = v as { infi_quick_row?: boolean; infi_usage_rec?: boolean;
+                        infi_usage?: Record<string, number>; infi_report_dock?: boolean };
+      if (nf.infi_quick_row !== undefined) setInfQuickRow(nf.infi_quick_row);
+      if (nf.infi_usage_rec !== undefined) setInfUsageRec(nf.infi_usage_rec);
+      if (nf.infi_usage) setInfUsage(nf.infi_usage);
+      if (nf.infi_report_dock !== undefined) setInfRptDock(nf.infi_report_dock);
+      const ty = v as { ty_tool_size?: number; ty_tool_labels?: boolean; ty_icon_3d?: boolean;
+                        ty_quick_row?: boolean; ty_usage_rec?: boolean;
+                        ty_usage?: Record<string, number>; ty_overlay_font?: number };
+      if (ty.ty_tool_size) setTyToolSize(ty.ty_tool_size);
+      if (ty.ty_tool_labels !== undefined) setTyToolLabels(ty.ty_tool_labels);
+      if (ty.ty_icon_3d !== undefined) setTyIcon3d(ty.ty_icon_3d);
+      if (ty.ty_quick_row !== undefined) setTyQuickRow(ty.ty_quick_row);
+      if (ty.ty_usage_rec !== undefined) setTyUsageRec(ty.ty_usage_rec);
+      if (ty.ty_usage) setTyUsage(ty.ty_usage);
+      if (ty.ty_overlay_font) setTyOvlFont(ty.ty_overlay_font);
       setOhifOn(!!(v as { ohif_enabled?: boolean }).ohif_enabled);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
@@ -310,6 +383,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_toolbar: infTb,
       infi_tool_cols: infToolCols, infi_tool_labels: infToolLabels, infi_tool_size: infToolSize,
       infi_cine_sec: infCineSec,
+      infi_quick_row: infQuickRow, infi_usage_rec: infUsageRec, infi_report_dock: infRptDock,
+      ty_tool_size: tyToolSize, ty_tool_labels: tyToolLabels, ty_icon_3d: tyIcon3d,
+      ty_quick_row: tyQuickRow, ty_usage_rec: tyUsageRec, ty_overlay_font: tyOvlFont,
+      // 사용 기록(ty_usage/infi_usage)은 [기록 초기화]를 누른 경우에만 빈 값으로 저장 —
+      // 평소에는 뷰어의 2초 디바운스 집계를 설정 저장이 덮어쓰지 않도록 제외
+      ...(tyUsageReset ? { ty_usage: {} } : {}),
+      ...(infUsageReset ? { infi_usage: {} } : {}),
       ohif_enabled: ohifOn,
       infi_default_layout: Object.fromEntries(Object.entries(defLay)
         .map(([k, v]) => {
@@ -393,8 +473,12 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 이 설정에 접근할 권한이 없습니다.
               </div>
             )}
-            {page === "env" && (
+            {page === "viewer" && (
               <>
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                  뷰어 선택·모드·OHIF 등 <b>공통 설정</b>입니다. 표시·아이콘·사용 패턴은 좌측
+                  [뷰어 — TY Viewer]/[뷰어 — In Viewer] 탭에서 뷰어별로 설정하며, 기능은 두 뷰어 동일합니다.
+                </div>
                 <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <select id="sv-mode" value={modeSel} onChange={(e) => setModeSel(e.target.value)}>
@@ -486,6 +570,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </details>
                   )}
                 </Group>
+              </>
+            )}
+            {page === "env" && (
+              <>
                 <Group title="워크리스트 동작">
                   <Row label="자동 갱신">
                     <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
@@ -1044,7 +1132,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </Row>
               </Group>
             )}
-            {page === "viewer" && (
+            {page === "viewerIn" && (
+              <>
+              <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                <b>In Viewer 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.
+              </div>
               <Group title="In Viewer 표시 (계정별 저장)">
                 <Row label="멀티선택 색">
                   <input type="color" value={infSelColor}
@@ -1063,12 +1155,20 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     표시
                   </label>
                 </Row>
+                <Row label="판독 도크">
+                  <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
+                    <input type="checkbox" checked={infRptDock}
+                           onChange={(e) => setInfRptDock(e.target.checked)} />
+                    뷰어를 열 때 판독(Report) 도크를 기본으로 열기 — 도크 열림 상태를 계정에 기억
+                  </label>
+                </Row>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   단축키(뷰어): <b>T + 마우스 스크롤</b> = 글자 크기 조절 · <b>T + Del</b> = 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.
                 </div>
               </Group>
+              </>
             )}
-            {page === "viewer" && (
+            {page === "viewerIn" && (
               <Group title="Modality 기본 레이아웃 (In Viewer — 행잉과 별도)">
                 {["CT", "MR", "CR", "DX", "US", "XA", "*"].map((m) => (
                   <Row key={m} label={m === "*" ? "기타(전체)" : m}>
@@ -1092,7 +1192,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </div>
               </Group>
             )}
-            {page === "viewer" && (
+            {page === "viewerIn" && (
               <Group title="툴 팔레트 표시 (In Viewer)">
                 <Row label="열 수">
                   <select value={infToolCols} onChange={(e) => setInfToolCols(Number(e.target.value))}>
@@ -1121,7 +1221,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </div>
               </Group>
             )}
-            {page === "viewer" && (
+            {page === "viewerIn" && (
+              <>
               <Group title="툴바 사용자화 (In Viewer — 표시할 툴 선택)">
                 <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)",
                               borderRadius: 4, padding: 6 }}>
@@ -1140,6 +1241,24 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   체크 해제한 툴은 뷰어 팔레트에서 숨겨집니다. 흐린 항목은 개발 예정 툴입니다.
                 </div>
               </Group>
+              <Group title="사용 패턴 · ★Quick 행 (In Viewer)">
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                  <input type="checkbox" checked={infQuickRow}
+                         onChange={(e) => setInfQuickRow(e.target.checked)} />
+                  ★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)
+                </label>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                  <input type="checkbox" checked={infUsageRec}
+                         onChange={(e) => setInfUsageRec(e.target.checked)} />
+                  사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)
+                </label>
+                <UsageTop usage={infUsage} labelOf={(id) => IN_TOOL_LABEL[id] ?? id}
+                          onReset={() => {
+                            setInfUsage({}); setInfUsageReset(true);
+                            setSaved("In Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영");
+                          }} />
+              </Group>
+              </>
             )}
             {page === "viewer" && (
               <Group title="행잉 프로토콜 (F-18)">
@@ -1153,8 +1272,56 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 ))}
               </Group>
             )}
-            {page === "viewer" && (
+            {page === "viewerTy" && (
               <>
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                  <b>TY Viewer 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.
+                </div>
+                <Group title="툴 아이콘·팔레트 (TY Viewer)">
+                  <Row label="아이콘 크기">
+                    <input type="range" min={13} max={28} step={1} value={tyToolSize}
+                           onChange={(e) => setTyToolSize(Number(e.target.value))} />
+                    <input type="number" min={13} max={28} value={tyToolSize}
+                           style={{ width: 56, marginLeft: 6 }}
+                           onChange={(e) => setTyToolSize(Math.min(28, Math.max(13, Number(e.target.value) || 17)))} />
+                    <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
+                  </Row>
+                  <Row label="라벨 표시">
+                    <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
+                      <input type="checkbox" checked={tyToolLabels}
+                             onChange={(e) => setTyToolLabels(e.target.checked)} />
+                      아이콘 아래 이름 표시
+                    </label>
+                  </Row>
+                  <Row label="3D 아이콘 효과">
+                    <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
+                      <input type="checkbox" checked={tyIcon3d}
+                             onChange={(e) => setTyIcon3d(e.target.checked)} />
+                      입체(3D) 렌더 — 해제 시 플랫(평면) 아이콘
+                    </label>
+                  </Row>
+                  <Row label="오버레이 글자">
+                    <input type="range" min={6} max={24} step={0.5} value={tyOvlFont}
+                           onChange={(e) => setTyOvlFont(Number(e.target.value))} /> {tyOvlFont}px
+                  </Row>
+                </Group>
+                <Group title="사용 패턴 · ★Quick 행 (TY Viewer)">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={tyQuickRow}
+                           onChange={(e) => setTyQuickRow(e.target.checked)} />
+                    ★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={tyUsageRec}
+                           onChange={(e) => setTyUsageRec(e.target.checked)} />
+                    사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)
+                  </label>
+                  <UsageTop usage={tyUsage} labelOf={(id) => TY_TOOL_LABEL[id] ?? id}
+                            onReset={() => {
+                              setTyUsage({}); setTyUsageReset(true);
+                              setSaved("TY Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영");
+                            }} />
+                </Group>
                 <Group title="자체 2D 뷰어 레이아웃 (요청: 방향·크기 전환)">
                   <Row label="툴 팔레트 위치">
                     <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top" | "right")}>

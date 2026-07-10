@@ -5,11 +5,12 @@ import { useId, type ReactNode } from "react";
 
 const BONE_EDGE = "#8a7c58";  // 뼈 외곽선(입체감)
 
-export function AnatomyIcon({ id, size = 17 }: { id: string; size?: number }) {
+export function AnatomyIcon({ id, size = 17, flat = false }: { id: string; size?: number; flat?: boolean }) {
   // useId 원본(":r5:" 형태)은 콜론 포함 — url(#...) FuncIRI 참조 안전을 위해 sanitize (toolIcons.tsx 와 동일 규칙)
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const boneId = `an3d-bone-${uid}`, accId = `an3d-acc-${uid}`, shId = `an3d-sh-${uid}`;
-  const bone = `url(#${boneId})`, acc = `url(#${accId})`;
+  // 플랫(ty_icon_3d=false) — 그라디언트 대신 단색, 드롭섀도 없음 (형태는 동일)
+  const bone = flat ? "#d9cda8" : `url(#${boneId})`, acc = flat ? "#38bdf8" : `url(#${accId})`;
 
   let body: ReactNode = null;
   switch (id) {
@@ -98,7 +99,7 @@ export function AnatomyIcon({ id, size = 17 }: { id: string; size?: number }) {
           <feDropShadow dx="0.35" dy="0.75" stdDeviation="0.55" floodColor="#000" floodOpacity="0.5" />
         </filter>
       </defs>
-      <g filter={`url(#${shId})`}>{body}</g>
+      <g filter={flat ? undefined : `url(#${shId})`}>{body}</g>
     </svg>
   );
 }

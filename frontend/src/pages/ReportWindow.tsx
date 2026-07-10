@@ -333,7 +333,7 @@ export function ReportWindow() {
         <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
-            <div style={sideTabStyle(sideTab === "hist")} onClick={() => setSideTab("hist")}>판독 기록</div>
+            <div style={sideTabStyle(sideTab === "hist")} onClick={() => setSideTab("hist")}>History</div>
             <div style={sideTabStyle(sideTab === "sheet")} onClick={() => setSideTab("sheet")}>기록지</div>
           </div>
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
@@ -342,7 +342,7 @@ export function ReportWindow() {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
                               padding: "60px 18px", textAlign: "center" }}>
                   <div style={{ fontSize: 34, opacity: 0.5 }}>🕘</div>
-                  <b style={{ fontSize: 13.5 }}>이전 판독 기록이 없습니다</b>
+                  <b style={{ fontSize: 13.5 }}>No previous reports</b>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
                     이 환자의 이전 검사 기록이 없거나 판독이 완료되지 않았습니다.
                   </div>
@@ -446,12 +446,12 @@ export function ReportWindow() {
             <button title={`▶ ${navLeft === "past" ? "한 단계 최신" : "한 단계 과거"} 검사 (뷰어 ▶와 동일 — 정책에서 변경)`}
                     style={{ padding: "1px 10px" }}
                     disabled={navTargetIdx(1) < 0} onClick={() => void nav(1)}>▶</button>
-            <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>초기화</button>
+            <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>Reset</button>
             <button className="primary" title={`저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
-                    disabled={!report || finalized} onClick={() => void save()}>저장</button>
+                    disabled={!report || finalized} onClick={() => void save()}>Save</button>
             <button title={`승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
                     style={{ padding: "2px 12px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4 }}
-                    disabled={!report || finalized} onClick={() => void approve()}>승인</button>
+                    disabled={!report || finalized} onClick={() => void approve()}>Approve</button>
           </div>
           {!!rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
             <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 12px", fontWeight: 700 }}>
@@ -494,8 +494,8 @@ export function ReportWindow() {
         <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ display: "flex", alignItems: "stretch", borderBottom: "1px solid var(--border)" }}>
-            <div style={sideTabStyle(rightTab === "std")} onClick={() => setRightTab("std")}>단축키</div>
-            <div style={sideTabStyle(rightTab === "tpl")} onClick={() => setRightTab("tpl")}>템플릿</div>
+            <div style={sideTabStyle(rightTab === "std")} onClick={() => setRightTab("std")}>Shortcuts</div>
+            <div style={sideTabStyle(rightTab === "tpl")} onClick={() => setRightTab("tpl")}>Templates</div>
             <button title={`내 ${rightTab === "std" ? "단축키" : "템플릿"} 추가 (계정 로컬 저장 · 주기 서버 백업)`}
                     onClick={addLocalPhrase}
                     style={{ width: 34, border: "none", background: "var(--bg-elevated)",
@@ -562,8 +562,8 @@ export function ReportWindow() {
             )}
             {phraseList.length === 0 && (
               <div style={{ padding: 16, fontSize: 12, color: "var(--text-secondary)", textAlign: "center" }}>
-                등록된 {rightTab === "std" ? "단축키가" : "템플릿이"} 없습니다.
-                <br />위 ＋ 로 내 항목 추가(계정 저장) 또는 설정 &gt; 판독(Reading)에서 등록
+                No {rightTab === "std" ? "shortcuts" : "templates"} — register in Settings &gt; Reading
+                <br />or add your own with ＋ above
               </div>
             )}
           </div>

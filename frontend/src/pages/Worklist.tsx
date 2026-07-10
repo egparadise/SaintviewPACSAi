@@ -1532,7 +1532,7 @@ ${rows}
               {finalized && !(current.diff_metrics as { confirm2?: unknown })?.confirm2 && (
                 <MiniBtn title="2차 승인(Conf2) — 1차와 다른 판독의 권장" onClick={async () => {
                   await api.confirm2Report(current.id); onChanged();
-                }}>2차 승인</MiniBtn>
+                }}>2nd Approve</MiniBtn>
               )}
               {finalized && (
                 <MiniBtn onClick={async () => { setBusy(true); try { await api.sendSr(current.id); alert("DICOM SR 전송 완료"); } finally { setBusy(false); } }}>
@@ -1540,7 +1540,7 @@ ${rows}
                 </MiniBtn>
               )}
               <div style={{ flex: 1 }} />
-              <MiniBtn onClick={save} disabled={busy || finalized}>저장</MiniBtn>
+              <MiniBtn onClick={save} disabled={busy || finalized}>Save</MiniBtn>
               <button className="primary" style={{ padding: "2px 12px", fontSize: 12 }}
                       onClick={finalize} disabled={busy || finalized}>
                 {finalized ? "확정됨" : "확정 (서명)"}
@@ -1721,7 +1721,7 @@ function InfiReport({ detail }: { detail: StudyDetail | null }) {
   }, [detail]);
   if (!detail) {
     return <PanelBox title="Report"><div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>
-      검사를 선택하세요.</div></PanelBox>;
+      Select a study.</div></PanelBox>;
   }
   const age = (() => {
     const b = detail.birth_date?.replaceAll("-", "");
@@ -1758,7 +1758,7 @@ function InfiReport({ detail }: { detail: StudyDetail | null }) {
         <L k="Report Date" v={rep?.finalized_at ? rep.finalized_at.slice(0, 10) : ""} />
         <div style={{ borderTop: "1px solid var(--border)", margin: "8px 0", paddingTop: 8,
                       whiteSpace: "pre-wrap", fontFamily: "inherit", color: "var(--text-secondary)" }}>
-          {rep?.narrative_text || "판독 없음"}
+          {rep?.narrative_text || "No report"}
         </div>
       </div>
     </PanelBox>

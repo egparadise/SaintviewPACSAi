@@ -13,9 +13,10 @@ import { Splitter } from "../lib/Splitter";
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 // 3D — Cornerstone3D MPR/MIP 볼륨 뷰어 (전체 오버레이)
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
-import { api, type InstanceNode, type Report, type SeriesNode, type StudyDetail } from "../api";
+import { api, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { ReportDock } from "../components/ReportDock";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -265,9 +266,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // scout=활성 페인 현재 이미지 절단선, all_lines=활성 시리즈 전체 절단선
   const [xlink, setXlink] = useState<Record<string, boolean>>({ crosslink: true, auto_sync: true, scout: true });
   const [toast, setToast] = useState("");
-  // §3.1 툴바 상단(원본): Report 도크 + Prev/Next 워크리스트 내비게이션
+  // §3.1 툴바 상단(원본): Report 도크(ReportDock — TY 와 동일 기능) + Prev/Next 워크리스트 내비게이션
+  // 열림 상태는 viewer.prefs.infi_report_dock 로 계정 로밍
   const [reportDock, setReportDock] = useState(false);
-  const [report, setReport] = useState<Report | null>(null);
   // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [show3d, setShow3d] = useState(false);   // 정보바 3D 버튼 — 현재 검사 MPR/MIP
@@ -543,6 +544,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const fire = (id: string) => {
     const p = panes[active];
     if (!p) return;
+    // 사용 패턴 기록 — 구현된 팔레트 툴의 활성화(원샷 실행/mode 전환)만 카운트
+    if (PALETTE.some((t) => t.id === id && t.impl)) recordUsage(id);
     switch (id) {
       case "fit": updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })); break;
       case "invert": updMany(targetsOf(active), (q) => ({ invert: !q.invert })); break;
@@ -915,11 +918,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     if (window.opener && !window.opener.closed) window.opener.focus();
     else window.open("/", "_blank");
   };
-  // Report 버튼(§3.1) — 현재 검사 판독 도크
-  useEffect(() => {
-    if (!reportDock) return;
-    api.reports(curD.id).then((r) => setReport(r.items[0] ?? null)).catch(() => setReport(null));
-  }, [reportDock, curD.id]);
+  // Report 도크의 과거검사 비교(◀▶/Prior Studies 클릭) — 활성 페인에 첫 시리즈 표시
+  // + 좌측 과거 썸네일 목록에도 등록(수동 loadPrior 와 동일 누적)
+  const dockLoadPrior = (examId: number) => {
+    const re = (curD.related_exams ?? []).find((r) => r.id === examId);
+    api.seriesTree(examId).then((r) => {
+      if (re && !priorLoaded.has(examId)) {
+        setPriorLoaded((s) => new Set(s).add(examId));
+        setPriorSeries((ps) => [...ps, ...r.series.map((s) => ({ uid: re.study_uid, label: re.study_date, s }))]);
+      }
+      const s0 = r.series[0];
+      if (s0) upd(active, { series: s0, index: 0, studyUid: re?.study_uid ?? "" });
+      if (re) say(`과거검사 비교 — ${re.study_date} ${re.modality}`);
+    }).catch(() => say("과거검사 로드 실패"));
+  };
 
   const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
 
@@ -934,6 +946,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [toolCols, setToolCols] = useState(2);
   const [toolLabels, setToolLabels] = useState(true);
   const [toolSize, setToolSize] = useState(34);
+  // 사용 패턴(viewer.prefs 로밍): infi_usage=툴별 활성화 카운트(상위 50), infi_usage_rec=기록 on/off,
+  // infi_quick_row=★ Quick 행(사용 상위 6개 툴) 표시
+  const [usage, setUsage] = useState<Record<string, number>>({});
+  const [usageRec, setUsageRec] = useState(true);
+  const [quickRow, setQuickRow] = useState(true);
+  const usageRef = useRef(usage);
+  const usageTimer = useRef<number | null>(null);
   const tHeld = useRef(false);
   const persistTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -950,7 +969,39 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (tv.infi_tool_labels !== undefined) setToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setToolSize(tv.infi_tool_size);
       if (tv.infi_cine_sec) setCineDefault(tv.infi_cine_sec);
+      const uv = r.value as { infi_report_dock?: boolean; infi_usage?: Record<string, number>;
+                              infi_usage_rec?: boolean; infi_quick_row?: boolean };
+      if (uv.infi_report_dock) setReportDock(true);
+      if (uv.infi_usage) { usageRef.current = uv.infi_usage; setUsage(uv.infi_usage); }
+      if (uv.infi_usage_rec !== undefined) setUsageRec(uv.infi_usage_rec);
+      if (uv.infi_quick_row !== undefined) setQuickRow(uv.infi_quick_row);
     }).catch(() => {});
+  }, []);
+  // 툴 활성화 카운트 +1 — 상위 50개만 유지, 2초 디바운스로 viewer.prefs.infi_usage 저장
+  const recordUsage = (id: string) => {
+    if (!usageRec) return;
+    let next = { ...usageRef.current, [id]: (usageRef.current[id] ?? 0) + 1 };
+    const keys = Object.keys(next);
+    if (keys.length > 50) {
+      next = Object.fromEntries(
+        keys.sort((a, b) => next[b] - next[a]).slice(0, 50).map((k) => [k, next[k]]));
+    }
+    usageRef.current = next;
+    setUsage(next);
+    if (usageTimer.current) window.clearTimeout(usageTimer.current);
+    usageTimer.current = window.setTimeout(() => {
+      usageTimer.current = null;
+      api.getSetting("viewer.prefs").then((r) =>
+        api.putSetting("viewer.prefs", { ...r.value, infi_usage: usageRef.current }, "user")).catch(() => {});
+    }, 2000);
+  };
+  /* 언마운트 시 디바운스 대기 중인 사용 기록 즉시 저장 — 뷰어 닫힘 직전 카운트 유실 방지 */
+  useEffect(() => () => {
+    if (usageTimer.current) {
+      window.clearTimeout(usageTimer.current);
+      api.getSetting("viewer.prefs").then((r) =>
+        api.putSetting("viewer.prefs", { ...r.value, infi_usage: usageRef.current }, "user")).catch(() => {});
+    }
   }, []);
   const persistPrefs = (patch: Record<string, unknown>) => {
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
@@ -963,7 +1014,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 기능 영역(툴바/썸네일/W-L/Report) 폭 — 경계 스플리터로 조절, localStorage 보존
   const UI_KEY = "sv_infi_ui";
   const [ui, setUi] = useState<{ toolW: number; thumbW: number; wlW: number; dockW: number }>(() => {
-    const def = { toolW: 158, thumbW: 88, wlW: 108, dockW: 280 };   // 툴 아이콘+이름 행 기준
+    const def = { toolW: 158, thumbW: 88, wlW: 108, dockW: 320 };   // 툴 아이콘+이름 행 기준, 도크 최소 320px
     try { return { ...def, ...JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") }; } catch { return def; }
   });
   const uiRef = useRef(ui);
@@ -1470,7 +1521,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           <div style={{ display: "flex", gap: 2 }}>
             <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>🗂</button>
-            <button title="Report 도크 — 판독 요약 패널 열기/닫기" onClick={() => setReportDock((v) => !v)}
+            <button title="Report 도크 — 판독 작성 패널 열기/닫기 (열림 상태는 계정에 저장)"
+                    onClick={() => {
+                      const nv = !reportDock;
+                      setReportDock(nv);
+                      persistPrefs({ infi_report_dock: nv });
+                    }}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0", background: reportDock ? "var(--accent)" : undefined }}>📄</button>
             <button title="Report 창 — 판독 작성 창(별도 웹창) 열기"
                     onClick={() => {
@@ -1511,59 +1567,88 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                     style={{ flex: 1, fontSize: 13, padding: "3px 0" }}>▶</button>
           </div>
           <div style={{ borderTop: "1px solid var(--border)" }} />
-          {/* 툴 목록 — 기능별 구획 + 설정 반영(열 수·이름 표시·아이콘 크기) */}
+          {/* 툴 목록 — ★ Quick(사용 상위 6) + 기능별 구획, 설정 반영(열 수·이름 표시·아이콘 크기) */}
           <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
-            {IN_PALETTE_GROUPS.map((grp) => {
-              const items = PALETTE.filter((t) => (t.group ?? "기타") === grp && tbShow[t.id] !== false);
-              if (!items.length) return null;
+            {(() => {
+              const toolBtn = (t: (typeof PALETTE)[number]) => {
+                const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && !!panes[active]?.playing)
+                  || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
+                  || (t.id === "dictation" && recording);
+                const name = t.label.split("—")[0].trim();
+                return (
+                  <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
+                          style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                                   gap: 2, padding: "3px 1px",
+                                   opacity: t.impl ? 1 : 0.32,
+                                   background: activeBtn ? "rgba(56,189,248,0.14)" : "transparent",
+                                   color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
+                                   border: "none", borderRadius: 7,
+                                   cursor: t.impl ? "pointer" : "default" }}>
+                    {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
+                    <span style={{
+                      width: toolSize, height: toolSize, flexShrink: 0,
+                      display: "grid", placeItems: "center",
+                      fontSize: Math.round(toolSize * 0.53), borderRadius: Math.round(toolSize * 0.26),
+                      color: activeBtn ? "#fff" : "#cbd5e1",
+                      background: activeBtn
+                        ? "linear-gradient(145deg, #1e40af, #38bdf8)"
+                        : "linear-gradient(145deg, #3b4759, #171d29)",
+                      boxShadow: activeBtn
+                        ? "inset 2px 2px 5px rgba(0,0,0,0.55), inset -1px -1px 2px rgba(255,255,255,0.15)"
+                        : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
+                      textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
+                    }}>{ANATOMY_ICONS[t.id] ?? t.icon}</span>
+                    {toolLabels && (
+                      <span style={{ fontSize: 8.5, lineHeight: 1.1, textAlign: "center", width: "100%",
+                                     overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
+                                     WebkitBoxOrient: "vertical" }}>{name}</span>
+                    )}
+                  </button>
+                );
+              };
+              // ★ Quick — 사용 상위 6개(3회 이상 사용만). infi_quick_row=false 면 숨김
+              const quickTools = quickRow
+                ? Object.entries(usage)
+                    .filter(([, n]) => n >= 3)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([id]) => PALETTE.find((t) => t.id === id && t.impl && tbShow[t.id] !== false))
+                    .filter((t): t is (typeof PALETTE)[number] => !!t)
+                    .slice(0, 6)
+                : [];
               return (
-                <div key={grp}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, margin: "5px 1px 3px" }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b",
-                                   whiteSpace: "nowrap" }}>{grp}</span>
-                    <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${toolCols}, 1fr)`, gap: 3 }}>
-                    {items.map((t) => {
-                      const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && !!panes[active]?.playing)
-                        || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
-                        || (t.id === "dictation" && recording);
-                      const name = t.label.split("—")[0].trim();
-                      return (
-                        <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}
-                                style={{ display: "flex", flexDirection: "column", alignItems: "center",
-                                         gap: 2, padding: "3px 1px",
-                                         opacity: t.impl ? 1 : 0.32,
-                                         background: activeBtn ? "rgba(56,189,248,0.14)" : "transparent",
-                                         color: activeBtn ? "var(--text-primary)" : "var(--text-secondary)",
-                                         border: "none", borderRadius: 7,
-                                         cursor: t.impl ? "pointer" : "default" }}>
-                          {/* 3D(입체) 아이콘 칩 — 볼록(기본) / 눌림(활성) */}
-                          <span style={{
-                            width: toolSize, height: toolSize, flexShrink: 0,
-                            display: "grid", placeItems: "center",
-                            fontSize: Math.round(toolSize * 0.53), borderRadius: Math.round(toolSize * 0.26),
-                            color: activeBtn ? "#fff" : "#cbd5e1",
-                            background: activeBtn
-                              ? "linear-gradient(145deg, #1e40af, #38bdf8)"
-                              : "linear-gradient(145deg, #3b4759, #171d29)",
-                            boxShadow: activeBtn
-                              ? "inset 2px 2px 5px rgba(0,0,0,0.55), inset -1px -1px 2px rgba(255,255,255,0.15)"
-                              : "2.5px 2.5px 5px rgba(0,0,0,0.55), -1.5px -1.5px 3px rgba(255,255,255,0.07), inset 0 1px 0 rgba(255,255,255,0.14)",
-                            textShadow: "0 1.5px 2px rgba(0,0,0,0.85)",
-                          }}>{ANATOMY_ICONS[t.id] ?? t.icon}</span>
-                          {toolLabels && (
-                            <span style={{ fontSize: 8.5, lineHeight: 1.1, textAlign: "center", width: "100%",
-                                           overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2,
-                                           WebkitBoxOrient: "vertical" }}>{name}</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <>
+                  {quickTools.length > 0 && (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, margin: "5px 1px 3px" }}>
+                        <span title="자주 쓰는 툴 — 사용 횟수 상위 6개 (설정>뷰어에서 숨김 가능)"
+                              style={{ fontSize: 9, fontWeight: 700, color: "#facc15",
+                                       whiteSpace: "nowrap" }}>★ Quick</span>
+                        <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: `repeat(${toolCols}, 1fr)`, gap: 3 }}>
+                        {quickTools.map(toolBtn)}
+                      </div>
+                    </div>
+                  )}
+                  {IN_PALETTE_GROUPS.map((grp) => {
+                    const items = PALETTE.filter((t) => (t.group ?? "기타") === grp && tbShow[t.id] !== false);
+                    if (!items.length) return null;
+                    return (
+                      <div key={grp}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, margin: "5px 1px 3px" }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b",
+                                         whiteSpace: "nowrap" }}>{grp}</span>
+                          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${toolCols}, 1fr)`, gap: 3 }}>
+                          {items.map(toolBtn)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
               );
-            })}
+            })()}
           </div>
           <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
             <button title="W/L Preset 패널 토글" onClick={() => setWlPanel((v) => !v)}
@@ -1643,31 +1728,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         )}
 
-        {/* ── Report 도크 (§3.1 Report 버튼 — 현재 검사 판독) ── */}
+        {/* ── Report 도크 (§3.1 Report 버튼) — TY 와 동일 ReportDock 컴포넌트,
+              활성 Exam 탭(curD) 전환 시 도크 검사도 동기. 폭 최소 320px, 스플리터로 조절 ── */}
         {reportDock && (
           <Splitter dir="v" onEnd={saveUi}
-                    onDrag={(dx) => setUi((u) => ({ ...u, dockW: clampW(u.dockW - dx, 180, 520) }))} />
+                    onDrag={(dx) => setUi((u) => ({ ...u, dockW: clampW(u.dockW - dx, 320, 520) }))} />
         )}
         {reportDock && (
-          <div style={{ width: ui.dockW, background: "var(--bg-panel)", borderLeft: "1px solid var(--border)",
-                        padding: 10, overflowY: "auto", fontSize: 12, flexShrink: 0 }}>
-            <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>
-              Report — {curD.modality} {curD.study_date}
-            </div>
-            {report ? (
-              <>
-                <div style={{ marginBottom: 6, color: "var(--text-secondary)" }}>
-                  상태: {report.status}
-                  {report.created_by === "ai" && <span className="badge ai" style={{ marginLeft: 6 }}>AI 초안</span>}
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, lineHeight: 1.5 }}>
-                  {report.narrative_text}
-                </pre>
-              </>
-            ) : (
-              <div style={{ color: "var(--text-secondary)" }}>이 검사의 판독이 없습니다.</div>
-            )}
-          </div>
+          <ReportDock detail={curD} width={Math.max(320, ui.dockW)}
+                      onLoadPrior={dockLoadPrior} onStatus={say} />
         )}
       </div>
 
