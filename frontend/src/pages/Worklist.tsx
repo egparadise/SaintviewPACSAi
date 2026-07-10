@@ -627,7 +627,15 @@ function ServerButtons() {
   const [net, setNet] = useState<ServerNetwork>({});
   const [files, setFiles] = useState<{ name: string; is_dir: boolean; size: number; mtime: number }[]>([]);
   const [shareDir, setShareDir] = useState("");
+  const [sub, setSub] = useState("");   // 공유 루트 기준 현재 상대경로("" = 루트) — 하위 폴더 탐색
   const [err, setErr] = useState("");
+
+  // 공유 폴더 목록 조회 — s=상대 하위경로(빈값=루트). 이미지 데이터 폴더 구조 탐색 지원
+  const openLocal = (s: string) => {
+    api.shareList(s || undefined)
+      .then((r) => { setFiles(r.items); setShareDir(r.dir); setSub(r.sub); setErr(""); })
+      .catch((e) => { setFiles([]); setErr(e instanceof Error ? e.message : "조회 실패"); });
+  };
 
   useEffect(() => {
     // 팝업을 열 때마다 최신 설정을 다시 읽는다 — 설정>서버 네트워크 저장 직후에도 반영
@@ -640,10 +648,7 @@ function ServerButtons() {
     setErr("");
     if (open === m) { setOpen(null); return; }
     setOpen(m);
-    if (m === "local") {
-      api.shareList().then((r) => { setFiles(r.items); setShareDir(r.dir); })
-        .catch((e) => { setFiles([]); setShareDir(""); setErr(e instanceof Error ? e.message : "조회 실패"); });
-    }
+    if (m === "local") { setShareDir(""); setSub(""); openLocal(""); }
   };
   const fmtSize = (n: number) => n > 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n > 1024 ? `${(n / 1024).toFixed(0)}KB` : `${n}B`;
 
@@ -677,24 +682,48 @@ function ServerButtons() {
               ) : (
                 <>
                   <div style={{ display: "flex", gap: 5, alignItems: "center", margin: "5px 0", color: "var(--text-secondary)" }}>
-                    <code style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                    <code style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
+                          title={sub ? `${shareDir}\\${sub.replace(/\//g, "\\")}` : shareDir}>
                       {shareDir}
                     </code>
-                    <MiniBtn onClick={() => navigator.clipboard?.writeText(shareDir)}>경로 복사</MiniBtn>
+                    <MiniBtn onClick={() => navigator.clipboard?.writeText(sub ? `${shareDir}\\${sub.replace(/\//g, "\\")}` : shareDir)}>경로 복사</MiniBtn>
+                  </div>
+                  {/* 브레드크럼 — 루트/하위 폴더 경로 표시, 각 조각 클릭=해당 폴더로 이동, ⬆=상위 */}
+                  <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "wrap",
+                                margin: "0 0 5px", fontSize: 11 }}>
+                    <MiniBtn onClick={() => openLocal(sub.split("/").slice(0, -1).join("/"))}
+                             disabled={!sub} title="상위 폴더로">⬆ 상위</MiniBtn>
+                    <span style={{ cursor: sub ? "pointer" : undefined, fontWeight: sub ? 400 : 700 }}
+                          onClick={() => sub && openLocal("")}>루트</span>
+                    {sub && sub.split("/").map((seg, i, arr) => (
+                      <span key={i} style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                        <span style={{ color: "var(--text-secondary)" }}>›</span>
+                        <span style={{ cursor: i < arr.length - 1 ? "pointer" : undefined,
+                                       fontWeight: i === arr.length - 1 ? 700 : 400 }}
+                              onClick={() => i < arr.length - 1 && openLocal(arr.slice(0, i + 1).join("/"))}>
+                          {seg}
+                        </span>
+                      </span>
+                    ))}
                   </div>
                   <table className="grid-table">
                     <thead><tr><th>이름</th><th style={{ width: 64 }}>크기</th></tr></thead>
                     <tbody>
-                      {files.slice(0, 20).map((f) => (
-                        <tr key={f.name} style={{ cursor: f.is_dir ? undefined : "pointer" }}
-                            onClick={() => {
-                              if (f.is_dir) return;
-                              window.open(`${(import.meta.env.VITE_API_BASE ?? "http://localhost:8000")}/api/share/file?name=${encodeURIComponent(f.name)}`, "_blank");
-                            }}>
-                          <td>{f.is_dir ? "📁" : "📄"} {f.name}</td>
-                          <td>{f.is_dir ? "-" : fmtSize(f.size)}</td>
-                        </tr>
-                      ))}
+                      {files.slice(0, 20).map((f) => {
+                        const rel = sub ? `${sub}/${f.name}` : f.name;   // 루트 기준 상대경로
+                        const isImg = /\.(jpe?g|png|bmp|gif)$/i.test(f.name);   // 이미지 미리보기 아이콘
+                        return (
+                          <tr key={f.name} style={{ cursor: "pointer" }}
+                              title={f.is_dir ? "클릭 = 폴더 진입" : "클릭 = 다운로드"}
+                              onClick={() => {
+                                if (f.is_dir) { openLocal(rel); return; }
+                                window.open(`${(import.meta.env.VITE_API_BASE ?? "http://localhost:8000")}/api/share/file?name=${encodeURIComponent(rel)}`, "_blank");
+                              }}>
+                            <td>{f.is_dir ? "📁" : isImg ? "🖼" : "📄"} {f.name}</td>
+                            <td>{f.is_dir ? "-" : fmtSize(f.size)}</td>
+                          </tr>
+                        );
+                      })}
                       {files.length === 0 && <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>비어 있음</td></tr>}
                     </tbody>
                   </table>

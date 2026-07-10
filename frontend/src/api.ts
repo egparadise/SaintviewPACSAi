@@ -319,8 +319,18 @@ export const api = {
     req<{ ok: boolean }>("/api/auth/profile", {
       method: "PUT", body: JSON.stringify({ display_name, license_no }),
     }),
-  shareList: () =>
-    req<{ dir: string; items: { name: string; is_dir: boolean; size: number; mtime: number }[] }>("/api/share"),
+  /** 공유 폴더 목록 — sub=상대 하위경로(생략=루트). 폴더 클릭 진입 지원 */
+  shareList: (sub?: string) =>
+    req<{ dir: string; sub: string; items: { name: string; is_dir: boolean; size: number; mtime: number }[] }>(
+      `/api/share${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`),
+  /** 현재 공유 디렉토리 설정 조회 — 미설정이어도 404 아님(설정 화면 초기 표시용) */
+  shareConfig: () =>
+    req<{ dir: string; exists: boolean }>("/api/share/config"),
+  /** 서버측 폴더 탐색(관리자 전용) — path 빈값=드라이브 목록+현재 공유 디렉토리 */
+  shareFs: (path?: string) =>
+    req<{ path: string; parent: string | null; dirs: { name: string; path: string }[];
+          exists: boolean; share_dir?: string }>(
+      `/api/share/fs?path=${encodeURIComponent(path ?? "")}`),
   netPing: (ip: string, port?: number) =>
     req<{ ok: boolean; icmp: boolean; icmp_ms: number; tcp: boolean | null }>("/api/admin/net-test/ping", {
       method: "POST", body: JSON.stringify({ ip, port }),

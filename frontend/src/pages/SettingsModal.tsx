@@ -230,6 +230,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [snDir, setSnDir] = useState("");
   const [snWeb, setSnWeb] = useState({ ip: "", port: "", name: "", ae_title: "" });
   const [snMsg, setSnMsg] = useState("");
+  // 공유 디렉토리 존재 여부 뱃지(초록 '존재함'/주황 '경로 없음') + 폴더 찾기 모달
+  const [snDirExists, setSnDirExists] = useState<boolean | null>(null);
+  const [fsPickerOpen, setFsPickerOpen] = useState(false);
   // 상용구 관리 (DB 테이블)
   const [phrases, setPhrases] = useState<PhraseRow[]>([]);
   const [phraseModal, setPhraseModal] = useState<PhraseRow | "new" | null>(null);
@@ -356,7 +359,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         ip: v.web?.ip ?? "", port: String(v.web?.port ?? ""),
         name: v.web?.name ?? "", ae_title: v.web?.ae_title ?? "",
       });
-    }).catch(() => {});
+      // 설정을 열 때 '지금 현재 공유된 폴더'가 처음에 보이게 — 값이 비면 /api/share/config 로 보충
+      if (!(v.local_share_dir ?? "").trim()) {
+        api.shareConfig().then((c) => { if (c.dir) setSnDir(c.dir); }).catch(() => {});
+      }
+    }).catch(() => {
+      api.shareConfig().then((c) => { if (c.dir) setSnDir(c.dir); }).catch(() => {});
+    });
     if (isAdmin) {
       api.getSetting("pdf.template").then((r) => {
         const v = r.value as Record<string, string>;
@@ -378,6 +387,17 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     api.orthancStatus().then(setOrthanc).catch(() => setOrthanc({ alive: false, url: "?" }));
   };
   useEffect(() => { if (page === "network") testOrthanc(); }, [page]);
+
+  // 공유 디렉토리 존재 여부 뱃지 — 입력 디바운스(400ms) 후 서버측 확인(/api/share/fs, 관리자 전용)
+  useEffect(() => {
+    if (!isAdmin || page !== "servernet") return;
+    const dir = snDir.trim();
+    if (!dir) { setSnDirExists(null); return; }
+    const t = setTimeout(() => {
+      api.shareFs(dir).then((r) => setSnDirExists(r.exists)).catch(() => setSnDirExists(null));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [snDir, isAdmin, page]);
 
   const save = async () => {
     // 병합 저장 — 드래그 panel_order 등 다른 키를 덮어쓰지 않도록 현재 서버 값과 합친다
@@ -727,11 +747,34 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Row label="공유 디렉토리">
                     <input value={snDir} onChange={(e) => setSnDir(e.target.value)} disabled={!isAdmin}
                            placeholder="C:\PACS\share" style={{ width: 320 }} />
+                    {isAdmin && (
+                      <button onClick={() => setFsPickerOpen(true)}
+                              title="서버 PC의 폴더를 직접 탐색해 선택합니다 (드라이브→하위 폴더)"
+                              style={{ padding: "2px 10px", fontSize: 12, display: "flex",
+                                       alignItems: "center", gap: 5 }}>
+                        <FolderIcon size={13} /> 폴더 찾기
+                      </button>
+                    )}
+                    {snDirExists !== null && (
+                      <span style={{
+                        fontSize: 10.5, fontWeight: 700, padding: "1px 8px", borderRadius: 9,
+                        color: "#fff", flexShrink: 0,
+                        background: snDirExists ? "#16a34a" : "#d97706",
+                      }}>
+                        {snDirExists ? "존재함" : "경로 없음"}
+                      </span>
+                    )}
                   </Row>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     워크리스트 우측 [Local Server] 버튼에서 이 폴더의 파일 목록·다운로드가 제공됩니다 (서버 PC 기준 경로).
                   </div>
                 </Group>
+                {fsPickerOpen && (
+                  <FolderPickerModal
+                    initial={snDir.trim()}
+                    onPick={(p) => { setSnDir(p); setFsPickerOpen(false); }}
+                    onClose={() => setFsPickerOpen(false)} />
+                )}
                 <Group title="웹 서버">
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <Row label="IP 주소">
@@ -2100,5 +2143,82 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span style={{ width: 110, color: "var(--text-secondary)" }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+/** 폴더 선택 모달 — 서버 PC 폴더 탐색(/api/share/fs, 관리자 전용).
+ *  폴더 클릭=진입, ⬆=상위(드라이브 루트면 드라이브 목록), [이 폴더 선택]=입력에 반영(저장은 기존 OK/Refresh). */
+function FolderPickerModal({ initial, onPick, onClose }: {
+  initial: string; onPick: (path: string) => void; onClose: () => void;
+}) {
+  const [path, setPath] = useState("");                 // 현재 경로("" = 드라이브 목록)
+  const [parent, setParent] = useState<string | null>(null);
+  const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const nav = (p: string) => {
+    setLoading(true); setErr("");
+    api.shareFs(p).then((r) => {
+      // 주의: nav("")가 동기적으로 setErr("")를 실행하므로, 에러 메시지는 nav("") 이후에 설정해야 남는다
+      if (p && !r.exists) { nav(""); setErr(`경로 없음: ${p} — 드라이브 목록을 표시합니다`); return; }
+      setPath(r.path); setParent(r.parent); setDirs(r.dirs); setLoading(false);
+    }).catch((e) => { setErr(e instanceof Error ? e.message : "폴더 탐색 실패"); setLoading(false); });
+  };
+  useEffect(() => {
+    // 초기 경로: 현재 입력값 → 없으면 현재 설정된 공유 디렉토리 → 없으면 드라이브 목록
+    if (initial) { nav(initial); return; }
+    api.shareConfig().then((c) => nav(c.exists ? c.dir : "")).catch(() => nav(""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+                  display: "grid", placeItems: "center", zIndex: 400 }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: "min(480px, 92vw)", height: "min(440px, 80vh)", display: "flex",
+                    flexDirection: "column", padding: 12, gap: 8 }}>
+        <b style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+          <FolderIcon size={15} /> 서버 폴더 선택
+        </b>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button onClick={() => nav(parent ?? "")} disabled={!path}
+                  title={parent ? "상위 폴더로" : "드라이브 목록으로"}
+                  style={{ padding: "2px 8px", fontSize: 12 }}>⬆ 상위</button>
+          <code title={path}
+                style={{ flex: 1, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis",
+                         whiteSpace: "nowrap" }}>
+            {path || "(드라이브를 선택하세요)"}
+          </code>
+        </div>
+        {err && <div style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{err}</div>}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
+                      border: "1px solid var(--border)", borderRadius: 4 }}>
+          {loading ? (
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>불러오는 중…</div>
+          ) : dirs.length === 0 ? (
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>하위 폴더 없음</div>
+          ) : dirs.map((d) => (
+            <div key={d.path} onClick={() => nav(d.path)} className="sv-fav-row"
+                 title={d.path}
+                 style={{ padding: "4px 10px", fontSize: 12.5, cursor: "pointer",
+                          display: "flex", alignItems: "center", gap: 6 }}>
+              <FolderIcon size={14} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {d.name}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
+            선택 후 저장(OK/Refresh)해야 반영됩니다
+          </span>
+          <button onClick={onClose} style={{ fontSize: 12 }}>취소</button>
+          <button className="primary" disabled={!path} onClick={() => onPick(path)}
+                  title="현재 표시된 경로를 공유 디렉토리 입력에 반영" style={{ fontSize: 12 }}>
+            이 폴더 선택
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
