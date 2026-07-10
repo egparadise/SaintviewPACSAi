@@ -395,6 +395,29 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     return !o;
   });
   const [priorTrees, setPriorTrees] = useState<Record<number, { uid: string; series: SeriesNode[] }>>({});
+
+  /* 검사별 환자·검사 메타(uid 키) — 페인 오버레이가 '그 페인의 검사' 환자 정보를 표기하도록 (타 환자 오표기 방지) */
+  type StudyMetaLite = { patient_name: string; sex: string; patient_key: string; modality: string; study_date: string; study_desc: string };
+  const [studyMeta, setStudyMeta] = useState<Record<string, StudyMetaLite>>({});
+  const metaReqRef = useRef<Set<string>>(new Set());
+  const metaOf = (d: StudyMetaLite): StudyMetaLite => ({
+    patient_name: d.patient_name, sex: d.sex, patient_key: d.patient_key,
+    modality: d.modality, study_date: d.study_date, study_desc: d.study_desc,
+  });
+  const ensureMeta = (examId: number, uid: string) => {
+    if (metaReqRef.current.has(uid)) return;
+    metaReqRef.current.add(uid);
+    api.study(examId).then((d) => setStudyMeta((m) => ({ ...m, [uid]: metaOf(d) })))
+      .catch(() => metaReqRef.current.delete(uid));
+  };
+  useEffect(() => {
+    setStudyMeta((m) => {
+      const n = { ...m, [detail.study_uid]: metaOf(detail) };
+      if (addDetail) n[addDetail.study_uid] = metaOf(addDetail);
+      if (stackDetail) n[stackDetail.study_uid] = metaOf(stackDetail);
+      return n;
+    });
+  }, [detail, addDetail, stackDetail]);
   // 오픈 검사 탭 — 여러 검사가 열리면 좌→우로 탭이 쌓인다(브라우저 창 메타포, UBPACS Opened Study List)
   const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
   useEffect(() => { if (openTabs.length) savePersistedTabs(openTabs); }, [openTabs]);  // ✕/전체닫기 전까지 유지
@@ -658,7 +681,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       tree = { uid: r.study_uid, series: r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality)) };
       setPriorTrees((p) => ({ ...p, [examId]: tree }));
     }
+    ensureMeta(examId, tree.uid);  // 오버레이용 환자 메타 확보(1회)
     return tree;
+  };
+
+  /* 시리즈 → 소속 검사 uid (썸네일/시리즈 메뉴 클릭 시 검사 오귀속 방지) */
+  const uidOfSeries = (su: string): string => {
+    for (const t of Object.values(priorTrees)) if (t.series.some((x) => x.series_uid === su)) return t.uid;
+    return detail.study_uid;
   };
 
   /* 오픈 탭 — 추가 검사가 열릴 때마다 좌→우로 탭이 쌓인다 */
@@ -692,7 +722,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     try {
       const tree = await getTree(id);
       const s = tree.series[0];
-      if (!s) return;
+      if (!s) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
       patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
     } catch { setStatus("검사 전환 실패"); }
   };
@@ -1593,22 +1623,26 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             filter: p.invert ? "invert(1)" : undefined,
           }} />
         )}
-        {overlayOn && p.series && (
+        {overlayOn && p.series && (() => {
+          const meta = studyMeta[p.studyUid] ?? detail;  // 페인의 검사 기준 — 다른 환자 영상에 주검사 환자명 오표기 방지
+          const priorMark = isPrior && meta.patient_key === detail.patient_key;  // 같은 환자의 과거검사만 [비교/과거]
+          return (
           <>
             <div style={ov("tl", tyOvFont)}>
-              {detail.patient_name} ({detail.sex})<br />
-              {isPrior ? "[비교/과거]" : detail.study_desc}<br />{detail.study_date}
+              {meta.patient_name} ({meta.sex})<br />
+              {priorMark ? "[비교/과거] " : ""}{meta.study_desc}<br />{meta.study_date}
             </div>
             <div style={ov("tr", tyOvFont)}>
               S{p.series.series_number} {p.series.series_desc || p.series.modality}<br />
               Img: {p.index + 1}{tileCount > 1 && `~${Math.min(p.index + tileCount, p.series.instances.length)}`}/{p.series.instances.length}
             </div>
-            <div style={ov("bl", tyOvFont)}>{detail.modality} · {detail.patient_key}</div>
+            <div style={ov("bl", tyOvFont)}>{meta.modality} · {meta.patient_key}</div>
             <div style={ov("br", tyOvFont)}>
               Z: {(p.zoom * 100).toFixed(0)}%{p.wl && <><br />W/L: {p.wl}</>}{p.fx && <><br />{p.fx}</>}
             </div>
           </>
-        )}
+          );
+        })()}
         {/* TY-3(5): 페인별 독립 시네 — 호버(또는 재생 중) 시 ▶/⏸+간격(초) 미니 컨트롤 (In 이식) */}
         {tbOn("pcine") && p.series && p.series.instances.length > 1 && (hoverPane === pid || p.playing) && (
           <div onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
@@ -2011,10 +2045,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     </div>
   );
 
-  /* 썸네일(방향·크기·모드 — 요청 2): series 모드=시리즈 카드+선택 전개 / all 모드=전체 개별 나열 */
+  /* 썸네일(방향·크기·모드 — 요청 2): series 모드=시리즈 카드+선택 전개 / all 모드=전체 개별 나열
+     — 활성 페인의 '검사' 기준 목록: Exam 탭 전환 시 이전 환자 시리즈가 남는 버그 수정.
+       Stack View 로 병합([중첩])된 검사는 병합 목록을 유지한다. */
+  const activeUid = panes[activePane].studyUid || detail.study_uid;
+  const thumbSeries = useMemo(() => {
+    if (activeUid === detail.study_uid) return series;
+    const tree = Object.values(priorTrees).find((t) => t.uid === activeUid);
+    if (!tree || !tree.series.length) return series;
+    const merged = tree.series.some((ts) => series.some((s) => s.series_uid === ts.series_uid));
+    return merged ? series : tree.series;
+  }, [activeUid, series, priorTrees, detail.study_uid]);
   const allInstances = useMemo(
-    () => series.flatMap((s) => s.instances.map((i, idx) => ({ s, i, idx }))),
-    [series],
+    () => thumbSeries.flatMap((s) => s.instances.map((i, idx) => ({ s, i, idx }))),
+    [thumbSeries],
   );
   const thumbs = thumbOpen && (
     <div style={{
@@ -2024,10 +2068,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: ts + 34, ...(thumbRight ? { borderLeft: "1px solid var(--border)" }
                                            : { borderRight: "1px solid var(--border)" }) }),
     }}>
-      {prefs.thumbMode === "series" ? series.map((s) => (
+      {prefs.thumbMode === "series" ? thumbSeries.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
           <div onClick={() => setSelSeries(selSeries === s.series_uid ? null : s.series_uid)}
-               onDoubleClick={() => patch(activePane, { ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) })}
+               onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
                title={`${s.series_desc || s.modality} — 더블클릭: 활성 페인 로드`}
                style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)" : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
@@ -2044,7 +2088,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             <div style={{ display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 2, padding: 2 }}>
               {s.instances.slice(0, 60).map((inst, idx) => (
                 <img key={inst.sop_uid} src={inst.preview_url} alt="" title={`Img ${inst.instance_number}`}
-                     onClick={() => patch(activePane, { studyUid: detail.study_uid, series: s, index: idx })}
+                     onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                      style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", flexShrink: 0,
                               border: panes[activePane].series?.series_uid === s.series_uid && panes[activePane].index === idx
                                 ? "2px solid var(--anno-keyimage)" : "1px solid var(--border)" }} />
@@ -2054,7 +2098,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         </div>
       )) : allInstances.slice(0, 200).map(({ s, i, idx }) => (
         <img key={i.sop_uid} src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}`}
-             onClick={() => patch(activePane, { studyUid: detail.study_uid, series: s, index: idx })}
+             onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
              style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", flexShrink: 0,
                       border: "1px solid var(--border)" }} />
       ))}
@@ -2199,11 +2243,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                      ],
                    }))} />
         <TitleMenu id="series" icon="≣" title="Open Series — 시리즈 전환 (●=현재 시리즈)" menu={menu} setMenu={setMenu}
-                   items={series.map((s) => ({
+                   items={thumbSeries.map((s) => ({
                      label: `S${s.series_number} ${s.series_desc || s.modality} (${s.instances.length}장)`,
                      active: panes[activePane].series?.series_uid === s.series_uid,
                      onClick: () => patch(activePane, {
-                       ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2),
+                       ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2),
                      }),
                    }))} />
         <TitleMenu id="hp" icon={`HP:${hpName}`} title="Hanging Protocol — 설정>행잉(HP)에서 규칙 관리" menu={menu} setMenu={setMenu}
