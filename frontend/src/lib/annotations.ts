@@ -45,10 +45,14 @@ export function contentRect(w: number, h: number, imgAspect: number) {
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
-/** 계측값 계산 — PixelSpacing 있으면 mm/mm², 없으면 px/px² 폴백 */
+/** 해부학 측정 툴 4종 — 라벨은 text(한국어 병기)를 우선 표시 */
+export const ANATOMY_KINDS = new Set(["cobb", "leg", "pelvis", "spineCurve"]);
+
+/** 계측값 계산 — PixelSpacing 있으면 mm/mm², 없으면 px/px² 폴백.
+ *  해부학 4종(cobb/leg/pelvis/spineCurve)은 표시용 text(한국어 병기, 소수1자리)도 반환. */
 export function measureAnno(
   kind: string, pts: number[][], inst: InstanceNode | undefined,
-): { value: number; unit: string } | null {
+): { value: number; unit: string; text?: string } | null {
   const cols = inst?.cols || 0, rows = inst?.rows || 0;
   const ps = inst?.pixel_spacing?.length === 2 ? inst.pixel_spacing : null;
   const hasMm = !!ps && cols > 0 && rows > 0;
@@ -71,6 +75,45 @@ export function measureAnno(
     const w = Math.abs(dx(pts[0], pts[1])), h = Math.abs(dy(pts[0], pts[1]));
     const area = kind === "ellipse" ? Math.PI / 4 * w * h : w * h;
     return { value: round1(area), unit: hasMm ? "mm2" : "px2" };
+  }
+  // ── 해부학 측정 4종 (콥각/다리길이/골반/척추외곡) ──
+  if (kind === "cobb" && pts.length >= 4) {
+    // 선1(p0,p1)·선2(p2,p3) 사이 예각 0~90°
+    const v1 = [dx(pts[0], pts[1]), dy(pts[0], pts[1])];
+    const v2 = [dx(pts[2], pts[3]), dy(pts[2], pts[3])];
+    const cos = Math.abs(v1[0] * v2[0] + v1[1] * v2[1]) /
+      (Math.hypot(v1[0], v1[1]) * Math.hypot(v2[0], v2[1]) || 1);
+    const ang = round1(Math.acos(Math.min(1, cos)) * 180 / Math.PI);
+    return { value: ang, unit: "deg", text: `Cobb ${ang.toFixed(1)}°` };
+  }
+  if (kind === "leg" && pts.length >= 4) {
+    // 좌 라인(p0,p1)·우 라인(p2,p3) 각 길이 + 좌우 차이
+    const L = round1(Math.hypot(dx(pts[0], pts[1]), dy(pts[0], pts[1])));
+    const R = round1(Math.hypot(dx(pts[2], pts[3]), dy(pts[2], pts[3])));
+    const d = round1(Math.abs(L - R));
+    return { value: d, unit: lin,
+             text: `L ${L.toFixed(1)}${lin} / R ${R.toFixed(1)}${lin} / Δ${d.toFixed(1)}${lin}` };
+  }
+  if (kind === "pelvis" && pts.length >= 2) {
+    // 좌우 장골능 2점 — 수평 대비 각도(°) + 좌우 높이차
+    const w = dx(pts[0], pts[1]), h = dy(pts[0], pts[1]);
+    const ang = round1(Math.atan2(Math.abs(h), Math.abs(w)) * 180 / Math.PI);
+    const dh = round1(Math.abs(h));
+    return { value: ang, unit: "deg", text: `골반 ${ang.toFixed(1)}° / Δ${dh.toFixed(1)}${lin}` };
+  }
+  if (kind === "spineCurve" && pts.length >= 3) {
+    // 첫점→끝점 기준선 대비 경유점 최대 수직 편차(물리 좌표)
+    const bx = dx(pts[0], pts[pts.length - 1]), by = dy(pts[0], pts[pts.length - 1]);
+    const ab2 = bx * bx + by * by || 1;
+    let md = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const qx = dx(pts[0], pts[i]), qy = dy(pts[0], pts[i]);
+      const t = (qx * bx + qy * by) / ab2;
+      const d = Math.hypot(qx - t * bx, qy - t * by);
+      if (d > md) md = d;
+    }
+    const dev = round1(md);
+    return { value: dev, unit: lin, text: `척추 편위 ${dev.toFixed(1)}${lin}` };
   }
   return null;
 }
@@ -107,9 +150,10 @@ export function refLineOn(src: InstanceNode, dst: InstanceNode): [number, number
   return pts.length >= 2 ? [pts[0], pts[1]] : null;
 }
 
-/** 주석 표시 라벨 */
+/** 주석 표시 라벨 — 해부학 4종은 복합 라벨(text)을 우선 표시 */
 export function annoLabel(a: Anno): string {
   const v = a.value != null ? `${a.value}${a.unit === "mm2" ? "mm²" : a.unit === "px2" ? "px²" : a.unit ?? ""}` : "";
-  const base = a.kind === "text" ? (a.text ?? "") : v || (a.text ?? "");
+  const base = a.kind === "text" || (ANATOMY_KINDS.has(a.kind) && a.text)
+    ? (a.text ?? "") : v || (a.text ?? "");
   return a.source === "ai" ? `AI ${base}`.trim() : base;
 }

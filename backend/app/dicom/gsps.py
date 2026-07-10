@@ -51,6 +51,10 @@ def _rect_points(p1: list[float], p2: list[float]) -> list[list[float]]:
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
 
+# 해부학 측정 4종(콥각/다리길이/골반/척추외곡) — text 에 이미 값 포함(복합 한국어 라벨)
+_ANATOMY_KINDS = ("cobb", "leg", "pelvis", "spineCurve")
+
+
 def annotation_to_graphics(anno: dict) -> tuple[list[Dataset], list[Dataset]]:
     """주석 1건 → (GraphicObject 목록, TextObject 목록)."""
     kind = anno.get("kind", "line")
@@ -58,7 +62,8 @@ def annotation_to_graphics(anno: dict) -> tuple[list[Dataset], list[Dataset]]:
     graphics: list[Dataset] = []
     texts: list[Dataset] = []
     label = anno.get("text", "")
-    if anno.get("value") is not None:
+    # 해부학 kind 는 text 가 이미 완성 라벨(값 포함) — value 재부착 시 중복 표기 방지
+    if anno.get("value") is not None and not (kind in _ANATOMY_KINDS and label):
         label = f"{label} {anno['value']}{anno.get('unit', '')}".strip()
     if anno.get("source") == "ai":
         label = f"[AI] {label}".strip()
@@ -74,6 +79,16 @@ def annotation_to_graphics(anno: dict) -> tuple[list[Dataset], list[Dataset]]:
         (x1, y1), (x2, y2) = pts[0], pts[1]
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
         graphics.append(_graphic([[x1, cy], [x2, cy], [cx, y1], [cx, y2]], "ELLIPSE"))
+    elif kind in ("cobb", "leg") and len(pts) >= 4:
+        # 콥각/다리길이 — 두 직선(p0-p1, p2-p3)을 각각 POLYLINE 으로
+        graphics.append(_graphic(pts[0:2], "POLYLINE"))
+        graphics.append(_graphic(pts[2:4], "POLYLINE"))
+    elif kind == "pelvis" and len(pts) >= 2:
+        # 골반 틀어짐 — 좌우 장골능 연결선
+        graphics.append(_graphic(pts[:2], "POLYLINE"))
+    elif kind == "spineCurve" and len(pts) >= 2:
+        # 척추 외곡 — 경유 폴리라인 전체
+        graphics.append(_graphic(pts, "POLYLINE"))
     elif kind == "text" and len(pts) >= 1:
         pass  # 텍스트만
     else:

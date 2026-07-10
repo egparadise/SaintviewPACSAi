@@ -4,6 +4,8 @@
 //         B/W Inverse/Sharpen/Average/Pseudo/Auto Scroll/Calibrate/Measure 2D Line/Measure 2D Angle
 // 미구현(반투명): Magnification/3D Cursor/Dictation 계열/Select All 계열/Shutter 3종/CT Ratio/
 //         Limb Length/Center Line/Profile/2D Table/Spine Label/Volume/3D 주석/2D 주석·ROI 계열/Cobb/Marking/Lens
+// 해부 측정 4종(공통 측정 스펙): Cobb Angle(4점 예각 0~90°)·Leg Length(4점 L/R/Δ)·
+//         Spine Curve(척추 외곡 — 3점+ 더블클릭 종료, 기준선 대비 최대 편위)·Pelvic Tilt(골반 틀어짐 — 2점 수평 대비 각·Δ높이)
 import { Fragment, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Splitter } from "../lib/Splitter";
 
@@ -51,6 +53,26 @@ const ANATOMY_ICONS: Record<string, React.ReactNode> = {
       <rect x="7.6" y="9.4" width="2.7" height="11" rx="1.3" fill="#dcc9a2" stroke="#8a744a" strokeWidth="0.6" />
       <rect x="13.7" y="9.4" width="2.7" height="11" rx="1.3" fill="#dcc9a2" stroke="#8a744a" strokeWidth="0.6" />
       <line x1="3.4" y1="6.4" x2="20.6" y2="6.4" stroke="#38bdf8" strokeWidth="0.9" strokeDasharray="2 1.6" />
+    </svg>
+  ),
+  pelvis: (   // 골반 틀어짐 — 좌우 장골 날개 + 수평 기준 점선 대비 기울어진 장골능 연결선
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      <path d="M3.5 8.5 C3 5.5 6 3.8 8.8 4.8 C10.4 5.4 11 7 10.6 8.8 L9 12.2 C7.8 14 5.6 13.4 4.6 11.8 Z"
+            fill="#e7d8b8" stroke="#8a744a" strokeWidth="0.7" />
+      <path d="M20.5 9.5 C21 6.5 18 4.8 15.2 5.8 C13.6 6.4 13 8 13.4 9.8 L15 13.2 C16.2 15 18.4 14.4 19.4 12.8 Z"
+            fill="#e7d8b8" stroke="#8a744a" strokeWidth="0.7" />
+      <path d="M10.6 13.4 L12 17.8 L13.4 14.2 Z" fill="#dcc9a2" stroke="#8a744a" strokeWidth="0.6" />
+      <line x1="2" y1="7.2" x2="22" y2="7.2" stroke="#38bdf8" strokeWidth="0.9" strokeDasharray="2 1.6" />
+      <line x1="4" y1="6.2" x2="20" y2="8.6" stroke="#4ade80" strokeWidth="1.2" />
+    </svg>
+  ),
+  spineCurve: (   // 척추 외곡 — 수직 플럼라인(점선) + S 커브 + 최대 편위 마커
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24">
+      <line x1="12" y1="2" x2="12" y2="22" stroke="#38bdf8" strokeWidth="0.9" strokeDasharray="2 1.6" />
+      <path d="M12 2.5 C16.5 6.5 8 10.5 12.5 14.5 C16 17.5 12 20 12 21.5"
+            fill="none" stroke="#e7d8b8" strokeWidth="2.6" strokeLinecap="round" />
+      <line x1="12" y1="7.6" x2="15.6" y2="7.6" stroke="#f87171" strokeWidth="1" />
+      <circle cx="15.6" cy="7.6" r="1.8" fill="none" stroke="#f87171" strokeWidth="1.1" />
     </svg>
   ),
 };
@@ -152,10 +174,10 @@ interface Anno2 { kind: string; pts: { x: number; y: number }[]; text?: string; 
 // 점 클릭형 툴의 필요 점 수 (polyline/shutPoly 는 더블클릭 종료)
 const TOOL_PTS: Record<string, number> = {
   mline: 2, mangle: 3, arrow2d: 2, box2d: 2, circle: 2, mellipse: 2, mrect: 2,
-  cobb: 4, centerline: 4, limb: 4, ctr: 4, profile: 2, table2d: 2,
+  cobb: 4, centerline: 4, limb: 4, ctr: 4, profile: 2, table2d: 2, pelvis: 2,
   text2d: 1, marking: 1, spine: 1, lens: 1, cursor3d: 1, shutRect: 2, shutEl: 2,
 };
-const OPEN_ENDED = new Set(["polyline", "shutPoly"]);
+const OPEN_ENDED = new Set(["polyline", "shutPoly", "spineCurve"]);
 const isPointTool = (t: string) => t in TOOL_PTS || OPEN_ENDED.has(t);
 
 // ── 렌더 이미지 픽셀 샘플러 (ROI 통계/Profile/Table/Lens) ──
@@ -651,6 +673,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "centerline": addAnno(sop, { kind: "centerline", pts }); break;
       case "limb": addAnno(sop, { kind: "limb", pts }); break;
       case "ctr": addAnno(sop, { kind: "ctr", pts }); break;
+      case "pelvis": addAnno(sop, { kind: "pelvis", pts }); break;           // 골반 틀어짐 — 2점
+      case "spineCurve": addAnno(sop, { kind: "spineCurve", pts }); break;   // 척추 외곡 — 3점+ 더블클릭 종료
       case "text2d": {
         const text = prompt("표시할 문구");
         if (text) addAnno(sop, { kind: "text", pts, text });
@@ -1935,12 +1959,70 @@ function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
                 {T(X(mid(m1, m2)) + 5, Y(mid(m1, m2)) - 5, "Center", "#facc15")}</g>);
           }
           case "limb": {
+            // Leg Length(다리 길이) — 좌/우 각 길이 + Δ차이 (라벨 예: "L 412.0 mm / R 405.2 mm / Δ6.8mm")
             const d1 = distLabel(a.pts[0], a.pts[1]), d2 = distLabel(a.pts[2], a.pts[3]);
-            const v1 = parseFloat(d1), v2 = parseFloat(d2);
+            const delta = Math.abs(parseFloat(d1) - parseFloat(d2)).toFixed(1);
+            const unit = sp ? "mm" : "px";
+            const lm = mid(a.pts[1], a.pts[3]);
             return (
               <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15")}{L(a.pts[2], a.pts[3], "#4ade80")}
-                {T(X(a.pts[1]) + 5, Y(a.pts[1]), `L1 ${d1}`, "#facc15")}
-                {T(X(a.pts[3]) + 5, Y(a.pts[3]), `L2 ${d2} (Δ${Math.abs(v1 - v2).toFixed(1)})`, "#4ade80")}</g>);
+                {T(X(a.pts[1]) + 5, Y(a.pts[1]), "L(좌)", "#facc15")}
+                {T(X(a.pts[3]) + 5, Y(a.pts[3]), "R(우)", "#4ade80")}
+                {T(X(lm) + 5, Y(lm) - 5, `L ${d1} / R ${d2} / Δ${delta}${unit}`, "#4ade80")}</g>);
+          }
+          case "pelvis": {
+            // Pelvic Tilt(골반 틀어짐) — 좌우 장골능 2점: 실선 + 수평 기준 점선,
+            // 수평 대비 각도(°) + 좌우 높이차(mm). 라벨 예: "골반 3.4° / Δ8.1mm"
+            const dxm = (a.pts[1].x - a.pts[0].x) * (sp ? sp[1] : 1);
+            const dym = (a.pts[1].y - a.pts[0].y) * (sp ? sp[0] : 1);
+            const raw = Math.abs(Math.atan2(dym, dxm)) * 180 / Math.PI;
+            const deg = raw > 90 ? 180 - raw : raw;   // 수평 대비 예각
+            const unit = sp ? "mm" : "px";
+            const xL = Math.min(X(a.pts[0]), X(a.pts[1])) - 12;
+            const xR = Math.max(X(a.pts[0]), X(a.pts[1])) + 12;
+            const yRef = Y(a.pts[0]);   // 첫 점 기준 수평선
+            return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#f97316")}
+                <line x1={xL} y1={yRef} x2={xR} y2={yRef}
+                      stroke="#38bdf8" strokeWidth={1.1} strokeDasharray="5 4" />
+                <circle cx={X(a.pts[0])} cy={Y(a.pts[0])} r={2.5} fill="#f97316" />
+                <circle cx={X(a.pts[1])} cy={Y(a.pts[1])} r={2.5} fill="#f97316" />
+                {T(xR + 4, yRef - 4, `골반 ${deg.toFixed(1)}° / Δ${Math.abs(dym).toFixed(1)}${unit}`, "#f97316")}</g>);
+          }
+          case "spineCurve": {
+            // Spine Curve(척추 외곡) — 첫점→끝점 기준선(점선) + 경유 폴리라인 +
+            // 기준선 대비 최대 수직 편차 지점 마커. 라벨 예: "척추 편위 14.2mm"
+            const p0 = a.pts[0], pn = a.pts[a.pts.length - 1];
+            const sx = sp ? sp[1] : 1, sy = sp ? sp[0] : 1;   // mm 공간(비등방 스페이싱 반영)
+            const bx = (pn.x - p0.x) * sx, by = (pn.y - p0.y) * sy;
+            const bl = Math.hypot(bx, by) || 1;
+            let devMax = 0, devIdx = -1, devFoot: { x: number; y: number } | null = null;
+            for (let k = 1; k < a.pts.length - 1; k++) {
+              const vx = (a.pts[k].x - p0.x) * sx, vy = (a.pts[k].y - p0.y) * sy;
+              const dist = Math.abs(vx * by - vy * bx) / bl;   // 점-기준선 수직거리
+              if (dist > devMax) {
+                devMax = dist; devIdx = k;
+                const t = (vx * bx + vy * by) / (bl * bl);     // 기준선 위 수선의 발(파라미터)
+                devFoot = { x: p0.x + (pn.x - p0.x) * t, y: p0.y + (pn.y - p0.y) * t };
+              }
+            }
+            const unit = sp ? "mm" : "px";
+            return (
+              <g key={i} fill="none">
+                <line x1={X(p0)} y1={Y(p0)} x2={X(pn)} y2={Y(pn)}
+                      stroke="#38bdf8" strokeWidth={1.1} strokeDasharray="6 4" />
+                <polyline points={a.pts.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
+                          stroke="#4ade80" strokeWidth={1.5} />
+                {devIdx >= 0 && devFoot && (
+                  <>
+                    <line x1={X(a.pts[devIdx])} y1={Y(a.pts[devIdx])} x2={X(devFoot)} y2={Y(devFoot)}
+                          stroke="#f87171" strokeWidth={1.2} strokeDasharray="3 3" />
+                    <circle cx={X(a.pts[devIdx])} cy={Y(a.pts[devIdx])} r={4}
+                            stroke="#f87171" strokeWidth={1.6} />
+                    {T(X(a.pts[devIdx]) + 7, Y(a.pts[devIdx]) - 6,
+                       `척추 편위 ${devMax.toFixed(1)}${unit}`, "#f87171")}
+                  </>
+                )}</g>);
           }
           case "ctr": {
             const heart = Math.hypot(a.pts[1].x - a.pts[0].x, a.pts[1].y - a.pts[0].y);

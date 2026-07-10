@@ -9,6 +9,7 @@ import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { ToolBtnInner } from "../lib/toolIcons";
+import { AnatomyIcon } from "../lib/anatomyIcons";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
@@ -16,7 +17,8 @@ const Viewer3DEmbed = lazy(() => import("./Viewer3D").then((m) => ({ default: m.
 // 뷰어 내 설정 — 워크리스트로 돌아가지 않고 Setting 진입
 const SettingsModalLazy = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
-type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text";
+type ToolKind = "length" | "angle" | "rect" | "ellipse" | "arrow" | "text"
+  | "cobb" | "leg" | "pelvis" | "spineCurve";
 const TOOL_DEFS: [ToolKind, string, string][] = [
   ["length", "Len", "길이 계측 (2점, mm)"],
   ["angle", "Ang", "각도 계측 (3점)"],
@@ -24,6 +26,13 @@ const TOOL_DEFS: [ToolKind, string, string][] = [
   ["ellipse", "Elps", "타원 ROI (면적)"],
   ["arrow", "Arrw", "화살표"],
   ["text", "Text", "텍스트 주석"],
+];
+// 해부학 측정 툴 4종 (Anatomy) — 콥각/다리길이/골반/척추외곡
+const ANATOMY_TOOL_DEFS: [ToolKind, string, string][] = [
+  ["cobb", "Cobb", "콥 각(척추측만) — 4점: 첫 선 2점 → 둘째 선 2점, 두 직선 사이 예각(°)"],
+  ["leg", "Leg", "다리 길이 — 4점: 좌측 라인 2점 → 우측 라인 2점, 각 길이(mm)와 좌우 차이"],
+  ["pelvis", "Pelvis", "골반 틀어짐 — 2점: 좌·우 장골능, 수평 대비 각도(°)와 높이차(mm)"],
+  ["spineCurve", "Spine", "척추 외곡 — 3점 이상 클릭 후 더블클릭으로 종료, 기준선 대비 최대 편위(mm)"],
 ];
 
 const PANE_IDS = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
@@ -185,7 +194,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [selSeries, setSelSeries] = useState<string | null>(null);
   const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan">("zoom");
   // 팔레트 섹션 — 기본 전체 펼침(헤더 클릭으로 개별 접기)
-  const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(["common", "anno", "2d", "etc"]));
+  const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(["common", "anno", "anatomy", "2d", "etc"]));
   const toggleSec = (k: string) => setOpenSecs((p) => {
     const n = new Set(p);
     if (n.has(k)) n.delete(k); else n.add(k);
@@ -521,16 +530,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     dragRef.current = { pid, x: e.clientX, y: e.clientY, btn: e.button };
   };
 
-  /* 측정 도구 — 클릭 점 수집 → 완성 시 주석 생성(계측값 자동 계산) */
+  /* 측정 도구 — 클릭 점 수집 → 완성 시 주석 생성(계측값 자동 계산)
+     spineCurve 는 open-ended: 점 수 제한 없이 수집, 더블클릭(finishSpineCurve)으로 종료 */
   const handleAnnoPoint = (pid: string, e: React.MouseEvent) => {
     const p = panes[pid];
     const inst = p.series?.instances[p.index];
     if (!tool || !p.series || !inst) return;
+    if (tool === "spineCurve" && e.detail > 1) return;  // 더블클릭 2번째 mousedown 은 점 추가 안 함
     const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
     const pt = screenToImage(e.clientX, e.clientY, rect, p, aspect);
     if (!pt) return;
-    const need = tool === "angle" ? 3 : tool === "text" ? 1 : 2;
+    const need = tool === "angle" ? 3 : tool === "text" ? 1
+      : tool === "cobb" || tool === "leg" ? 4
+      : tool === "spineCurve" ? Infinity : 2;
     const d = draft && draft.pid === pid
       ? draft
       : { pid, sop_uid: inst.sop_uid, series_uid: p.series.series_uid, points: [] as number[][] };
@@ -544,7 +557,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const m = measureAnno(tool, points, inst);
     setAnnos((prev) => [...prev, {
       series_uid: d.series_uid, sop_uid: d.sop_uid, kind: tool, points,
-      value: m?.value ?? null, unit: m?.unit ?? "", text, source: "user",
+      value: m?.value ?? null, unit: m?.unit ?? "", text: m?.text ?? text, source: "user",
+    }]);
+    setDraft(null);
+  };
+
+  /* 척추 외곡(open-ended) 종료 — 페인 더블클릭. 3점 이상이면 확정, 미만이면 계속 수집 */
+  const finishSpineCurve = () => {
+    if (tool !== "spineCurve" || !draft) return;
+    const points = draft.points;
+    if (points.length < 3) { setStatus("척추 외곡: 3점 이상 클릭 후 더블클릭으로 종료하세요"); return; }
+    const p = panes[draft.pid];
+    const inst = p.series?.instances.find((i) => i.sop_uid === draft.sop_uid) ?? p.series?.instances[p.index];
+    const m = measureAnno("spineCurve", points, inst);
+    setAnnos((prev) => [...prev, {
+      series_uid: draft.series_uid, sop_uid: draft.sop_uid, kind: "spineCurve", points,
+      value: m?.value ?? null, unit: m?.unit ?? "", text: m?.text ?? "", source: "user",
     }]);
     setDraft(null);
   };
@@ -681,8 +709,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           <circle key={i} cx={sx(pt[0])} cy={sy(pt[1])} r={fs * 0.25} fill="#ffd54a" />
         ))}
         {dr && dr.points.length >= 2 && (
-          <polyline points={dr.points.map((q) => `${sx(q[0])},${sy(q[1])}`).join(" ")}
-                    stroke="#ffd54a" fill="none" strokeWidth={fs * 0.08} />
+          tool === "cobb" || tool === "leg" ? (
+            // 4점 도구 초안 — 선1(p0,p1)만 잇는다(p1→p2 연결선은 오해 소지)
+            <line x1={sx(dr.points[0][0])} y1={sy(dr.points[0][1])}
+                  x2={sx(dr.points[1][0])} y2={sy(dr.points[1][1])}
+                  stroke="#ffd54a" strokeWidth={fs * 0.08} />
+          ) : (
+            <polyline points={dr.points.map((q) => `${sx(q[0])},${sy(q[1])}`).join(" ")}
+                      stroke="#ffd54a" fill="none" strokeWidth={fs * 0.08} />
+          )
         )}
         {refSeg && (
           <line x1={sx(refSeg[0][0])} y1={sy(refSeg[0][1])} x2={sx(refSeg[1][0])} y2={sy(refSeg[1][1])}
@@ -909,7 +944,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </button>
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setThumbOpen((t) => !t)}>Thumb</button>
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setPaletteOpen(false)}>Hide</button>
-      {([["common", "Common"], ["anno", "Anno"], ["2d", "2D"], ["etc", "ETC"]] as const).map(([k, label]) => (
+      {([["common", "Common"], ["anno", "Anno"], ["anatomy", "Anatomy(해부)"], ["2d", "2D"], ["etc", "ETC"]] as const).map(([k, label]) => (
         <div key={k} style={paletteHoriz ? { display: "flex", gap: 3, alignItems: "center" } : undefined}>
           <div onClick={() => toggleSec(k)}
                title="클릭=섹션 접기/펼치기 (기본 전체 펼침)"
@@ -1011,6 +1046,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     <ToolBtnInner id="clr" label="Clr" />
                   </button>
                 )}
+              </>)}
+              {k === "anatomy" && (<>
+                {ANATOMY_TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
+                  <button key={tk} title={title}
+                          onClick={() => { setTool(tool === tk ? null : tk); setDraft(null); }}
+                          style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
+                                   background: tool === tk ? "var(--accent)" : undefined }}>
+                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
+                      <AnatomyIcon id={tk} size={17} />
+                      <span style={{ fontSize: 10 }}>{label}</span>
+                    </span>
+                  </button>
+                ))}
               </>)}
               {k === "2d" && (<>
                 <button title="All — W/L 프리셋을 모든 페인(전체 이미지)에 적용 (UBPACS All)"
@@ -1400,7 +1448,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               <div key={pid} ref={getPaneRef(pid)}
                    onMouseDown={(e) => onPaneMouseDown(pid, e)}
                    onWheel={(e) => step(pid, e.deltaY > 0 ? 1 : -1)}
-                   onDoubleClick={() => { if (!tool) act("fit"); }}
+                   onDoubleClick={() => { if (tool === "spineCurve") finishSpineCurve(); else if (!tool) act("fit"); }}
                    style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0,
                             background: "#000", cursor: tool ? "copy" : "crosshair",
                             outline: activePane === pid ? "1px solid var(--accent)" : "1px solid var(--border)" }}>
@@ -1590,6 +1638,7 @@ function AnnoShape({ a, sx, sy, fs }: {
   const mid = pts.length >= 2
     ? { x: (P(0).x + P(1).x) / 2, y: (P(0).y + P(1).y) / 2 }
     : P(0);
+  let labelAt = mid;  // 라벨 기준점 — 해부학 도구는 케이스별로 재지정
   let shape: React.ReactNode = null;
   switch (a.kind) {
     case "length": case "line": case "ctr":
@@ -1629,6 +1678,70 @@ function AnnoShape({ a, sx, sy, fs }: {
       break;
     case "text":
       break;
+    // ── 해부학 측정 4종 ──
+    case "cobb":
+      // 두 실선(선1 p0-p1, 선2 p2-p3) 사이 예각
+      if (pts.length < 4) return null;
+      shape = (
+        <g stroke={color} strokeWidth={sw} fill="none">
+          <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(1).y} />
+          <line x1={P(2).x} y1={P(2).y} x2={P(3).x} y2={P(3).y} />
+        </g>
+      );
+      labelAt = { x: (P(1).x + P(2).x) / 2, y: (P(1).y + P(2).y) / 2 };
+      break;
+    case "leg":
+      // 좌(p0-p1)·우(p2-p3) 라인 + 끝점 표시
+      if (pts.length < 4) return null;
+      shape = (
+        <g stroke={color} strokeWidth={sw} fill="none">
+          <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(1).y} />
+          <line x1={P(2).x} y1={P(2).y} x2={P(3).x} y2={P(3).y} />
+          {[0, 1, 2, 3].map((i) => (
+            <circle key={i} cx={P(i).x} cy={P(i).y} r={sw * 1.3} fill={color} stroke="none" />
+          ))}
+        </g>
+      );
+      labelAt = { x: (P(1).x + P(3).x) / 2, y: (P(1).y + P(3).y) / 2 };
+      break;
+    case "pelvis":
+      // 좌우 장골능 실선 + 수평 기준 점선(좌측 점 기준)
+      if (pts.length < 2) return null;
+      shape = (
+        <g stroke={color} strokeWidth={sw} fill="none">
+          <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(1).y} />
+          <line x1={P(0).x} y1={P(0).y} x2={P(1).x} y2={P(0).y}
+                strokeDasharray={`${fs * 0.5} ${fs * 0.35}`} opacity={0.8} />
+        </g>
+      );
+      break;
+    case "spineCurve": {
+      // 기준선(첫점→끝점, 점선) + 경유 폴리라인 + 최대 수직 편차 지점 마커
+      if (pts.length < 3) return null;
+      const A = P(0), B = P(pts.length - 1);
+      const abx = B.x - A.x, aby = B.y - A.y;
+      const ab2 = abx * abx + aby * aby || 1;
+      let mi = 1, md = -1, fx2 = A.x, fy2 = A.y;
+      for (let i = 1; i < pts.length - 1; i++) {
+        const Q = P(i);
+        const t = ((Q.x - A.x) * abx + (Q.y - A.y) * aby) / ab2;
+        const px2 = A.x + t * abx, py2 = A.y + t * aby;
+        const d = Math.hypot(Q.x - px2, Q.y - py2);
+        if (d > md) { md = d; mi = i; fx2 = px2; fy2 = py2; }
+      }
+      shape = (
+        <g stroke={color} strokeWidth={sw} fill="none">
+          <line x1={A.x} y1={A.y} x2={B.x} y2={B.y}
+                strokeDasharray={`${fs * 0.5} ${fs * 0.35}`} opacity={0.85} />
+          <polyline points={pts.map((q) => `${sx(q[0])},${sy(q[1])}`).join(" ")} />
+          <line x1={P(mi).x} y1={P(mi).y} x2={fx2} y2={fy2}
+                strokeDasharray={`${fs * 0.25} ${fs * 0.2}`} />
+          <circle cx={P(mi).x} cy={P(mi).y} r={fs * 0.3} strokeWidth={sw * 1.5} />
+        </g>
+      );
+      labelAt = P(mi);
+      break;
+    }
     default:
       return null;
   }
@@ -1636,7 +1749,7 @@ function AnnoShape({ a, sx, sy, fs }: {
     <g>
       {shape}
       {label && (
-        <text x={mid.x + fs * 0.3} y={mid.y - fs * 0.3} fill={color} fontSize={fs}
+        <text x={labelAt.x + fs * 0.3} y={labelAt.y - fs * 0.3} fill={color} fontSize={fs}
               stroke="#000" strokeWidth={fs * 0.1} style={{ paintOrder: "stroke" }}>
           {label}
         </text>

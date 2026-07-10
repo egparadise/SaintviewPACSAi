@@ -1,5 +1,7 @@
 // 뷰어 Tools 아이콘 세트 — UBPACS p.18~21 아이콘 표 대응(인라인 SVG, currentColor)
-import type { ReactNode } from "react";
+// 3D(입체) 렌더링: ① 아래쪽 드롭섀도 ② 상단광(top-light) 베벨 림 ③ 2톤(상단 밝음→하단 어두움)
+// 그라디언트 오버레이 ④ 흰색 저투명 하이라이트 엣지. 실루엣(형태)은 기존 플랫 아이콘 그대로 유지.
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 const P = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -36,12 +38,48 @@ const ICONS: Record<string, ReactNode> = {
   mpr: (<g {...P}><path d="M12 2.5l8 4.5v9l-8 4.5-8-4.5v-9z" /><path d="M4 7l8 4.5L20 7" /><line x1="12" y1="11.5" x2="12" y2="20.5" /></g>),
 };
 
+// currentColor 치환용 레이어 스타일 — 어두운 버튼 배경/파란(accent) 활성 배경 어디서든
+// 본체(currentColor)는 그대로 두고 흰/검 저투명 사본으로만 명암을 얹는다(선명도 유지).
+const LAYER_LIGHT: CSSProperties = { color: "#fff" };
+const LAYER_DARK: CSSProperties = { color: "#000" };
+
 export function ToolIcon({ id, size = 17 }: { id: string; size?: number }) {
+  // SVG 인스턴스가 여러 개 렌더되므로 gradient/filter/mask id 충돌 방지 — 인스턴스별 고유 id
+  const rawId = useId();
   const icon = ICONS[id];
   if (!icon) return null;
+  const uid = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const shadowId = `t3d-sh-${uid}`;
+  const glossId = `t3d-gl-${uid}`;
+  const maskId = `t3d-mk-${uid}`;
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden style={{ display: "block" }}>
-      {icon}
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden style={{ display: "block", overflow: "visible" }}>
+      <defs>
+        {/* ① 아래쪽 부드러운 드롭섀도 */}
+        <filter id={shadowId} x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="1" stdDeviation="0.9" floodColor="#000" floodOpacity="0.5" />
+        </filter>
+        {/* ③ 2톤 볼륨: 상단 밝음(흰 저투명) → 하단 어두움(검 저투명) */}
+        <linearGradient id={glossId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.5" />
+          <stop offset="0.5" stopColor="#fff" stopOpacity="0.06" />
+          <stop offset="1" stopColor="#000" stopOpacity="0.32" />
+        </linearGradient>
+        {/* 아이콘 실루엣 마스크 — 그라디언트를 선/면 모양 안쪽에만 입힘(형태 불변) */}
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="-2" y="-2" width="28" height="28">
+          <g style={LAYER_LIGHT}>{icon}</g>
+        </mask>
+      </defs>
+      <g filter={`url(#${shadowId})`}>
+        {/* ② 베벨 아래면 — 어두운 림(0.6px 아래로) */}
+        <g transform="translate(0 0.6)" opacity={0.45} style={LAYER_DARK}>{icon}</g>
+        {/* ④ 상단광 하이라이트 엣지 — 흰색 저투명 림(0.6px 위로) */}
+        <g transform="translate(0 -0.6)" opacity={0.55} style={LAYER_LIGHT}>{icon}</g>
+        {/* 본체 — currentColor 유지(테마/활성색 자동 대응) */}
+        {icon}
+        {/* ③ 2톤 그라디언트 오버레이(마스크로 본체 위에만) */}
+        <rect x="-2" y="-2" width="28" height="28" fill={`url(#${glossId})`} mask={`url(#${maskId})`} />
+      </g>
     </svg>
   );
 }
