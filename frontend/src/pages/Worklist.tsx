@@ -181,7 +181,7 @@ const INFI_COL_WIDTH: Record<string, number> = {
 /* ── [A] 액션 툴바 ─────────────────────────────── */
 function ActionToolbar({
   selected, onAction, searchText, setSearchText, onSearch, onNlSearch,
-  withOpen, setWithOpen, withOpenMode, setWithOpenMode,
+  withOpen, setWithOpen, withOpenMode, setWithOpenMode, ohifOn = false,
 }: {
   selected: StudyDetail | null;
   onAction: (a: string) => void;
@@ -193,6 +193,7 @@ function ActionToolbar({
   setWithOpen: (b: boolean) => void;
   withOpenMode: "add" | "stack";
   setWithOpenMode: (m: "add" | "stack") => void;
+  ohifOn?: boolean;   // OHIF 아이콘 표시 여부 (설정>뷰어 — 기본 숨김)
 }) {
   const need = !selected;
   const [nlText, setNlText] = useState("");
@@ -214,7 +215,7 @@ function ActionToolbar({
       <Btn a="ub_view" label="🖵 View" title="① View — 기존 영상을 닫고 선택 검사를 그 자리에 표시 (UBPACS-Z)" />
       <Btn a="ub_add" label="🖵+ Add" title="② Add View — 기존 영상은 닫지 않고 선택 검사를 분할 추가" />
       <Btn a="ub_stack" label="⧉ Stack" title="③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩" />
-      <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />
+      {ohifOn && <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />}
       <Btn a="ub_key" label="🔑 Key" title="⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)" />
       {/* Study With Open (p.13): 더블클릭 시 Related Study를 함께 오픈 */}
       <label title="Study With Open — 더블클릭으로 열 때 Related Study List의 검사를 한번에 같이 오픈"
@@ -1806,9 +1807,10 @@ function CommentMemoPanel({ detail, onChanged }: { detail: StudyDetail | null; o
 }
 
 /* ── 컨텍스트 메뉴 (디자인 §3.3) ─────────────────── */
-function ContextMenu({ x, y, row, onAction, onClose }: {
+function ContextMenu({ x, y, row, onAction, onClose, ohifOn = false }: {
   x: number; y: number; row: StudyRow;
   onAction: (a: string) => void; onClose: () => void;
+  ohifOn?: boolean;
 }) {
   useEffect(() => {
     const h = () => onClose();
@@ -1833,7 +1835,7 @@ function ContextMenu({ x, y, row, onAction, onClose }: {
       <Item a="viewdraft" label="View&Draft (자체 뷰어)" />
       <Item a="ub_add" label="Add View — 기존 유지+추가" />
       <Item a="ub_stack" label="Stack View — 기존 유지+중첩" />
-      <Item a="ub_adv" label="Advance View (OHIF)" />
+      {ohifOn && <Item a="ub_adv" label="Advance View (OHIF)" />}
       <Item a="ub_key" label="Key Image View — 키 이미지만" />
       <Item a="3d" label="3D 뷰어 (MPR/MIP)" />
       <Item a="compare" label="비교세트에 추가" />
@@ -2234,7 +2236,7 @@ export function Worklist() {
         if (target) {
           const d = await api.study(target.id);
           selectAndSync(d);
-          if (dblAction === "ohif") openStudy(d);
+          if (dblAction === "ohif" && ohifOnRef.current) openStudy(d);
           else if (withOpen) {
             // With Open 체크 = 명시적 다중 오픈 — 다른 환자라도 기존 검사에 ADD/STACK 으로 누적.
             // 과거검사(최대 3건)도 함께. related 가 없어도 withOpen 신호를 보내 누적 유지
@@ -2272,7 +2274,8 @@ export function Worklist() {
         break;
       }
       case "ub_adv":
-        // ④ Advance View: 고급 뷰어(OHIF)로 교체 오픈
+        // ④ Advance View: 고급 뷰어(OHIF)로 교체 오픈 — 설정에서 허용 시에만
+        if (!ohifOnRef.current) { alert("OHIF는 설정 > 뷰어 > OHIF에서 활성화할 수 있습니다"); break; }
         if (target) openStudy(target);
         break;
       case "ub_key": {
@@ -2488,9 +2491,15 @@ export function Worklist() {
   // In 모드 워크리스트 배치 — 선택 뷰어(viewer.prefs.client_viewer)=infi 면 INFINITT 원본 7구역 배치,
   // ty 면 현행(TY) 배치 유지. 설정 저장/⟳Refresh 시 refreshKey 로 즉시 재적용.
   const [infiMode, setInfiMode] = useState(false);
+  // OHIF 표시/동작 — 기본 숨김, 설정>뷰어>OHIF 에서 허용 (viewer.prefs.ohif_enabled)
+  const [ohifOn, setOhifOn] = useState(false);
+  const ohifOnRef = useRef(false);
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
       setInfiMode((r.value as { client_viewer?: string }).client_viewer === "infi");
+      const on = !!(r.value as { ohif_enabled?: boolean }).ohif_enabled;
+      setOhifOn(on);
+      ohifOnRef.current = on;
     }).catch(() => {});
   }, [refreshKey]);
   // Infi 레이아웃 패널 크기(px) — 각 경계 스플리터로 드래그 조절 후 계정 저장
@@ -2600,7 +2609,7 @@ export function Worklist() {
                       padding: "3px 10px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", gap: 4, padding: "3px 6px", border: "1px solid var(--border)",
                         borderRadius: 6, background: "var(--bg-elevated)" }}>
-            {INFI_ICONS.map((t) => (
+            {INFI_ICONS.filter((t) => t.a !== "ub_adv" || ohifOn).map((t) => (
               <button key={t.a} title={t.l} onClick={() => infiTool(t.a)}
                       style={{ width: 46, height: 40, fontSize: 22, padding: 0, border: "none",
                                display: "flex", alignItems: "center", justifyContent: "center",
@@ -2618,7 +2627,8 @@ export function Worklist() {
                      onSearch={() => setRefreshKey((k) => k + 1)}
                      onNlSearch={onNlSearch}
                      withOpen={withOpen} setWithOpen={setWithOpen}
-                     withOpenMode={withOpenMode} setWithOpenMode={setWithOpenMode} />
+                     withOpenMode={withOpenMode} setWithOpenMode={setWithOpenMode}
+                     ohifOn={ohifOn} />
       <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
                  onSearch={() => setRefreshKey((k) => k + 1)} />
 
@@ -2810,7 +2820,7 @@ export function Worklist() {
         </Suspense>
       )}
       {ctx && (
-        <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row}
+        <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn}
                      onAction={(a) => doAction(a, ctx.row)} onClose={() => setCtx(null)} />
       )}
     </div>

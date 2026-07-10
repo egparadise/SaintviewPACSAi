@@ -29,6 +29,18 @@ interface ModeProfile {
 
 // 설정 스코프(단계별 분리): system(병원선택 화면) · hospital(자원관리 화면) · viewer(PACS Viewer)
 export type SettingsScope = "system" | "hospital" | "viewer";
+/** 파란 모던 폴더 아이콘 — 노란 이모지(📁) 대체 (뒷판+탭 진한 파랑, 앞판 밝은 파랑) */
+function FolderIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={Math.round(size * 0.84)} viewBox="0 0 24 20"
+         style={{ flexShrink: 0, display: "block" }}>
+      <path d="M2 4 a2 2 0 0 1 2-2 h5.4 l2.3 2.6 h8.3 a2 2 0 0 1 2 2 v1.4 H2 Z" fill="#0284c7" />
+      <rect x="2" y="7" width="20" height="11.5" rx="2" fill="#38bdf8" />
+      <rect x="2" y="7" width="20" height="2.6" fill="#67d3fa" />
+    </svg>
+  );
+}
+
 const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope }[] = [
   // 시스템 — 서버 운영(시스템 관리자)
   { key: "server", label: "서버 (Server)", admin: true, scope: "system" },
@@ -91,6 +103,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infToolLabels, setInfToolLabels] = useState(true);
   const [infToolSize, setInfToolSize] = useState(34);
   const [infCineSec, setInfCineSec] = useState(0.5);   // 시네 기본 간격(초)
+  const [ohifOn, setOhifOn] = useState(false);         // OHIF 아이콘 표시·동작 (기본 꺼짐)
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
   const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
@@ -206,6 +219,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (tv.infi_tool_labels !== undefined) setInfToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setInfToolSize(tv.infi_tool_size);
       if (tv.infi_cine_sec) setInfCineSec(tv.infi_cine_sec);
+      setOhifOn(!!(v as { ohif_enabled?: boolean }).ohif_enabled);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
         setDefLay(Object.fromEntries(Object.entries(iv.infi_default_layout)
@@ -296,6 +310,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_toolbar: infTb,
       infi_tool_cols: infToolCols, infi_tool_labels: infToolLabels, infi_tool_size: infToolSize,
       infi_cine_sec: infCineSec,
+      ohif_enabled: ohifOn,
       infi_default_layout: Object.fromEntries(Object.entries(defLay)
         .map(([k, v]) => {
           const parse = (s: string) => {
@@ -363,10 +378,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               <div key={t.key} onClick={() => setPage(t.key)}
                    style={{
                      padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, marginBottom: 2,
+                     display: "flex", alignItems: "center", gap: 7,
                      background: page === t.key ? "var(--accent-subtle)" : undefined,
                      color: page === t.key ? "var(--text-primary)" : "var(--text-secondary)",
                    }}>
-                📁 {t.label}
+                <FolderIcon /> {t.label}
               </div>
             ))}
           </div>
@@ -997,6 +1013,21 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </>
             )}
 
+            {page === "viewer" && (
+              <Group title="OHIF (고급 웹뷰어)">
+                <Row label="OHIF 사용">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={ohifOn}
+                           onChange={(e) => setOhifOn(e.target.checked)} />
+                    OHIF 아이콘 표시·동작 허용 (기본 꺼짐)
+                  </label>
+                </Row>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  끄면 워크리스트(⌂ Adv·🌐·우클릭 메뉴)와 뷰어의 OHIF 버튼이 숨겨지고 동작하지 않습니다.
+                  더블클릭 동작이 OHIF 로 설정돼 있어도 자체 뷰어로 열립니다.
+                </div>
+              </Group>
+            )}
             {page === "viewer" && (
               <Group title="선택 뷰어 (Client Viewer)">
                 <Row label="사용할 뷰어">

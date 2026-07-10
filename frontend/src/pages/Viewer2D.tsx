@@ -111,6 +111,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open (p.13)
 }) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
+  // OHIF 표시 — 기본 숨김, 설정>뷰어>OHIF 허용 시에만 (viewer.prefs.ohif_enabled)
+  const [ohifOn, setOhifOn] = useState(false);
+  useEffect(() => {
+    api.getSetting("viewer.prefs").then((r) =>
+      setOhifOn(!!(r.value as { ohif_enabled?: boolean }).ohif_enabled)).catch(() => {});
+  }, []);
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [series, setSeries] = useState<SeriesNode[]>([]);
@@ -1023,7 +1029,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                 ))}
               </>)}
               {k === "etc" && (<>
-                {tbOn("ohif") && (
+                {tbOn("ohif") && ohifOn && (
                   <button style={{ padding: "6px 4px", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}
                           onClick={() => openViewer(detail.study_uid)}>
                     <ToolBtnInner id="ohif" label="OHIF" />
