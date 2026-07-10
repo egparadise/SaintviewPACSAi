@@ -1660,7 +1660,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
                     뷰어를 별도 포트로 분리하려면 <code>frontend/.env</code>에
-                    <code> VITE_VIEWER_BASE=http://localhost:5174</code> 추가 후
+                    <code> VITE_VIEWER_BASE=http://localhost:5176</code> 추가 후
                     <code> npm run dev:viewer</code>를 함께 실행하세요 (재기동 필요).
                   </div>
                 </Group>
