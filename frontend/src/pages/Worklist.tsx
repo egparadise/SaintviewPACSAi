@@ -837,7 +837,7 @@ function StudyGrid({
                           style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
                     시리즈 없음
                   </td></tr>
-                ) : (trees[row.id] ?? []).map((s) => (
+                ) : (trees[row.id] ?? []).map((s, si) => (
                   <Fragment key={s.series_uid}>
                     <tr style={{ background: "rgba(56,108,173,0.10)" }}
                         onDoubleClick={() => onOpen(row)}>
@@ -849,17 +849,17 @@ function StudyGrid({
                               onDoubleClick={(e) => e.stopPropagation()}>
                           {expSeries.has(s.series_uid) ? "−" : "＋"}
                         </span>
-                        📚 Series {s.series_number} · {s.modality} · {s.instances.length}장
+                        📚 Series {s.series_number || si + 1} · {s.modality} · {s.instances.length}장
                         <span style={{ color: "var(--text-secondary)" }}> {s.series_desc}</span>
                       </td>
                     </tr>
                     {/* 2단계: Image(인스턴스) 행들 */}
-                    {expSeries.has(s.series_uid) && s.instances.map((inst) => (
+                    {expSeries.has(s.series_uid) && s.instances.map((inst, ii) => (
                       <tr key={inst.sop_uid} onDoubleClick={() => onOpen(row)}>
                         <td />
                         <td colSpan={span - 1}
                             style={{ paddingLeft: 58, fontSize: 11.5, color: "var(--text-secondary)" }}>
-                          🖼 Image {inst.instance_number}
+                          🖼 Image {inst.instance_number || ii + 1}
                           {inst.rows ? ` · ${inst.rows}×${inst.cols}px` : ""}
                           <span style={{ opacity: 0.6 }}> · …{inst.sop_uid.slice(-12)}</span>
                         </td>
