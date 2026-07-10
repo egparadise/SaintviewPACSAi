@@ -1858,10 +1858,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                           onClick={() => { recordUse("cursor3d"); setTool(tool === "cursor3d" ? null : "cursor3d"); setDraft(null); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === "cursor3d" ? "var(--accent)" : undefined }}>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
-                      <span style={{ fontSize: tySize * 0.8 }}>✛</span>
-                      {tyLabels && <span style={{ fontSize: 10 }}>3DC</span>}
-                    </span>
+                    <TyInner id="cursor3d" label="3DC" />
                   </button>
                 )}
                 {tbOn("ctr") && (detail.modality === "CR" || detail.modality === "DX") && (
@@ -2000,20 +1997,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   <button title="Key — 현재 이미지를 키이미지로 등록/해제 (워크리스트 🔑·Key Image View 연동)"
                           onClick={() => { recordUse("key2d"); toggleKeyImage(); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
-                      <span style={{ fontSize: tySize * 0.8 }}>🔑</span>
-                      {tyLabels && <span style={{ fontSize: 10 }}>Key</span>}
-                    </span>
+                    <TyInner id="key2d" label="Key" />
                   </button>
                 )}
                 {tbOn("media") && (
                   <button title="Media — 로컬 이미지(JPG/PNG/BMP)·동영상(AVI/MP4)을 활성 페인에 표시/재생"
                           onClick={() => { recordUse("media"); mediaInputRef.current?.click(); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
-                      <span style={{ fontSize: tySize * 0.8 }}>🎞</span>
-                      {tyLabels && <span style={{ fontSize: 10 }}>Media</span>}
-                    </span>
+                    <TyInner id="media" label="Media" />
                   </button>
                 )}
                 {tbOn("dict") && (
@@ -2021,20 +2012,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                           onClick={() => { recordUse("dict"); toggleDictation(); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: recording ? "var(--accent)" : undefined }}>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
-                      <span style={{ fontSize: tySize * 0.8 }}>🎙</span>
-                      {tyLabels && <span style={{ fontSize: 10 }}>{recording ? "Rec●" : "Dict"}</span>}
-                    </span>
+                    <TyInner id="dict" label={recording ? "Rec●" : "Dict"} />
                   </button>
                 )}
                 {tbOn("dict") && (
                   <button title="Play Dictation — 이 검사의 녹음 재생"
                           onClick={playDictation}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
-                    <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, lineHeight: 1 }}>
-                      <span style={{ fontSize: tySize * 0.8 }}>🔊</span>
-                      {tyLabels && <span style={{ fontSize: 10 }}>Play</span>}
-                    </span>
+                    <TyInner id="dictplay" label="Play" />
                   </button>
                 )}
               </>)}
@@ -2173,7 +2158,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {tbOn("cmp") && (
           <button title="Compare — 같은 환자의 과거검사를 골라 나란히 비교 (동기 스크롤 ON)"
                   onClick={() => { setCmpSel(new Set()); setCmpOpen(true); }}
-                  style={{ fontWeight: 700 }}>⇄</button>
+                  style={{ fontWeight: 700, padding: "3px 8px" }}>
+            <ToolIconTy id="cmp" size={15} flat={!tyIcon3d} />
+          </button>
         )}
         {/* TY-3(7): 로컬 미디어 파일 선택 (팔레트 ETC>Media 버튼에서 오픈) */}
         <input ref={mediaInputRef} type="file" hidden

@@ -5,7 +5,8 @@ import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseE
 import { GridPicker } from "../lib/GridPicker";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_LAYOUTS, IN_PALETTE } from "../lib/infiConfig";
-import { ToolIcon } from "../lib/toolIcons";
+import { ToolIconTy } from "../components/ToolIconTy";
+import { AnatomyIcon } from "../lib/anatomyIcons";
 import { HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
 import {
   FolderEditModal,
@@ -1426,7 +1427,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                                  style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}>
                             <input type="checkbox" checked={tbConfig[t.id] !== false}
                                    onChange={(e) => setTbConfig((p) => ({ ...p, [t.id]: e.target.checked }))} />
-                            <ToolIcon id={t.id === "3d" ? "mpr" : t.id} size={14} />
+                            {["cobb", "leg", "pelvis", "spineCurve"].includes(t.id)
+                              ? <AnatomyIcon id={t.id} size={14} />
+                              : <ToolIconTy id={t.id === "3d" ? "mpr" : t.id} size={14} />}
                             {t.label} <span style={{ color: "var(--text-secondary)", fontSize: 10.5 }}>{t.desc.split(" — ")[0].split(" (")[0]}</span>
                           </label>
                         ))}
