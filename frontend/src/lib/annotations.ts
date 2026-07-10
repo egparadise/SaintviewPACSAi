@@ -47,12 +47,14 @@ const round1 = (v: number) => Math.round(v * 10) / 10;
 
 /** 해부학 측정 툴 4종 — 라벨은 text(한국어 병기)를 우선 표시 */
 export const ANATOMY_KINDS = new Set(["cobb", "leg", "pelvis", "spineCurve"]);
+/** TY-2 이식 kind 중 라벨을 text(복합 표기)로 우선 표시하는 것들 */
+const TEXT_FIRST_KINDS = new Set(["circle", "centerline", "mctr"]);
 
 /** 계측값 계산 — PixelSpacing 있으면 mm/mm², 없으면 px/px² 폴백.
  *  해부학 4종(cobb/leg/pelvis/spineCurve)은 표시용 text(한국어 병기, 소수1자리)도 반환. */
 export function measureAnno(
   kind: string, pts: number[][], inst: InstanceNode | undefined,
-): { value: number; unit: string; text?: string } | null {
+): { value: number | null; unit: string; text?: string } | null {
   const cols = inst?.cols || 0, rows = inst?.rows || 0;
   const ps = inst?.pixel_spacing?.length === 2 ? inst.pixel_spacing : null;
   const hasMm = !!ps && cols > 0 && rows > 0;
@@ -75,6 +77,29 @@ export function measureAnno(
     const w = Math.abs(dx(pts[0], pts[1])), h = Math.abs(dy(pts[0], pts[1]));
     const area = kind === "ellipse" ? Math.PI / 4 * w * h : w * h;
     return { value: round1(area), unit: hasMm ? "mm2" : "px2" };
+  }
+  // ── TY-2 이식 계측 (In Viewer poly/circle/centerline/수동 CTR) ──
+  if (kind === "poly" && pts.length >= 2) {
+    // 폴리라인 — 경로(세그먼트 합) 길이
+    let sum = 0;
+    for (let i = 1; i < pts.length; i++) sum += Math.hypot(dx(pts[i - 1], pts[i]), dy(pts[i - 1], pts[i]));
+    return { value: round1(sum), unit: lin };
+  }
+  if (kind === "circle" && pts.length >= 2) {
+    // 원 — 중심(p0)→가장자리(p1) 반지름
+    const r = round1(Math.hypot(dx(pts[0], pts[1]), dy(pts[0], pts[1])));
+    return { value: r, unit: lin, text: `R ${r.toFixed(1)}${lin}` };
+  }
+  if (kind === "centerline" && pts.length >= 4) {
+    // 중앙선 — 두 선(p0-p1, p2-p3)의 중점 연결(수치 없음, 표시 전용)
+    return { value: null, unit: "", text: "Center" };
+  }
+  if (kind === "mctr" && pts.length >= 4) {
+    // 수동 심흉비 — 심장 폭(p0-p1) / 흉곽 폭(p2-p3) % (AI CTR 'ctr' 과 별개)
+    const heart = Math.hypot(dx(pts[0], pts[1]), dy(pts[0], pts[1]));
+    const thorax = Math.hypot(dx(pts[2], pts[3]), dy(pts[2], pts[3]));
+    const ratio = thorax > 0 ? round1((heart / thorax) * 100) : 0;
+    return { value: ratio, unit: "%", text: `CTR ${ratio.toFixed(1)}%${ratio > 50 ? " ⚠" : ""}` };
   }
   // ── 해부학 측정 4종 (콥각/다리길이/골반/척추외곡) ──
   if (kind === "cobb" && pts.length >= 4) {
@@ -150,10 +175,10 @@ export function refLineOn(src: InstanceNode, dst: InstanceNode): [number, number
   return pts.length >= 2 ? [pts[0], pts[1]] : null;
 }
 
-/** 주석 표시 라벨 — 해부학 4종은 복합 라벨(text)을 우선 표시 */
+/** 주석 표시 라벨 — 해부학 4종·복합 표기 kind(circle/centerline/mctr)는 text 를 우선 표시 */
 export function annoLabel(a: Anno): string {
   const v = a.value != null ? `${a.value}${a.unit === "mm2" ? "mm²" : a.unit === "px2" ? "px²" : a.unit ?? ""}` : "";
-  const base = a.kind === "text" || (ANATOMY_KINDS.has(a.kind) && a.text)
+  const base = a.kind === "text" || ((ANATOMY_KINDS.has(a.kind) || TEXT_FIRST_KINDS.has(a.kind)) && a.text)
     ? (a.text ?? "") : v || (a.text ?? "");
   return a.source === "ai" ? `AI ${base}`.trim() : base;
 }

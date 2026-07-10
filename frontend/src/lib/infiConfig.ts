@@ -240,6 +240,7 @@ export const IN_PALETTE: { id: string; icon: string; label: string; impl: boolea
   { id: "cine", icon: "▶", label: "Auto Scroll — 이미지 자동 스크롤", impl: true, group: "영상 조정" },
   // p.13 측정/분석
   { id: "ctr", icon: "♥", label: "CT Ratio 심흉비 — 심장 2점 + 흉곽 2점", impl: true, mode: true, group: "측정" },
+  { id: "ctrAi", icon: "🤖", label: "AI CTR — 심흉비 자동계측 초안 (CR/DX 전용, AI 초안·확정 아님)", impl: true, group: "측정" },
   { id: "limb", icon: "🦵", label: "Leg Length — 다리 길이: 좌 라인(2점)+우 라인(2점) 각 길이·Δ차이(mm)", impl: true, mode: true, group: "측정" },
   { id: "centerline", icon: "╂", label: "Center Line — 두 선(4점)의 중앙선 표시", impl: true, mode: true, group: "측정" },
   { id: "profile", icon: "📈", label: "Profile — 두 점 선의 픽셀값 그래프", impl: true, mode: true, group: "측정" },
@@ -262,7 +263,13 @@ export const IN_PALETTE: { id: string; icon: string; label: string; impl: boolea
   { id: "spineCurve", icon: "⌇", label: "Spine Curve — 척추 외곡: 3점 이상 클릭 후 더블클릭 종료, 기준선 대비 최대 편위(mm)", impl: true, mode: true, group: "측정" },
   { id: "pelvis", icon: "⏛", label: "Pelvic Tilt — 골반 틀어짐: 좌우 장골능 2점, 수평 대비 각도(°)·Δ높이차(mm)", impl: true, mode: true, group: "측정" },
   { id: "marking", icon: "M", label: "Marking — 클릭 후 짧은 표기 입력", impl: true, mode: true, group: "주석" },
-  { id: "lens", icon: "🎯", label: "Lens — 클릭 지점 픽셀값(근사 HU)", impl: true, mode: true, group: "측정" },
+  { id: "lens", icon: "🎯", label: "Lens — 클릭 지점 픽셀값(서버 HU, 실패 시 근사)", impl: true, mode: true, group: "측정" },
+  // IN-1 서버 연동 — 주석 영속화(Save) + GSPS 저장/불러오기
+  { id: "saveAnno", icon: "💾", label: "Save — 주석·계측을 서버에 저장(계정 로밍)", impl: true, group: "기타" },
+  { id: "gsps", icon: "🗂", label: "GSPS 저장 — 현재 주석+활성 페인 W/L 을 DICOM Presentation State 로 서버 저장", impl: true, group: "기타" },
+  { id: "gspsLoad", icon: "📥", label: "PR↓ — 검사에 귀속된 GSPS(타사 PR 포함) 불러오기, 외부 주석은 녹색 표시", impl: true, group: "기타" },
+  // IN-2 ⑦: OHIF 연동 — 설정>뷰어>OHIF(ohif_enabled) 켠 계정만 노출 (TY ETC 게이트 패턴)
+  { id: "ohif", icon: "🌐", label: "OHIF — 고급 웹뷰어(OHIF)로 활성 검사 열기 (설정>뷰어>OHIF 허용 시)", impl: true, group: "기타" },
   { id: "clrAnno", icon: "🧹", label: "측정 전체 지우기", impl: true, group: "기타" },
 ];
 

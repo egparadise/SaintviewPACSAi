@@ -13,10 +13,14 @@ import { Splitter } from "../lib/Splitter";
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 // 3D — Cornerstone3D MPR/MIP 볼륨 뷰어 (전체 오버레이)
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
-import { api, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
+import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
+import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { ReportDock } from "../components/ReportDock";
+import { screenFeatures } from "../lib/screens";
+import { onStudySync, postStudySync } from "../lib/sync";
+import type { HpRule } from "../lib/viewerConfig";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -170,7 +174,35 @@ function paneFilter(p: Pane): string | undefined {
 }
 
 type Tool = string;   // select/pan/zoom/wl + 점 클릭형 측정·주석·셔터·렌즈 등 (IN_PALETTE mode)
-interface Anno2 { kind: string; pts: { x: number; y: number }[]; text?: string; value?: string }
+interface Anno2 {
+  kind: string; pts: { x: number; y: number }[]; text?: string; value?: string;
+  /** IN-1 서버 주석 연동 — 출처(user/ai/external, 색 구분: TY AnnoShape 규칙) */
+  src?: "user" | "ai" | "external";
+  /** 서버 로드 원본(정규화 Anno) — In 은 기존 주석을 편집하지 않으므로 저장 시 그대로 반환(무손실 왕복) */
+  orig?: Anno;
+}
+
+/** In(픽셀좌표 Anno2) ↔ 서버/TY(정규화 Anno) kind 매핑 — 공통 개념만 표준명 변환, 나머지는 원형 유지 */
+const TY2IN: Record<string, string> = { length: "line", rect: "mrect", ellipse: "mellipse", leg: "limb" };
+const IN2TY: Record<string, string> = { line: "length", mrect: "rect", mellipse: "ellipse", limb: "leg" };
+/** In 렌더가 value(통계 문자열)를 라벨로 쓰는 kind — TY Anno.text 와 왕복 */
+const VALUE_KINDS = new Set(["mrect", "mellipse", "lens"]);
+/** In 렌더가 text 를 문구로 쓰는 kind */
+const TEXT_KINDS = new Set(["text", "marking", "box", "spine"]);
+type CloseReq = { kind: "one"; i: number } | { kind: "all" };
+type CloseMode = "ask" | "save_current" | "save_all" | "none";
+
+/** ② AI 자동 최적 W/L (TY autoWL 이식) — 모달리티×부위 결정적 규칙 v1, 추후 AI 추론 교체 지점 */
+function autoWL(modality: string, bodyPart: string): { q: string; label: string } | null {
+  const bp = (bodyPart || "").toUpperCase();
+  if (modality === "CT") {
+    if (bp.includes("CHEST") || bp.includes("LUNG")) return { q: "-600,1500", label: "폐" };
+    if (bp.includes("BRAIN") || bp.includes("HEAD")) return { q: "40,80", label: "뇌" };
+    if (bp.includes("ABD") || bp.includes("PEL")) return { q: "60,400", label: "복부" };
+    return { q: "40,400", label: "종격동" };
+  }
+  return null;   // MR/CR 등은 서버 VOI 기본
+}
 
 // 점 클릭형 툴의 필요 점 수 (polyline/shutPoly 는 더블클릭 종료)
 const TOOL_PTS: Record<string, number> = {
@@ -275,6 +307,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // Compare — 같은 환자 과거검사 선택 비교 (선택 검사들을 페인으로 추가 + Sync With Other Exams)
   const [cmpOpen, setCmpOpen] = useState(false);
   const [cmpSel, setCmpSel] = useState<Set<number>>(new Set());
+  // IN-2 ①: 행잉 프로토콜 규칙(viewer.hp) — 검사 로드 시 자동 매칭 + 행잉 콤보에서 선택 (TY applyHp 등가)
+  const [hpRules, setHpRules] = useState<HpRule[]>([]);
+  const [hpName, setHpName] = useState("기본");
+  // IN-2 ⑦: OHIF 게이트(viewer.prefs.ohif_enabled — 켠 계정만 '기타' 구획에 버튼 노출)
+  const [ohifOn, setOhifOn] = useState(false);
+  // IN-2 ⑥: 판독창(📝) 모니터 배치 — Setting>모니터의 monitor.report 인덱스
+  const [monReport, setMonReport] = useState<number | null>(null);
+  // IN-2 ⑤: 썸네일 표시 모드(시리즈 대표/전체 이미지) — viewer.prefs.infi_thumb_mode 로밍
+  const [thumbMode, setThumbMode] = useState<"series" | "all">("series");
+  // IN-1: GSPS 불러오기 목록 모달 · 닫기 동작(viewer.prefs.infi_close_mode) · 닫기 확인 다이얼로그
+  const [gspsPick, setGspsPick] = useState<GspsItem[] | null>(null);
+  const [closeMode, setCloseMode] = useState<CloseMode>("ask");
+  const [closeDlg, setCloseDlg] = useState<CloseReq | null>(null);
+  const [closeRemember, setCloseRemember] = useState(false);
   const [role, setRole] = useState("user");
   useEffect(() => { api.profile().then((p) => setRole(p.role)).catch(() => {}); }, []);
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
@@ -306,6 +352,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (!ids.includes(wid)) ids.push(wid);
     }
     localStorage.setItem(EXAMS_KEY, JSON.stringify(ids));
+    postStudySync(detail.id, "viewer");   // IN-2 ③: Worklist·Reading 창에 활성 검사 알림
     // Compare 로 재진입한 경우 — Sync With Other Exams 자동 ON
     if (localStorage.getItem("sv_infi_cmp") === "1") {
       localStorage.removeItem("sv_infi_cmp");
@@ -321,6 +368,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         { infi_default_layout?: Record<string, { s?: { r: number; c: number } | null;
                                                  i?: { r: number; c: number } | null }> };
       const defMap = prefsV.infi_default_layout ?? {};
+      // IN-2 ①: 규칙 기반 행잉 프로토콜(viewer.hp) — 모달리티×부위×Projection 첫 일치 자동 적용
+      //          (TY hpRules/applyHp 등가 — 단독 검사에서 Modality 기본 레이아웃보다 우선)
+      const hpv = (await api.getSetting("viewer.hp").catch(() => ({ value: {} }))).value as
+        { rules?: HpRule[] };
+      const rules = hpv.rules ?? [];
+      setHpRules(rules);
+      const up = (s: string) => (s || "").toUpperCase();
+      const hpMatch = rules.find((x) =>
+        (!x.modality || x.modality === detail.modality) &&
+        (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
+        (!x.projection || up(detail.study_desc).includes(up(x.projection)))) ?? null;
       // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
       if (keySops?.length) {
         const prim = list.find((e) => e.d.id === detail.id);
@@ -361,7 +419,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const mod = list[0]?.d.modality ?? "";
       const defCfg = single ? (defMap[mod] ?? defMap["*"]) : undefined;
       let r: number, c: number;
-      if (defCfg?.s) { r = defCfg.s.r; c = defCfg.s.c; }
+      if (single && hpMatch) {
+        r = Math.min(hpMatch.s.r, 10); c = Math.min(hpMatch.s.c, 10);
+        setHpName(hpMatch.name);
+      }
+      else if (defCfg?.s) { r = defCfg.s.r; c = defCfg.s.c; }
       else { const n = Math.max(1, list.length); c = Math.min(n, 4); r = Math.ceil(n / c); }
       setSLayout({ r, c });
       setPanes(Array.from({ length: r * c }, (_, i) => {
@@ -369,7 +431,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           // 단독 검사: 페인마다 시리즈를 순서대로(부족하면 빈 페인), Image 레이아웃은 설정값
           const s0 = list[0].series[i] ?? null;
           const p = { ...initPane(list[0].d.study_uid), series: s0 };
-          if (defCfg?.i) p.il = defCfg.i;
+          if (hpMatch) {   // IN-2 ①: HP 규칙의 Image layout·W/L 적용 (TY applyHp 동일)
+            p.il = { r: Math.min(hpMatch.i.r, 10), c: Math.min(hpMatch.i.c, 10) };
+            if (hpMatch.wl !== undefined) p.wl = hpMatch.wl ?? "";
+          }
+          else if (defCfg?.i) p.il = defCfg.i;
           else if (i === 0 && r * c === 1 && ["CT", "MR"].includes(mod)
                    && (list[0].series[0]?.instances.length ?? 0) >= 9) {
             p.il = { r: 3, c: 3 };   // 설정 없을 때 기본 행잉 (원본)
@@ -391,8 +457,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setExams((es) => es.map((e, i) => (i === activeExam ? { ...e, series: t.series } : e)));
     }).catch(() => {});
   };
-  // 검사 닫기 — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
-  const closeExam = (i: number) => {
+  // 검사 닫기(실행) — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
+  const proceedCloseExam = (i: number) => {
     const remain = exams.filter((_, k) => k !== i).map((e) => e.d.id);
     localStorage.setItem(EXAMS_KEY, JSON.stringify(remain));
     if (!remain.length) {
@@ -402,6 +468,31 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     } else {
       location.search = `?viewer=2d&study=${remain[remain.length - 1]}`;
     }
+  };
+  const proceedCloseAll = () => {
+    localStorage.removeItem(EXAMS_KEY);
+    gotoWorklist();
+    window.close();
+    onClose();
+  };
+  /* IN-1 닫기 동작 — viewer.prefs.infi_close_mode: ask=물어봄 / save_current=주석 저장 /
+     save_all=주석+GSPS(표시상태) 저장 / none=저장 없이 닫기 (TY close_mode 등가) */
+  const doCloseAction = async (mode: CloseMode, remember: boolean, req: CloseReq) => {
+    setCloseDlg(null);
+    if (remember && mode !== "ask") {
+      setCloseMode(mode);
+      persistPrefs({ infi_close_mode: mode });
+    }
+    try {
+      if (mode === "save_current") await saveAnnos();
+      else if (mode === "save_all") { await saveAnnos(); await doGsps(); }
+    } catch { /* 저장 실패해도 닫기는 진행 (TY 동일 정책) */ }
+    if (req.kind === "one") proceedCloseExam(req.i);
+    else proceedCloseAll();
+  };
+  const requestClose = (req: CloseReq) => {
+    if (closeMode === "ask") { setCloseRemember(false); setCloseDlg(req); }
+    else void doCloseAction(closeMode, false, req);
   };
   const curD = exams[activeExam]?.d ?? detail;
   const wlPresets = curD.modality === "MR" ? IN_WL_PRESETS_MR : IN_WL_PRESETS_CT;
@@ -424,6 +515,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         return { ...initPane(detail.study_uid), series: s };
       });
     });
+  };
+  /* IN-2 ①: 행잉 콤보에서 HP 규칙 수동 선택 — Series/Image layout + W/L (TY applyHp 등가) */
+  const applyHpIn = (rule: HpRule) => {
+    applySLayout({ r: Math.min(rule.s.r, 10), c: Math.min(rule.s.c, 10) });
+    setPanes((ps) => ps.map((p) => ({
+      ...p,
+      il: { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) },
+      ...(rule.wl !== undefined ? { wl: rule.wl ?? "" } : {}),
+    })));
+    setHpName(rule.name);
+    say(`행잉 프로토콜 적용 — ${rule.name}`);
   };
   // 과거검사 시리즈 로드 (Related Exam 버튼)
   const loadPrior = (reId: number, uid: string, label: string) => {
@@ -495,6 +597,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   useEffect(() => { panesRef.current = panes; }, [panes]);
   const annosSnapRef = useRef(annos);
   useEffect(() => { annosSnapRef.current = annos; }, [annos]);
+  /* IN-2 ③: 창간 검사 동기 수신 — 다른 창(Worklist/Reading)에서 검사가 바뀌면
+     해당 검사의 Exam 탭이 열려 있을 때만 그 탭으로 전환 (TY onStudySync 정책 동일) */
+  const examsRef = useRef(exams);
+  useEffect(() => { examsRef.current = exams; }, [exams]);
+  useEffect(() => onStudySync("viewer", (id) => {
+    const i = examsRef.current.findIndex((x) => x.d.id === id);
+    if (i < 0) return;   // 열려있지 않은 검사 — 무시
+    const ex = examsRef.current[i];
+    setActiveExam(i);
+    setSeries(ex.series);
+    const pi = panesRef.current.findIndex((q) => q.studyUid === ex.d.study_uid);
+    if (pi >= 0) setActive(pi);
+  }), []);
   const takeSnap = (): Snap => ({
     vis: panesRef.current.map((p) => ({
       zoom: p.zoom, tx: p.tx, ty: p.ty, rot: p.rot, flipH: p.flipH, flipV: p.flipV,
@@ -541,6 +656,198 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const HIST_OPS = new Set(["fit", "invert", "flipH", "flipV", "rotL", "rotR", "rot180",
                             "reset", "sharpen", "smooth", "pseudo", "clrAnno"]);
 
+  /* ══ IN-1 서버 연동 — 주석 영속화 · GSPS · AI CTR ══ */
+  /** sop_uid → 인스턴스·시리즈·검사 매핑 (열린 검사들의 시리즈 트리 전수 탐색) */
+  const findInst = (sop: string): { inst: InstanceNode; series_uid: string; examId: number } | null => {
+    for (const e of exams) {
+      for (const s of e.series) {
+        const i = s.instances.find((x) => x.sop_uid === sop);
+        if (i) return { inst: i, series_uid: s.series_uid, examId: e.d.id };
+      }
+    }
+    return null;
+  };
+  /** 서버(정규화 0~1 Anno) → In(이미지 픽셀 Anno2). sop 없는 study 단위 주석(CTR 등)은
+   *  해당 검사 첫 이미지에 귀속(TY 는 전 이미지 표시 — In 은 sop 키 구조라 대표 1장). */
+  const tyToIn = (t: Anno, ex?: { d: StudyDetail; series: SeriesNode[] }): { sop: string; a: Anno2 } | null => {
+    let sop = t.sop_uid;
+    let f = sop ? findInst(sop) : null;
+    if (!f && !sop && ex) {
+      const s0 = ex.series.find((s) => s.instances.length > 0);
+      const i0 = s0?.instances[0];
+      if (s0 && i0) { sop = i0.sop_uid; f = { inst: i0, series_uid: s0.series_uid, examId: ex.d.id }; }
+    }
+    if (!f || !sop) return null;
+    const cols = f.inst.cols || 0, rows = f.inst.rows || 0;
+    if (!cols || !rows) return null;
+    const kind = TY2IN[t.kind] ?? t.kind;
+    const a: Anno2 = {
+      kind, pts: t.points.map((q) => ({ x: q[0] * cols, y: q[1] * rows })),
+      src: t.source ?? "user", orig: t,
+    };
+    if (t.source === "ai" || t.source === "external") a.value = annoLabel(t);   // 라벨은 TY 규칙으로 미리 계산
+    else if (VALUE_KINDS.has(kind)) a.value = t.text || undefined;              // ROI 통계 문자열 복원
+    else if (TEXT_KINDS.has(kind)) a.text = t.text ?? "";
+    return { sop, a };
+  };
+  /** In(픽셀 Anno2) → 서버(정규화 Anno). 서버 로드분(orig)은 원본 그대로 반환(무손실 왕복),
+   *  로컬 추가분은 정규화 + measureAnno 로 값/단위 산출. */
+  const inToTy = (sop: string, a: Anno2): Anno | null => {
+    if (a.orig) return a.orig;
+    const f = findInst(sop);
+    if (!f) return null;
+    const cols = f.inst.cols || 0, rows = f.inst.rows || 0;
+    if (!cols || !rows) return null;
+    const kind = IN2TY[a.kind] ?? a.kind;
+    const points = a.pts.map((q) => [q.x / cols, q.y / rows]);
+    const m = measureAnno(kind, points, f.inst);
+    return {
+      series_uid: f.series_uid, sop_uid: sop, kind, points,
+      value: m?.value ?? null, unit: m?.unit ?? "",
+      text: a.text ?? a.value ?? m?.text ?? "", source: "user",
+    };
+  };
+  /** 표시 변환 실패로 화면에 못 올린 서버 주석(검사별) — keySops 필터로 제외된 이미지 위 주석,
+   *  cols/rows 누락 인스턴스 등. 전량 교체 PUT(saveAnnos)에서 함께 반환해 조용한 삭제를 방지. */
+  const srvKeepRef = useRef<Record<number, Anno[]>>({});
+  /** ① 주석 서버 저장 — 검사별로 묶어 saveAnnotations(전량 교체 PUT) */
+  const saveAnnos = async (): Promise<void> => {
+    const byExam = new Map<number, Anno[]>();
+    for (const e of exams) byExam.set(e.d.id, [...(srvKeepRef.current[e.d.id] ?? [])]);
+    const saved = new Map<Anno2, Anno>();   // 저장 성공 로컬분 — orig 부착(재로드 중복 방지)용
+    let n = 0, skipped = 0;
+    for (const [sop, list] of Object.entries(annos)) {
+      const f = findInst(sop);
+      for (const a of list) {
+        const t = inToTy(sop, a);
+        if (t && f && byExam.has(f.examId)) {
+          byExam.get(f.examId)!.push(t);
+          if (!a.orig) saved.set(a, t);
+          n++;
+        }
+        else skipped++;   // 과거(prior) 시리즈 위 주석 등 — 소속 검사 미로드 시 제외
+      }
+    }
+    await Promise.all([...byExam].map(([id, items]) => api.saveAnnotations(id, items)));
+    // 저장된 로컬 추가분에 orig 부착 — 주석 재로드(Refresh Exam 등) 시 서버본과 중복 생성 방지
+    if (saved.size) {
+      setAnnos((prev) => Object.fromEntries(Object.entries(prev).map(([sop, arr]) =>
+        [sop, arr.map((a) => (saved.has(a) ? { ...a, orig: saved.get(a)! } : a))])));
+    }
+    say(`주석 ${n}건 저장됨 (서버)${skipped ? ` · ${skipped}건 제외(과거 시리즈)` : ""}`);
+  };
+  /** ③ GSPS 저장 — 활성 검사의 주석 + 활성 페인 W/L 을 Presentation State 로 */
+  const doGsps = async (): Promise<void> => {
+    const ex = exams[activeExam];
+    const p = panes[active];
+    if (!ex) return;
+    const images = new Map<string, { sop_uid: string; series_uid: string; rows: number; cols: number }>();
+    const list: Anno[] = [];
+    for (const [sop, arr] of Object.entries(annos)) {
+      const f = findInst(sop);
+      if (!f || f.examId !== ex.d.id) continue;
+      for (const a of arr) {
+        const t = inToTy(sop, a);
+        if (!t) continue;
+        // sop 미지정 원본(study 단위)은 In 귀속 이미지로 바인딩해 내보냄 (TY 동일)
+        list.push(t.sop_uid ? t : { ...t, sop_uid: sop, series_uid: f.series_uid });
+        images.set(sop, { sop_uid: sop, series_uid: f.series_uid, rows: f.inst.rows, cols: f.inst.cols });
+      }
+    }
+    const inst = p?.series?.instances[p.index];
+    if (!images.size && p?.series && inst) {
+      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: p.series.series_uid,
+                                 rows: inst.rows, cols: inst.cols });
+    }
+    if (!images.size) { say("GSPS 저장할 이미지가 없습니다"); return; }
+    const [wc, ww] = p?.wl ? p.wl.split(",").map(Number) : [null, null];
+    await api.sendGsps(ex.d.id, { images: [...images.values()], annotations: list, wc, ww });
+    say("GSPS 저장됨 — Orthanc 동일 검사 귀속(PR)");
+  };
+  /** ③ GSPS 적용 — 선택한 PR 의 주석(녹색)+W/L 을 반영. 기존 외부 주석은 교체(중복 방지) */
+  const applyGsps = (it: GspsItem) => {
+    const ex = exams[activeExam];
+    setAnnos((prev) => {
+      const next: Record<string, Anno2[]> = {};
+      for (const [sop, arr] of Object.entries(prev)) {
+        const keep = arr.filter((a) => a.src !== "external");
+        if (keep.length) next[sop] = keep;
+      }
+      for (const t of it.annotations) {
+        const conv = tyToIn({ ...t, source: "external" }, ex);
+        if (conv) (next[conv.sop] = next[conv.sop] ?? []).push(conv.a);
+      }
+      return next;
+    });
+    if (it.wc != null && it.ww != null) updMany(targetsOf(active), () => ({ wl: `${it.wc},${it.ww}` }));
+    setGspsPick(null);
+    schedHist();
+    say(`GSPS 적용 — ${it.label || it.creator || "PR"} · 주석 ${it.annotations.length}건 (녹색=외부)`);
+  };
+  /** ④ AI CTR 자동계측 — CR/DX 전용, 서버 초안 주석(kind=ctr)을 보라색 AI 라벨로 표시 */
+  const doCtrAi = () => {
+    const ex = exams[activeExam];
+    if (!ex) return;
+    if (!["CR", "DX"].includes(ex.d.modality)) { say("AI CTR 은 CR/DX 검사 전용입니다"); return; }
+    say("AI CTR 계측 중…");
+    api.ctr(ex.d.id).then(async (r) => {
+      const ar = await api.annotations(ex.d.id);
+      const ctrs = ar.items.filter((x) => x.kind === "ctr");
+      setAnnos((prev) => {
+        const next: Record<string, Anno2[]> = {};
+        for (const [sop, arr] of Object.entries(prev)) {
+          // 서버 유래 CTR(orig)과 AI CTR 은 교체 대상 — In 수동 ctr(로컬)은 유지(병존)
+          const keep = arr.filter((a) => !(a.orig?.kind === "ctr" || (a.src === "ai" && a.kind === "ctr")));
+          if (keep.length) next[sop] = keep;
+        }
+        for (const t of ctrs) {
+          const conv = tyToIn({ ...t, source: t.source ?? "ai" }, ex);
+          if (conv) (next[conv.sop] = next[conv.sop] ?? []).push(conv.a);
+        }
+        return next;
+      });
+      say(r.verified && r.ctr != null
+        ? `AI CTR ${r.ctr} · 신뢰도 ${(r.confidence * 100).toFixed(0)}% (초안 — 확정 아님)`
+        : `CTR 검증 실패: ${r.verify_note || r.note}`);
+      schedHist();
+    }).catch((e) => say(e instanceof Error ? e.message : "CTR 실패"));
+  };
+  /* ① 검사 로드 시 서버 주석 로드 → In 구조 변환 표시 (user=기본색, ai=보라, external=녹색) */
+  useEffect(() => {
+    if (!exams.length) return;
+    let gone = false;
+    Promise.all(exams.map((e) =>
+      api.annotations(e.d.id).then((r) => ({ e, items: r.items }))
+        .catch(() => ({ e, items: [] as Anno[] })),
+    )).then((rs) => {
+      if (gone) return;
+      const next: Record<string, Anno2[]> = {};
+      const keep: Record<number, Anno[]> = {};
+      let n = 0;
+      for (const { e, items } of rs) {
+        for (const t of items) {
+          const conv = tyToIn(t, e);
+          if (conv) { (next[conv.sop] = next[conv.sop] ?? []).push(conv.a); n++; }
+          else (keep[e.d.id] = keep[e.d.id] ?? []).push(t);   // 미표시 서버분 — 저장 시 원본 반환
+        }
+      }
+      srvKeepRef.current = keep;
+      if (!n) return;
+      setAnnos((prev) => {
+        const merged = { ...next };
+        for (const [sop, arr] of Object.entries(prev)) {
+          const locals = arr.filter((a) => !a.orig);   // 로드 완료 전 로컬 추가분 보존
+          if (locals.length) merged[sop] = [...(merged[sop] ?? []), ...locals];
+        }
+        return merged;
+      });
+      say(`서버 주석 ${n}건 로드`);
+      schedHist();
+    });
+    return () => { gone = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exams]);
+
   const fire = (id: string) => {
     const p = panes[active];
     if (!p) return;
@@ -574,7 +881,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }).catch(() => say("키이미지 저장 실패"));
         break;
       }
-      case "reset": upd(active, { ...initPane(), series: p.series, index: p.index }); break;
+      case "reset": upd(active, { ...initPane(p.studyUid), series: p.series, index: p.index }); break;
       case "cine": {   // 활성(또는 멀티 선택) 페인 재생 토글
         const newVal = !panes[active]?.playing;
         for (const k of targetsOf(active)) cineLast.current[k] = 0;
@@ -642,6 +949,27 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }
         break;
       }
+      case "saveAnno":   // IN-1 ①: 주석 서버 저장 (계정 로밍)
+        saveAnnos().catch((e) => say(e instanceof Error ? e.message : "주석 저장 실패"));
+        break;
+      case "gsps":       // IN-1 ③: 주석+W/L → Presentation State 저장
+        doGsps().catch((e) => say(e instanceof Error ? e.message : "GSPS 저장 실패"));
+        break;
+      case "gspsLoad": { // IN-1 ③: 검사 귀속 PR 목록 → 선택 적용
+        const ex = exams[activeExam];
+        if (!ex) break;
+        api.loadGsps(ex.d.id).then((r) => {
+          if (!r.items.length) { say("불러올 GSPS(PR)가 없습니다"); return; }
+          setGspsPick(r.items);
+        }).catch((e) => say(e instanceof Error ? e.message : "GSPS 조회 실패"));
+        break;
+      }
+      case "ctrAi":      // IN-1 ④: AI 심흉비 자동계측 초안
+        doCtrAi();
+        break;
+      case "ohif":       // IN-2 ⑦: OHIF 뷰어로 활성 검사 열기 (ohif_enabled 계정만 버튼 노출)
+        openViewer(panes[active]?.studyUid || curD.study_uid);
+        break;
       default: {
         const item = PALETTE.find((t) => t.id === id);
         if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {
@@ -736,30 +1064,60 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         setCross3d(markers);
         break;
       }
-      // ── 픽셀값 계열 (렌더 8bit 근사 — W/L 역변환 '≈' 표기) ──
+      // ── 픽셀값 계열 — IN-1 ②: 서버 roiStats(원본 픽셀, 진짜 HU) 우선,
+      //    실패 시 기존 렌더 8bit 근사 폴백(W/L 역변환 '≈' 표기) ──
       case "lens": {
-        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
-          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
-          const x = Math.round(pts[0].x), y = Math.round(pts[0].y);
-          const v = rawOf(data.data[(Math.max(0, Math.min(data.height - 1, y)) * data.width +
-                                     Math.max(0, Math.min(data.width - 1, x))) * 4], p.wl);
-          addAnno(sop, { kind: "lens", pts, value: `≈${v.toFixed(0)}` });
-        });
+        const cols = inst.cols || 1, rows = inst.rows || 1;
+        const x = Math.round(pts[0].x), y = Math.round(pts[0].y);
+        const local = () => {   // 8bit 근사 폴백
+          void samplePixels(url, cols, rows).then((data) => {
+            if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+            const v = rawOf(data.data[(Math.max(0, Math.min(data.height - 1, y)) * data.width +
+                                       Math.max(0, Math.min(data.width - 1, x))) * 4], p.wl);
+            addAnno(sop, { kind: "lens", pts, value: `≈${v.toFixed(0)}` });
+          });
+        };
+        const exd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+        // 클릭 지점 1px 사각 ROI 의 평균 = 해당 픽셀 원값(HU)
+        api.roiStats(exd.id, { sop_uid: sop, kind: "rect",
+                               points: [[x / cols, y / rows], [(x + 1) / cols, (y + 1) / rows]] })
+          .then((st) => {
+            if (st.error || st.mean == null) { local(); return; }
+            addAnno(sop, { kind: "lens", pts,
+                           value: `${st.mean.toFixed(0)}${st.unit ? ` ${st.unit}` : ""}` });
+          })
+          .catch(local);
         break;
       }
       case "mellipse": case "mrect": {
         const ell = tool === "mellipse";
-        void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
-          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
-          const st = roiStats(data, pts[0].x, pts[0].y, pts[1].x, pts[1].y, ell, p.wl);
-          if (!st) return;
-          const areaMm = sp
-            ? Math.abs((pts[1].x - pts[0].x) * sp[1] * (pts[1].y - pts[0].y) * sp[0]) * (ell ? Math.PI / 4 : 1)
-            : 0;
-          const area = areaMm ? ` · ${(areaMm / 100).toFixed(2)}cm²` : "";
-          addAnno(sop, { kind: ell ? "mellipse" : "mrect", pts,
-                         value: `≈${st.mean.toFixed(0)}±${st.sd.toFixed(0)} [${st.mn.toFixed(0)}~${st.mx.toFixed(0)}]${area}` });
-        });
+        const kind = ell ? "mellipse" : "mrect";
+        const cols = inst.cols || 1, rows = inst.rows || 1;
+        const local = () => {   // 8bit 근사 폴백 (기존 동작)
+          void samplePixels(url, cols, rows).then((data) => {
+            if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+            const st = roiStats(data, pts[0].x, pts[0].y, pts[1].x, pts[1].y, ell, p.wl);
+            if (!st) return;
+            const areaMm = sp
+              ? Math.abs((pts[1].x - pts[0].x) * sp[1] * (pts[1].y - pts[0].y) * sp[0]) * (ell ? Math.PI / 4 : 1)
+              : 0;
+            const area = areaMm ? ` · ${(areaMm / 100).toFixed(2)}cm²` : "";
+            addAnno(sop, { kind, pts,
+                           value: `≈${st.mean.toFixed(0)}±${st.sd.toFixed(0)} [${st.mn.toFixed(0)}~${st.mx.toFixed(0)}]${area}` });
+          });
+        };
+        const exd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+        api.roiStats(exd.id, { sop_uid: sop, kind: ell ? "ellipse" : "rect",
+                               points: pts.map((q) => [q.x / cols, q.y / rows]) })
+          .then((st) => {
+            if (st.error || st.mean == null) { local(); return; }
+            const area = st.area_mm2 ? ` · ${(st.area_mm2 / 100).toFixed(2)}cm²` : "";
+            addAnno(sop, { kind, pts,
+                           value: `${st.mean.toFixed(0)}±${(st.std ?? 0).toFixed(0)} ` +
+                                  `[${(st.min ?? 0).toFixed(0)}~${(st.max ?? 0).toFixed(0)}]` +
+                                  `${st.unit ? ` ${st.unit}` : ""}${area}` });
+          })
+          .catch(local);
         break;
       }
       case "profile": {
@@ -969,12 +1327,24 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (tv.infi_tool_labels !== undefined) setToolLabels(tv.infi_tool_labels);
       if (tv.infi_tool_size) setToolSize(tv.infi_tool_size);
       if (tv.infi_cine_sec) setCineDefault(tv.infi_cine_sec);
+      // IN-1: 닫기 동작 (ask/save_current/save_all/none)
+      const cm = (r.value as { infi_close_mode?: CloseMode }).infi_close_mode;
+      if (cm && ["ask", "save_current", "save_all", "none"].includes(cm)) setCloseMode(cm);
       const uv = r.value as { infi_report_dock?: boolean; infi_usage?: Record<string, number>;
                               infi_usage_rec?: boolean; infi_quick_row?: boolean };
       if (uv.infi_report_dock) setReportDock(true);
       if (uv.infi_usage) { usageRef.current = uv.infi_usage; setUsage(uv.infi_usage); }
       if (uv.infi_usage_rec !== undefined) setUsageRec(uv.infi_usage_rec);
       if (uv.infi_quick_row !== undefined) setQuickRow(uv.infi_quick_row);
+      // IN-2: 썸네일 로밍(⑤) · 판독창 모니터 배치(⑥) · OHIF 게이트(⑦)
+      const n2 = r.value as { infi_thumb_size?: number; infi_thumb_mode?: "series" | "all";
+                              ohif_enabled?: boolean;
+                              monitor?: { report?: number | null } };
+      const tsz = n2.infi_thumb_size;
+      if (tsz) setUi((u) => ({ ...u, thumbW: Math.min(260, Math.max(56, tsz)) }));
+      if (n2.infi_thumb_mode === "series" || n2.infi_thumb_mode === "all") setThumbMode(n2.infi_thumb_mode);
+      setOhifOn(!!n2.ohif_enabled);
+      if (n2.monitor?.report != null) setMonReport(n2.monitor.report);
     }).catch(() => {});
   }, []);
   // 툴 활성화 카운트 +1 — 상위 50개만 유지, 2초 디바운스로 viewer.prefs.infi_usage 저장
@@ -1033,6 +1403,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   }, [sLayout.r, sLayout.c]);
 
   // 'A' = 전체 페인 선택, Esc = 해제, T(홀드)+스크롤 = 오버레이 글자 크기, T+Del = 오버레이 토글
+  // IN-2 ④ 키보드 패리티(TY 동일): ←→=이미지 스크롤(활성 페인), Space=활성 페인 시네 토글,
+  // 1/2/4=레이아웃(1×1/1×2/2×2), i=반전, r=90° 회전, f=Fit, l=Crosslink 토글
+  // (기존 a/t/Del/Esc 유지 — 입력 필드 포커스·Ctrl/Alt/Meta 조합은 무시)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -1046,11 +1419,29 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         });
         return;
       }
-      if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        setSelPanes(new Set(panes.map((_, i) => i)));
-      } else if (e.key === "Escape") {
-        setSelPanes(new Set());
+      if (e.key === "Escape") { setSelPanes(new Set()); return; }
+      if (e.ctrlKey || e.altKey || e.metaKey) return;   // 브라우저/기존 조합키 동작 보존
+      switch (e.key) {
+        case "ArrowRight": e.preventDefault(); scroll(active, 1); return;
+        case "ArrowLeft": e.preventDefault(); scroll(active, -1); return;
+        case " ":   // Space — 활성 페인 시네 재생/정지
+          e.preventDefault();
+          cineLast.current[active] = 0;
+          setPanes((ps) => ps.map((q, k) => (k === active && q.series ? { ...q, playing: !q.playing } : q)));
+          return;
+        case "1": applySLayout({ r: 1, c: 1 }); return;
+        case "2": applySLayout({ r: 1, c: 2 }); return;
+        case "4": applySLayout({ r: 2, c: 2 }); return;
+      }
+      switch (e.key.toLowerCase()) {
+        case "a":
+          e.preventDefault();
+          setSelPanes(new Set(panes.map((_, i) => i)));
+          return;
+        case "i": updMany(targetsOf(active), (q) => ({ invert: !q.invert })); schedHist(); return;
+        case "r": updMany(targetsOf(active), (q) => ({ rot: (q.rot + 90) % 360 })); schedHist(); return;
+        case "f": updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })); schedHist(); return;
+        case "l": setXlink((x) => ({ ...x, crosslink: !x.crosslink })); return;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -1063,7 +1454,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       window.removeEventListener("keyup", onKeyUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panes.length]);
+  }, [panes.length, active, scroll, selPanes, xlink.crosslink, series]);
   const adjFr = (set: React.Dispatch<React.SetStateAction<number[]>>, i: number,
                  deltaPx: number, totalPx: number) =>
     set((fr) => {
@@ -1231,7 +1622,27 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
       <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
-      {series.map((s, sIdx) => (
+      {/* IN-2 ⑤: 썸네일 표시 모드 — 시리즈 대표/전체 이미지 나열 (viewer.prefs.infi_thumb_mode 계정 로밍) */}
+      <button onClick={() => {
+                const m = thumbMode === "series" ? "all" : "series";
+                setThumbMode(m);
+                persistPrefs({ infi_thumb_mode: m });
+              }}
+              title={`썸네일 표시 모드 전환 (계정 로밍) — 현재: ${thumbMode === "series" ? "시리즈 대표 1장" : "전체 이미지 나열(최대 200장)"}`}
+              style={{ fontSize: 10.5 }}>
+        {thumbMode === "series" ? "시리즈" : "전체"}
+      </button>
+      {thumbMode === "all" && series
+        .flatMap((s) => s.instances.map((inst, idx) => ({ s, inst, idx })))
+        .slice(0, 200)
+        .map(({ s, inst, idx }) => (
+          <img key={inst.sop_uid} src={inst.preview_url} alt=""
+               title={`S${s.series_number} Img${inst.instance_number ?? idx + 1} — 클릭=활성 페인 표시`}
+               onClick={() => upd(active, { series: s, index: idx, studyUid: curD.study_uid })}
+               style={{ width: "100%", display: "block", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+                        border: thumbBorder(s.series_uid, "1px solid var(--border)"), background: "#000" }} />
+        ))}
+      {thumbMode === "series" && series.map((s, sIdx) => (
         <div key={s.series_uid}
              onClick={(e) => {
                // 썸네일에서도 다중 선택: Ctrl=해당 시리즈가 표시된 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
@@ -1373,6 +1784,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   setSeries(e.series);
                   const pi = panes.findIndex((p) => p.studyUid === e.d.study_uid);
                   if (pi >= 0) setActive(pi);
+                  postStudySync(e.d.id, "viewer");   // IN-2 ③: Worklist·Reading 창 동기
                 }}
                 style={{ border: `1px solid ${i === activeExam ? "var(--accent)" : "var(--border)"}`,
                          borderRadius: 4, padding: "1px 8px", cursor: "pointer",
@@ -1380,7 +1792,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                          fontSize: 10.5, lineHeight: 1.25 }}>
             {e.d.modality}(Original) {e.d.patient_name}<br />
             {e.d.study_date} {(e.d.study_desc ?? "").slice(0, 14)}
-            <span onClick={(ev) => { ev.stopPropagation(); closeExam(i); }}
+            <span onClick={(ev) => { ev.stopPropagation(); requestClose({ kind: "one", i }); }}
                   title="이 검사 닫기" style={{ marginLeft: 6, color: "var(--stat-emergency)" }}>✕</span>
           </span>
         ))}
@@ -1505,15 +1917,25 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                            color: xlink.crosslink ? "#fff" : undefined }}>
             ⛓ Crosslink
           </button>
-          <select title="행잉 프로토콜 (Default hanging protocol)" defaultValue=""
+          <select title={`행잉 프로토콜 — 현재: ${hpName}. 규칙(장비×부위×Projection)은 설정>행잉(HP)에서 관리, 검사 로드 시 첫 일치 규칙 자동 적용`}
+                  defaultValue=""
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (v === "stack") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 1, c: 1 } }); }
-                    else if (v === "tile") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 3, c: 3 } }); }
-                    else if (v === "cmp") applySLayout({ r: 1, c: 2 });
+                    if (v.startsWith("hp:")) {   // IN-2 ①: 규칙 기반 행잉 선택 적용
+                      const rule = hpRules[Number(v.slice(3))];
+                      if (rule) applyHpIn(rule);
+                    }
+                    else if (v === "stack") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 1, c: 1 } }); setHpName("기본"); }
+                    else if (v === "tile") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 3, c: 3 } }); setHpName("기본"); }
+                    else if (v === "cmp") { applySLayout({ r: 1, c: 2 }); setHpName("기본"); }
                     e.target.value = "";
                   }} style={{ fontSize: 10 }}>
-            <option value="" disabled>Default …</option>
+            <option value="" disabled>HP: {hpName}</option>
+            {hpRules.map((r, i) => (
+              <option key={r.id} value={`hp:${i}`}>
+                {r.name} — {r.modality || "*"}/{r.body_part || "*"} · S{r.s.r}×{r.s.c} I{r.i.r}×{r.i.c}
+              </option>
+            ))}
             <option value="stack">Stack 1x1</option>
             <option value="tile">Tile 3x3</option>
             <option value="cmp">Compare 1x2</option>
@@ -1528,12 +1950,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       persistPrefs({ infi_report_dock: nv });
                     }}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0", background: reportDock ? "var(--accent)" : undefined }}>📄</button>
-            <button title="Report 창 — 판독 작성 창(별도 웹창) 열기"
+            <button title="Report 창 — 판독 작성 창(별도 웹창) 열기 · 모니터 배치는 Setting>모니터"
                     onClick={() => {
-                      const w = window.open(
-                        `${window.location.origin}${window.location.pathname}?report=1&study=${curD.id}`,
-                        "sv_report", "width=1280,height=860");
-                      w?.focus();
+                      // IN-2 ⑥: Setting>모니터의 판독창 모니터(monitor.report)에 배치 (TY Reading 버튼 동일)
+                      void screenFeatures(monReport != null ? [monReport] : null, "width=1280,height=860")
+                        .then((features) => {
+                          const w = window.open(
+                            `${window.location.origin}${window.location.pathname}?report=1&study=${curD.id}`,
+                            "sv_report", features);
+                          w?.focus();
+                        });
                     }}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>📝</button>
           </div>
@@ -1543,10 +1969,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             {closeMenu && (
               <div style={{ position: "absolute", left: 0, top: "105%", zIndex: 30, background: "var(--bg-elevated)",
                             border: "1px solid var(--border)", borderRadius: 4, minWidth: 150, fontSize: 11.5 }}>
-                {[["현재 검사 닫기", () => closeExam(activeExam)],
-                  ["모든 검사 닫기", () => {
-                    localStorage.removeItem(EXAMS_KEY); gotoWorklist(); window.close(); onClose();
-                  }]].map(([label, fn]) => (
+                {[["현재 검사 닫기", () => requestClose({ kind: "one", i: activeExam })],
+                  ["모든 검사 닫기", () => requestClose({ kind: "all" })]].map(([label, fn]) => (
                   <div key={label as string} onClick={fn as () => void}
                        style={{ padding: "5px 8px", cursor: "pointer" }}>{label as string}</div>
                 ))}
@@ -1607,11 +2031,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                 );
               };
               // ★ Quick — 사용 상위 6개(3회 이상 사용만). infi_quick_row=false 면 숨김
+              // IN-2 ⑦: OHIF 버튼은 설정(ohif_enabled) 켠 계정만 노출 (TY ETC 게이트 패턴)
+              const visible = (t: (typeof PALETTE)[number]) =>
+                tbShow[t.id] !== false && (t.id !== "ohif" || ohifOn);
               const quickTools = quickRow
                 ? Object.entries(usage)
                     .filter(([, n]) => n >= 3)
                     .sort((a, b) => b[1] - a[1])
-                    .map(([id]) => PALETTE.find((t) => t.id === id && t.impl && tbShow[t.id] !== false))
+                    .map(([id]) => PALETTE.find((t) => t.id === id && t.impl && visible(t)))
                     .filter((t): t is (typeof PALETTE)[number] => !!t)
                     .slice(0, 6)
                 : [];
@@ -1631,7 +2058,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                     </div>
                   )}
                   {IN_PALETTE_GROUPS.map((grp) => {
-                    const items = PALETTE.filter((t) => (t.group ?? "기타") === grp && tbShow[t.id] !== false);
+                    const items = PALETTE.filter((t) => (t.group ?? "기타") === grp && visible(t));
                     if (!items.length) return null;
                     return (
                       <div key={grp}>
@@ -1672,8 +2099,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         {/* ── 세로 시리즈 썸네일 열 (원본 이미지4) ── */}
         {thumbCol}
 
-        {/* 썸네일 ↔ 뷰포트 폭 조절 */}
-        <Splitter dir="v" onEnd={saveUi}
+        {/* 썸네일 ↔ 뷰포트 폭 조절 — IN-2 ⑤: 크기를 viewer.prefs.infi_thumb_size 로 계정 로밍 */}
+        <Splitter dir="v"
+                  onEnd={() => { saveUi(); persistPrefs({ infi_thumb_size: uiRef.current.thumbW }); }}
                   onDrag={(dx) => setUi((u) => ({ ...u, thumbW: clampW(u.thumbW + dx, 56, 260) }))} />
 
         {/* ── 뷰포트: Series 페인 — 경계 스플리터로 좌우/상하 크기 조절 ── */}
@@ -1715,6 +2143,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                         padding: 6, overflowY: "auto", fontSize: 11.5, flexShrink: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>
               W/L ({detail.modality === "MR" ? "MR" : "CT"})
+            </div>
+            {/* IN-1 ⑤: AI 자동 W/L — 모달리티×부위 추천값(TY autoWL 이식, 초안 규칙) */}
+            <div onClick={() => {
+                   const p0 = panes[active];
+                   const exd = exams.find((e) => e.d.study_uid === p0?.studyUid)?.d ?? curD;
+                   const inst0 = p0?.series?.instances[p0.index];
+                   // 합성/비보정 데이터(PixelSpacing 없음)는 HU 윈도우가 화면을 날리므로 미적용 (TY 동일 가드)
+                   const real = !!inst0?.pixel_spacing?.length;
+                   const ai = real ? autoWL(exd.modality, exd.body_part || exd.study_desc) : null;
+                   if (!ai) {
+                     say(real ? "AI 추천 W/L 미지원 — CT 검사에서 사용하세요"
+                              : "보정 정보 없는 데이터 — AI W/L 미적용(서버 기본 유지)");
+                     return;
+                   }
+                   updMany(targetsOf(active), () => ({ wl: ai.q }));
+                   schedHist();
+                   say(`AI 추천 W/L 적용: ${ai.label} (${ai.q})`);
+                 }}
+                 title="AI 자동 W/L — 모달리티×부위 기반 추천값을 활성/선택 페인에 적용 (초안 규칙)"
+                 style={{ padding: "3px 6px", borderRadius: 3, cursor: "pointer",
+                          color: "var(--ai)", fontWeight: 700 }}>
+              ⚡ AI Auto
             </div>
             {wlPresets.map((w) => (
               <div key={w.key}
@@ -1820,6 +2270,72 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             </table>
             <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 6 }}>
               렌더 영상 기반 근사값(W/L 역변환 ≈) — 원본 픽셀값 아님
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── IN-1 ③: PR↓ GSPS 불러오기 — 목록에서 선택 적용 (외부 주석=녹색) ── */}
+      {gspsPick && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 255,
+                      display: "grid", placeItems: "center" }}
+             onMouseDown={(e) => { if (e.target === e.currentTarget) setGspsPick(null); }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                        width: "min(520px, 94vw)", maxHeight: "72vh", overflow: "auto", padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+              <b style={{ fontSize: 13 }}>📥 GSPS(PR) 불러오기 — 적용할 Presentation State 선택</b>
+              <button style={{ marginLeft: "auto" }} onClick={() => setGspsPick(null)}>✕</button>
+            </div>
+            {gspsPick.map((it) => (
+              <div key={it.sop_instance_uid} onClick={() => applyGsps(it)}
+                   title="클릭 = 이 PR 의 주석·W/L 적용 (기존 외부 주석은 교체)"
+                   style={{ padding: "6px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12.5,
+                            border: "1px solid var(--border)", marginBottom: 6 }}>
+                <b>{it.label || "(라벨 없음)"}</b>
+                <span style={{ color: "var(--text-secondary)", marginLeft: 8 }}>
+                  {it.creator || "unknown"} · 주석 {it.annotations.length}건
+                  {it.wc != null && it.ww != null ? ` · W/L ${it.wc}/${it.ww}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── IN-1: 닫기 확인 — infi_close_mode=ask (체크 시 선택이 기본 동작으로 저장) ── */}
+      {closeDlg && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 260,
+                      display: "grid", placeItems: "center" }}
+             onMouseDown={(e) => { if (e.target === e.currentTarget) setCloseDlg(null); }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                        padding: 16, width: "min(420px, 92vw)" }}>
+            <b style={{ fontSize: 13 }}>
+              {closeDlg.kind === "all" ? "모든 검사 닫기" : "검사 닫기"} — 변경사항 저장
+            </b>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "8px 0 12px" }}>
+              주석·계측을 서버에 저장할까요?
+            </div>
+            {([["save_current", "주석 저장 후 닫기", "측정·주석을 서버에 저장(계정 로밍)"],
+               ["save_all", "전체 저장 후 닫기", "주석 + 표시상태(GSPS Presentation State)까지 저장"],
+               ["none", "저장하지 않고 닫기", "이번 세션의 로컬 변경을 버립니다"]] as
+               [CloseMode, string, string][]).map(([m, label, desc]) => (
+              <button key={m} className={m === "save_current" ? "primary" : ""}
+                      onClick={() => void doCloseAction(m, closeRemember, closeDlg)}
+                      style={{ display: "block", width: "100%", marginBottom: 6, padding: "7px 10px",
+                               fontSize: 12, textAlign: "left" }}>
+                <b>{label}</b>
+                <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 1 }}>{desc}</div>
+              </button>
+            ))}
+            <label title="체크하고 닫으면 다음부터 묻지 않고 이 동작으로 닫습니다 (viewer.prefs.infi_close_mode)"
+                   style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, marginTop: 4,
+                            color: "var(--text-secondary)", cursor: "pointer" }}>
+              <input type="checkbox" checked={closeRemember}
+                     onChange={(e) => setCloseRemember(e.target.checked)} />
+              이 선택을 기본 닫기 동작으로 저장(다음부터 묻지 않음)
+            </label>
+            <div style={{ textAlign: "right", marginTop: 8 }}>
+              <button onClick={() => setCloseDlg(null)}>취소</button>
             </div>
           </div>
         </div>
@@ -1947,6 +2463,35 @@ function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
         );
         const mid = (p0: { x: number; y: number }, p1: { x: number; y: number }) =>
           ({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
+        // ── IN-1 ①: 서버 주석 출처 색 구분 (TY AnnoShape 규칙: 보라=AI, 녹색=외부 PR) ──
+        // ai/external 은 라벨(annoLabel 사전 계산)을 그대로 보여주는 범용 도형으로 렌더
+        if ((a.src === "ai" || a.src === "external") && a.pts.length) {
+          const c = a.src === "ai" ? "#a78bfa" : "#67e8a0";
+          const label = a.value ?? a.text ?? "";
+          const lp = a.pts[1] ?? a.pts[0];
+          let shape: React.ReactNode = null;
+          if (["rect", "mrect", "box"].includes(a.kind) && a.pts.length >= 2) {
+            shape = <rect x={Math.min(X(a.pts[0]), X(a.pts[1]))} y={Math.min(Y(a.pts[0]), Y(a.pts[1]))}
+                          width={Math.abs(X(a.pts[1]) - X(a.pts[0]))}
+                          height={Math.abs(Y(a.pts[1]) - Y(a.pts[0]))} stroke={c} strokeWidth={1.4} />;
+          } else if (["ellipse", "mellipse"].includes(a.kind) && a.pts.length >= 2) {
+            shape = <ellipse cx={(X(a.pts[0]) + X(a.pts[1])) / 2} cy={(Y(a.pts[0]) + Y(a.pts[1])) / 2}
+                             rx={Math.abs(X(a.pts[1]) - X(a.pts[0])) / 2}
+                             ry={Math.abs(Y(a.pts[1]) - Y(a.pts[0])) / 2} stroke={c} strokeWidth={1.4} />;
+          } else if (a.kind === "ctr" && a.pts.length >= 4) {
+            shape = <>{L(a.pts[0], a.pts[1], c)}{L(a.pts[2], a.pts[3], c)}</>;
+          } else if (a.pts.length >= 2) {
+            shape = <polyline points={a.pts.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
+                              stroke={c} strokeWidth={1.4} />;
+          }
+          return (
+            <g key={i} fill="none">
+              {shape}
+              {a.pts.length === 1 && <circle cx={X(a.pts[0])} cy={Y(a.pts[0])} r={3} fill={c} stroke="none" />}
+              {label && T(X(lp) + 6, Y(lp) - 6, label, c)}
+            </g>
+          );
+        }
         switch (a.kind) {
           case "line": return (
             <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15")}
@@ -2109,7 +2654,11 @@ function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
               {T(X(a.pts[0]) + 9, Y(a.pts[0]) - 4, a.value ?? "", "#22d3ee")}</g>);
           case "profile": {
             const vals = (a as Anno2 & { vals?: number[] }).vals ?? [];
-            if (!vals.length) return null;
+            // 그래프(vals)는 세션 전용 — 서버 재로드분은 선·좌표만 표시(비표시 방지)
+            if (!vals.length) return (
+              <g key={i} fill="none">{L(a.pts[0], a.pts[1], "#facc15", "3 3")}
+                {T((X(a.pts[0]) + X(a.pts[1])) / 2 + 5, (Y(a.pts[0]) + Y(a.pts[1])) / 2 - 5,
+                   "Profile", "#facc15", 9.5)}</g>);
             const bx = Math.min(X(a.pts[0]), X(a.pts[1]));
             const by = Math.max(Y(a.pts[0]), Y(a.pts[1])) + 8;
             const bw = 130, bh = 42;

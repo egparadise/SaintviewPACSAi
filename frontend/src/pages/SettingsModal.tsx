@@ -160,6 +160,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [tyUsage, setTyUsage] = useState<Record<string, number>>({});
   const [tyUsageReset, setTyUsageReset] = useState(false);
   const [tyOvlFont, setTyOvlFont] = useState(10.5);  // Viewer2D 기본(ov() 10.5px)과 일치 — 키 계약
+  // TY 신규 키 계약 — ty_sel_color(멀티선택·활성 페인 테두리 색), ty_cine_sec(페인 시네 기본 간격 초)
+  const [tySelColor, setTySelColor] = useState("#d946ef");
+  const [tyCineSec, setTyCineSec] = useState(0.15);
+  // In 신규 키 계약 — infi_close_mode(닫기 동작: 묻기/현재 저장/전체 저장/저장 안 함)
+  const [infCloseMode, setInfCloseMode] = useState<"ask" | "save_current" | "save_all" | "none">("ask");
   const [ohifOn, setOhifOn] = useState(false);         // OHIF 아이콘 표시·동작 (기본 꺼짐)
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
@@ -292,6 +297,12 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (ty.ty_usage_rec !== undefined) setTyUsageRec(ty.ty_usage_rec);
       if (ty.ty_usage) setTyUsage(ty.ty_usage);
       if (ty.ty_overlay_font) setTyOvlFont(ty.ty_overlay_font);
+      // 신규 키 로드 — 뷰어 소비 코드와 동일 범위로 정규화(Viewer2D clamp 0.05~, ViewerInfi 값 검증)
+      const ty2 = v as { ty_sel_color?: string; ty_cine_sec?: number };
+      if (ty2.ty_sel_color) setTySelColor(ty2.ty_sel_color);
+      if (ty2.ty_cine_sec) setTyCineSec(Math.min(5, Math.max(0.05, ty2.ty_cine_sec)));
+      const icm = (v as { infi_close_mode?: "ask" | "save_current" | "save_all" | "none" }).infi_close_mode;
+      if (icm && ["ask", "save_current", "save_all", "none"].includes(icm)) setInfCloseMode(icm);
       setOhifOn(!!(v as { ohif_enabled?: boolean }).ohif_enabled);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
@@ -386,6 +397,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_quick_row: infQuickRow, infi_usage_rec: infUsageRec, infi_report_dock: infRptDock,
       ty_tool_size: tyToolSize, ty_tool_labels: tyToolLabels, ty_icon_3d: tyIcon3d,
       ty_quick_row: tyQuickRow, ty_usage_rec: tyUsageRec, ty_overlay_font: tyOvlFont,
+      ty_sel_color: tySelColor, ty_cine_sec: tyCineSec,
+      infi_close_mode: infCloseMode,
       // 사용 기록(ty_usage/infi_usage)은 [기록 초기화]를 누른 경우에만 빈 값으로 저장 —
       // 평소에는 뷰어의 2초 디바운스 집계를 설정 저장이 덮어쓰지 않도록 제외
       ...(tyUsageReset ? { ty_usage: {} } : {}),
@@ -1162,6 +1175,18 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     뷰어를 열 때 판독(Report) 도크를 기본으로 열기 — 도크 열림 상태를 계정에 기억
                   </label>
                 </Row>
+                <Row label="닫기 동작">
+                  <select value={infCloseMode}
+                          onChange={(e) => setInfCloseMode(e.target.value as typeof infCloseMode)}>
+                    <option value="ask">항상 묻기 (닫기 다이얼로그)</option>
+                    <option value="save_current">현재 저장하고 닫기 (주석)</option>
+                    <option value="save_all">전체 저장하고 닫기 (주석+GSPS)</option>
+                    <option value="none">저장하지 않고 닫기</option>
+                  </select>
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
+                    닫기 다이얼로그의 "기본으로" 체크 시 이 설정이 자동 변경됩니다 (viewer.prefs.infi_close_mode)
+                  </span>
+                </Row>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   단축키(뷰어): <b>T + 마우스 스크롤</b> = 글자 크기 조절 · <b>T + Del</b> = 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.
                 </div>
@@ -1303,6 +1328,22 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Row label="오버레이 글자">
                     <input type="range" min={6} max={24} step={0.5} value={tyOvlFont}
                            onChange={(e) => setTyOvlFont(Number(e.target.value))} /> {tyOvlFont}px
+                  </Row>
+                  <Row label="멀티선택 색">
+                    <input type="color" value={tySelColor}
+                           onChange={(e) => setTySelColor(e.target.value)}
+                           title="멀티 선택·활성 페인 테두리 색 (viewer.prefs.ty_sel_color)" />
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
+                      Shift/Ctrl 로 선택된 페인 테두리 2px · 활성 페인 1px (기본 자주색 #d946ef)
+                    </span>
+                  </Row>
+                  <Row label="시네 기본 간격">
+                    <input type="number" min={0.05} max={5} step={0.05} value={tyCineSec}
+                           onChange={(e) => setTyCineSec(Math.min(5, Math.max(0.05, Number(e.target.value) || 0.15)))}
+                           style={{ width: 70 }} />
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
+                      초 — 시네(▶)·페인별 시네(▶p) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능
+                    </span>
                   </Row>
                 </Group>
                 <Group title="사용 패턴 · ★Quick 행 (TY Viewer)">
