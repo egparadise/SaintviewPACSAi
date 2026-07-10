@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.db import get_db
 from app.services.auth_service import authenticate, create_token
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,11 +29,20 @@ class LoginResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
-    """관리자/서버 운영 로그인 (홈 페이지 Login) — 관리 콘솔용."""
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
+    """관리자/서버 운영 로그인 (홈 페이지 Login) — 관리 콘솔용.
+
+    레인 S 보안 훅: 계정·IP 연속 실패 잠금(security.policy) — 잠금 중 401, 성공 시 카운터 리셋.
+    """
+    from app.services import security_service
+
+    ip = _client_ip(request)
+    security_service.ensure_login_allowed(db, body.username, ip)
     account = authenticate(db, body.username, body.password)
     if not account:
+        security_service.record_login_failure(db, body.username, ip)
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+    security_service.reset_login_failures(body.username, ip)
     return LoginResponse(token=create_token(account), username=account.username, role=account.role,
                          hospital_id=account.hospital_id)
 
@@ -41,22 +54,28 @@ class ClientLoginRequest(BaseModel):
 
 
 @router.post("/client-login", response_model=LoginResponse)
-def client_login(body: ClientLoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def client_login(body: ClientLoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
     """Saintview PACS AI Client 뷰어 로그인 — 병원 ID + 개별 ID + Password.
 
     병원 ID로 병원을 식별하고, 해당 병원 소속 계정만 그 병원 PACS Viewer에 로그인된다.
+    레인 S 보안 훅: 관리 콘솔 로그인과 동일한 실패 잠금 적용.
     """
     from sqlalchemy import select
 
     from app.models import Hospital
+    from app.services import security_service
 
+    ip = _client_ip(request)
+    security_service.ensure_login_allowed(db, body.username, ip)
     code = body.hospital_id.strip()
     hospital = db.execute(select(Hospital).where(Hospital.code == code)).scalar_one_or_none()
     if not hospital or not hospital.enabled:
         raise HTTPException(status_code=401, detail="병원 ID가 올바르지 않거나 비활성 병원입니다")
     account = authenticate(db, body.username, body.password)
     if not account:
+        security_service.record_login_failure(db, body.username, ip)
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+    security_service.reset_login_failures(body.username, ip)
     # 시스템 관리자(병원 미소속 admin)는 어느 병원이든 접속 가능(운영/지원).
     # 그 외에는 자기 소속 병원만.
     is_system_admin = account.role == "admin" and not account.hospital_id

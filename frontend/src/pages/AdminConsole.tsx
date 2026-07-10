@@ -1,6 +1,7 @@
 // 관리자 콘솔 — 로그인 후 메인 페이지(좌측 트리 메뉴 + 우측 내용)
-// 구조도: 서버 Storage/Database · 등록 병원 → 병원별 관리 탭 7종
-//   (①계정·등급 ②권한 매트릭스 ③Modality(SCP) ④병원 설정(SCU) ⑤사용량 ⑥연결 대시보드 ⑦DB·영상 관리)
+// 구조도: 서버(상태·설정·인프라·보안 등) · 등록 병원 → 병원별 관리 탭 12종
+//   (①계정·등급 ②권한 매트릭스 ③Modality(SCP) ④병원 설정(SCU) ⑤사용량 ⑥연결 대시보드 ⑦DB·영상 관리
+//    ⑧로그 ⑨통계 ⑩데이터 ⑪연동(HL7·원격판독·MWL·가상환자) ⑫컨테이너(Orthanc))
 import { useEffect, useState } from "react";
 import {
   api, setToken, type HospitalNetResult, type HospitalRow, type ServerStatusAll,
@@ -18,6 +19,10 @@ import {
 import {
   AdminAccountsPanel, AiProvidersPanel, DbSchemaPanel, LogsPanel, SignupFieldsPanel, StatsPanel,
 } from "./admin/ServerInsights";
+// 병렬 레인 패널 (통합 배선) — H: HL7/원격판독/MWL/가상환자 · O: 인프라 · S: 보안
+import { Hl7Panel } from "./admin/Hl7Panel";
+import InfraPanel, { HospitalContainersSection } from "./admin/InfraPanel";
+import { SecurityPanel } from "./admin/SecurityPanel";
 
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
 
@@ -150,6 +155,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     { key: "logs", label: "⑧ 로그" },
     { key: "stats", label: "⑨ 통계" },
     { key: "data", label: "⑩ 데이터 (지우기·복원)" },
+    { key: "link", label: "⑪ 연동 (HL7·원격판독·MWL·가상환자)" },
+    { key: "cont", label: "⑫ 컨테이너 (Orthanc)" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -186,6 +193,9 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   else if (sel === "srv-logs") content = <LogsPanel />;
   else if (sel === "srv-stats") content = <StatsPanel />;
   else if (sel === "srv-ai") content = <AiProvidersPanel />;
+  // 병렬 레인 패널 — 인프라(O) · 보안(S)
+  else if (sel === "srv-infra") content = <InfraPanel />;
+  else if (sel === "srv-security") content = <SecurityPanel />;
   else if (sel.startsWith("h:")) {
     const [, hidStr, sub] = sel.split(":");
     const hid = Number(hidStr);
@@ -200,6 +210,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     else if (sub === "logs") content = <HospitalLogsTab hid={hid} />;
     else if (sub === "stats") content = <HospitalStatsTab hid={hid} />;
     else if (sub === "data") content = <HospitalDataTab hid={hid} hospitals={hosps} />;
+    else if (sub === "link") content = <Hl7Panel hid={hid} />;
+    else if (sub === "cont") content = <HospitalContainersSection hid={hid} />;
   }
 
   return (
@@ -232,6 +244,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
             <div style={itemStyle(sel === "srv-logs")} onClick={() => setSel("srv-logs")}>📜 시스템 로그</div>
             <div style={itemStyle(sel === "srv-stats")} onClick={() => setSel("srv-stats")}>📈 사용량 통계</div>
             <div style={itemStyle(sel === "srv-ai")} onClick={() => setSel("srv-ai")}>🤖 AI 등록</div>
+            <div style={itemStyle(sel === "srv-infra")} onClick={() => setSel("srv-infra")}>🐳 인프라 (컨테이너·OHIF·DDNS)</div>
+            <div style={itemStyle(sel === "srv-security")} onClick={() => setSel("srv-security")}>🔐 보안 (바이러스·랜섬·접근)</div>
             <div style={itemStyle(sel === "overview")} onClick={() => setSel("overview")}>📊 운영 현황(감독)</div>
             <div style={itemStyle(sel === "users")} onClick={() => setSel("users")}>👤 사용자 관리</div>
           </>}

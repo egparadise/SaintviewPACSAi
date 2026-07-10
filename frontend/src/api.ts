@@ -98,6 +98,33 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** 레인 패널(HL7·인프라·보안) 공용 인증 fetch — 각 패널의 중복 로컬 헬퍼를 승격(동작 무변경).
+ *  api 내부 req() 와 달리 401 자동 로그아웃·리로드를 하지 않는다(패널이 오류 메시지로 표시).
+ *  오류 문구 형식은 패널마다 달랐으므로 fmtErr 로 기존 형식을 그대로 유지한다. */
+export async function panelFetch<T>(
+  path: string,
+  init?: RequestInit,
+  fmtErr: (status: number, statusText: string, detail?: string) => string
+    = (s, st, d) => (d ? `${s} · ${d}` : `${s} ${st}`),
+): Promise<T> {
+  // 토큰: 메모리 우선(새 창 인계 커버), 없으면 저장소(sv_token) 조회 — 기존 패널 동작과 동일
+  const t = token ?? localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(t ? { Authorization: `Bearer ${t}` } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let detail: string | undefined;
+    try { detail = ((await res.json()) as { detail?: string }).detail; } catch { /* 본문 없음 */ }
+    throw new Error(fmtErr(res.status, res.statusText, detail));
+  }
+  return res.json() as Promise<T>;
+}
+
 // ---- 타입 (백엔드 응답 1:1) ----
 export interface StudyRow {
   id: number;

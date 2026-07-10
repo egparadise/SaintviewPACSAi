@@ -6,6 +6,8 @@ from app.models.entities import (  # noqa: F401
     AuditLog,
     BackupJob,
     Client,
+    Hl7Inbox,
+    Hl7Outbox,
     Hospital,
     Modality,
     Order,

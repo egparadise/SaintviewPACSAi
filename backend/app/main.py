@@ -31,6 +31,20 @@ try:
     from app.api import insights as insights_api
 except ImportError:
     insights_api = None
+# 병렬 레인 라우터 3종 — 파일명 계약: app/api/hl7.py(레인 H)·infra.py(레인 O)·security.py(레인 S).
+# 아직 없는 레인 파일은 건너뛰고, 병합 후 자동 등록된다.
+try:
+    from app.api import hl7 as hl7_api
+except ImportError:
+    hl7_api = None
+try:
+    from app.api import infra as infra_api
+except ImportError:
+    infra_api = None
+try:
+    from app.api import security as security_api
+except ImportError:
+    security_api = None
 from app.config import get_settings
 from app.db import SessionLocal, init_db
 from app.services.auth_service import ensure_default_admin
@@ -93,6 +107,12 @@ app.include_router(share.router)
 app.include_router(maintenance.router)
 if insights_api is not None:
     app.include_router(insights_api.router)
+if hl7_api is not None:
+    app.include_router(hl7_api.router)
+if infra_api is not None:
+    app.include_router(infra_api.router)
+if security_api is not None:
+    app.include_router(security_api.router)
 
 
 @app.get("/api/health")

@@ -267,6 +267,10 @@ class Order(Base):
     dicom_study_id: Mapped[str] = mapped_column(String(16), default="")  # DICOM StudyID (0020,0010)
     # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
     status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    # 경량 테넌시 — HL7 ORM/가상환자 생성기 오더의 병원 귀속(MWL 병원 필터). NULL=전역
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -361,6 +365,56 @@ class BackupJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Hl7Inbox(Base):
+    """HL7 수신함(중간 테이블) — ADT(환자 캐시)·ORM(오더 생성)·원격판독 수신 이력.
+
+    ADT^A04/A08 은 parsed_json 에 환자 정보를 캐시하고(뷰어 patient_key 매핑 보강),
+    ORM^O01 은 Order 행을 생성한다. status: received | done | error.
+    """
+
+    __tablename__ = "hl7_inbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
+    direction: Mapped[str] = mapped_column(String(8), default="in")
+    msg_type: Mapped[str] = mapped_column(String(16), default="", index=True)  # ADT^A04 등
+    patient_id: Mapped[str] = mapped_column(String(64), default="", index=True)  # PID-3
+    accession: Mapped[str] = mapped_column(String(64), default="", index=True)
+    raw: Mapped[str] = mapped_column(Text, default="")
+    parsed_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="received", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Hl7Outbox(Base):
+    """HL7 발신함 — 판독 확정(finalize) 시 ORU^R01 적재 → MLLP 클라이언트 전송.
+
+    status: queued | sent | error. 전송 실패 시 retry_count 증가 후 재시도 대상 유지.
+    """
+
+    __tablename__ = "hl7_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
+    direction: Mapped[str] = mapped_column(String(8), default="out")
+    msg_type: Mapped[str] = mapped_column(String(16), default="ORU^R01", index=True)
+    patient_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    accession: Mapped[str] = mapped_column(String(64), default="", index=True)
+    raw: Mapped[str] = mapped_column(Text, default="")
+    parsed_json: Mapped[dict] = mapped_column(JSON, default=dict)  # {report_id, study_id …}
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AppSetting(Base):

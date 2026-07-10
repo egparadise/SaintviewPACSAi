@@ -11,10 +11,11 @@ logger = logging.getLogger("saintview.orthanc")
 
 
 class OrthancClient:
-    def __init__(self) -> None:
+    def __init__(self, base_url: str | None = None) -> None:
+        # base_url 미지정 = 기존 공유 Orthanc 그대로(무회귀) — 병원별 컨테이너는 명시 주입
         s = get_settings()
         self._client = httpx.Client(
-            base_url=s.orthanc_url,
+            base_url=base_url or s.orthanc_url,
             auth=(s.orthanc_user, s.orthanc_password),
             timeout=30,
         )
@@ -180,6 +181,30 @@ class OrthancClient:
 
     def close(self) -> None:
         self._client.close()
+
+
+def orthanc_url_for_hospital(db, hospital_id) -> str | None:
+    """병원 전용 Orthanc URL 해석 — infra.containers 레지스트리에 등록돼 있으면 그 URL.
+
+    미등록/미지정이면 None(공유 컨테이너 폴백 — 기존 동작 무회귀).
+    """
+    if hospital_id is None:
+        return None
+    try:
+        from app.services.settings_service import get_setting
+
+        reg = get_setting(db, "infra.containers", default={}) or {}
+        entry = reg.get(str(hospital_id)) if isinstance(reg, dict) else None
+        url = entry.get("url") if isinstance(entry, dict) else None
+        return str(url) if url else None
+    except Exception:  # noqa: BLE001 — 해석 실패는 공유 폴백(가용성 우선)
+        logger.warning("병원별 Orthanc URL 해석 실패(hid=%s) — 공유 컨테이너 폴백", hospital_id)
+        return None
+
+
+def client_for_hospital(db, hospital_id) -> OrthancClient:
+    """병원별 컨테이너가 있으면 그쪽, 없으면 공유 Orthanc 클라이언트(폴백)."""
+    return OrthancClient(base_url=orthanc_url_for_hospital(db, hospital_id))
 
 
 def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, int]:

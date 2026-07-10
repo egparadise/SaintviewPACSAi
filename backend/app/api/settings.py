@@ -35,6 +35,15 @@ ALLOWED_KEYS = {
     "perm.matrix",           # 병원별 등급 권한 매트릭스 (GET|PUT /hospitals/{hid}/perm-matrix)
     "modality.nodes",        # 병원별 SCP Modality 등록 (GET|PUT /hospitals/{hid}/modalities)
     "hospital.scu",          # 병원 SCU IP/Port (GET|PUT /hospitals/{hid}/scu)
+    # 병원 스코프 — EMR/장비 연동(레인 H, GET|PUT /api/hl7/hospitals/{hid}/config/{key})
+    "hl7.config",            # MLLP 수신 {enabled, port, facility(MSH-5/6 매핑), oru:{host,port}}
+    "remote.reading",        # 원격판독 입력 창구 {enabled, api_key}
+    "mwl.config",            # MWL SCP {enabled, port, aet, registered_only}
+    "testgen.config",        # 가상 환자 생성 규칙 {pid_prefix, acc_prefix, modalities …}
+    # 전역 전용 — 인프라/보안 (레인 O·S)
+    "infra.containers",      # 병원별 컨테이너 오케스트레이션 설정 (전역/관리자)
+    "ddns.config",           # DDNS 설정 (전역/관리자)
+    "security.policy",       # 보안 정책(로그인 잠금 등 — 전역/관리자)
 }
 
 # 전역(global) 스코프만 허용하는 키 — 관리자 전용 서버 설정(사용자 스코프 오염 방지)
@@ -42,6 +51,7 @@ GLOBAL_ONLY_KEYS = {
     "mode.profiles", "dicom.nodes", "server.network",
     "signup.fields.hospital", "signup.fields.client", "signup.fields.modality",
     "ai.providers", "server.dbtool",
+    "infra.containers", "ddns.config", "security.policy",
 }
 
 
