@@ -2,7 +2,7 @@
 // [Report|History|Shortcuts|Templates] 탭 · Font size · CVR Notice · ◀▶ · Reset/Save/Approve
 // 동작은 Viewer2D 내장 시절과 완전 동일(이사만) — 리포트 로드/저장/승인/상용구/단축키 포함.
 import { useEffect, useRef, useState } from "react";
-import { api, type PhraseRow, type Report, type StudyDetail } from "../api";
+import { PERM_DENIED_TIP, api, hasPerm, loadPermMe, type PermMe, type PhraseRow, type Report, type StudyDetail } from "../api";
 
 export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   detail: StudyDetail;
@@ -24,6 +24,11 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
     cvr_notice?: boolean; save_alert?: boolean; panel_tab?: string; sidebar_tab?: string;
     insert_pos?: string; key_save?: string; key_approve?: string;
   }>({});
+  // 유효 권한(perm/me, 레인 W) — report.write 없으면 Reading/Conclusion readOnly + Save/Approve 비활성(조회 가능).
+  // 서버가 403 을 강제하므로 이 게이트는 UX(사전 안내) 목적. 로드 실패=null → 전 기능 허용 폴백
+  const [permMe, setPermMe] = useState<PermMe | null>(null);
+  useEffect(() => { loadPermMe().then(setPermMe).catch(() => {}); }, []);
+  const canWrite = hasPerm(permMe, "report.write");
 
   const initDockText = (r: Report | null) => {
     setHistView(null);
@@ -70,6 +75,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockSave = async () => {
+    if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 단축키(Ctrl+S) 경로도 게이트
     const sr = buildDockSr();
     if (!report || !sr) return;
     try {
@@ -83,6 +89,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockApprove = async () => {
+    if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 단축키(Ctrl+Shift+A) 경로도 게이트
     const sr = buildDockSr();
     if (!report || !sr) return;
     if (!window.confirm("판독을 확정(승인·서명)합니다. 확정 후 수정할 수 없습니다.")) return;
@@ -99,6 +106,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockInsert = (p: PhraseRow) => {
+    if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 상용구 삽입도 판독 변경
     const pos = rdOpts.insert_pos ?? "end";
     const join = (cur: string, add: string) => !add ? cur : (cur ? `${cur}\n${add}` : add);
     if (pos === "cursor") {
@@ -117,6 +125,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockApplyTemplate = (p: PhraseRow) => {
+    if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 템플릿 교체도 판독 변경
     if (!window.confirm(`템플릿 '${p.name}'으로 판독/결론을 교체할까요?`)) return;
     setReading(p.reading_text);
     setConclusion(p.text);
@@ -194,11 +203,14 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
                 onClick={() => onLoadPrior(relExams[1].id)}>▶</button>
         <button title="서버 저장본으로 되돌리기" style={{ padding: "1px 7px" }}
                 onClick={() => initDockText(report)}>Reset</button>
-        <button className="primary" title={`저장 (${rdOpts.key_save ?? "Ctrl+S"})`} style={{ padding: "1px 9px" }}
-                disabled={!report || finalizedDock} onClick={() => void dockSave()}>Save</button>
-        <button title={`승인 — 확정·서명 (${rdOpts.key_approve ?? "Ctrl+Shift+A"})`}
-                style={{ padding: "1px 9px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4 }}
-                disabled={!report || finalizedDock} onClick={() => void dockApprove()}>Approve</button>
+        {/* report.write 게이트(레인 W) — 서버 403 이 최종 방어선, UI 는 비활성+안내 툴팁(UX) */}
+        <button className="primary" title={canWrite ? `저장 (${rdOpts.key_save ?? "Ctrl+S"})` : PERM_DENIED_TIP}
+                style={{ padding: "1px 9px" }}
+                disabled={!report || finalizedDock || !canWrite} onClick={() => void dockSave()}>Save</button>
+        <button title={canWrite ? `승인 — 확정·서명 (${rdOpts.key_approve ?? "Ctrl+Shift+A"})` : PERM_DENIED_TIP}
+                style={{ padding: "1px 9px", background: "var(--stat-final)", color: "#fff", border: "none",
+                         borderRadius: 4, opacity: !report || finalizedDock || !canWrite ? 0.5 : 1 }}
+                disabled={!report || finalizedDock || !canWrite} onClick={() => void dockApprove()}>Approve</button>
       </div>
       {rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
         <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 11, padding: "3px 8px", fontWeight: 700 }}>
@@ -219,11 +231,14 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
             </div>
           )}
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>Reading</div>
+          {/* report.write 없으면 readOnly — 조회는 가능(레인 W) */}
           <textarea value={reading} placeholder="Enter reading findings" disabled={finalizedDock}
+                    readOnly={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
                     onChange={(e) => { setReading(e.target.value); setReadingTouched(true); }}
                     style={{ ...taStyle, flex: 1.4, minHeight: 90 }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>Conclusion</div>
           <textarea id="sv-dock-conclusion" value={conclusion} placeholder="Enter conclusion" disabled={finalizedDock}
+                    readOnly={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
                     onChange={(e) => setConclusion(e.target.value)}
                     style={{ ...taStyle, flex: 1, minHeight: 70 }} />
           {dockSig && (

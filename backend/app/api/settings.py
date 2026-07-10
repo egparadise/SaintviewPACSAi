@@ -25,6 +25,10 @@ ALLOWED_KEYS = {
     "report.prefs",          # 리포트 구성 (AI 패널 표시·자동 적용 — UBPACS Report Composition)
     "server.network",        # 서버 네트워크 (로컬 공유 디렉토리·웹서버 IP/Port/Name/AET — 전역)
     "report.phrases_local",  # 계정별 로컬 단축키·템플릿의 서버 백업(주기 — 설정>판독)
+    # 병원(hospital) 스코프 키 — 전용 엔드포인트(/api/hospitals/{hid}/...)로 읽고 쓴다
+    "perm.matrix",           # 병원별 등급 권한 매트릭스 (GET|PUT /hospitals/{hid}/perm-matrix)
+    "modality.nodes",        # 병원별 SCP Modality 등록 (GET|PUT /hospitals/{hid}/modalities)
+    "hospital.scu",          # 병원 SCU IP/Port (GET|PUT /hospitals/{hid}/scu)
 }
 
 

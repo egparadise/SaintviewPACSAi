@@ -38,7 +38,7 @@ def test_account_lifecycle_and_permissions(client, auth_headers):
     })
     assert r.status_code == 200, r.text
     aid = r.json()["id"]
-    assert r.json()["role_label"] == "방사선사"
+    assert r.json()["role_label"] == "방사선사(Radiographer)"  # 등급 라벨 병기
     # 새 계정 로그인
     tok = client.post("/api/auth/login", json={"username": "rt1", "password": "rtpass123"})
     assert tok.status_code == 200, tok.text

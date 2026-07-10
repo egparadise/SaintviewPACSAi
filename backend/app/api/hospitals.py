@@ -158,19 +158,44 @@ class ClientBody(BaseModel):
     name: str
     location: str = ""
     enabled: bool = True
+    role: str = ""  # 계정 등급 — doctor|radiologist|technologist|staff ("" = 변경 없음/기본 staff)
 
 
-def _client_dict(c: Client) -> dict:
+# Client(좌석)별 계정 등급 — Client 테이블에 컬럼이 없어(스키마 마이그레이션 금지)
+# hospital 스코프 setting 'client.roles' 에 {"<client_id>": "<role>"} 로 보관한다.
+_CLIENT_ROLES_KEY = "client.roles"
+
+
+def _client_roles(db: Session, hid: int) -> dict:
+    from app.services.settings_service import get_hospital_setting
+
+    stored = get_hospital_setting(db, hid, _CLIENT_ROLES_KEY, default={}) or {}
+    return dict(stored) if isinstance(stored, dict) else {}
+
+
+def _validate_client_role(role: str) -> None:
+    from app.services.permissions import CLIENT_ROLES
+
+    if role and role not in CLIENT_ROLES:
+        raise HTTPException(status_code=400,
+                            detail=f"알 수 없는 등급: {role} ({'|'.join(CLIENT_ROLES)})")
+
+
+def _client_dict(c: Client, role: str = "staff") -> dict:
+    from app.services.permissions import ROLES
+
     return {"id": c.id, "hospital_id": c.hospital_id, "name": c.name, "code": c.code,
             "location": c.location, "enabled": c.enabled, "online": _is_online(c.last_seen),
-            "last_seen": c.last_seen.isoformat() if c.last_seen else None, "last_user": c.last_user}
+            "last_seen": c.last_seen.isoformat() if c.last_seen else None, "last_user": c.last_user,
+            "role": role, "role_label": ROLES.get(role, role)}
 
 
 @router.get("/hospitals/{hid}/clients")
 def list_clients(hid: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     _require_access(user, hid)
+    roles = _client_roles(db, hid)
     rows = db.execute(select(Client).where(Client.hospital_id == hid).order_by(Client.id)).scalars().all()
-    return {"items": [_client_dict(c) for c in rows]}
+    return {"items": [_client_dict(c, roles.get(str(c.id), "staff")) for c in rows]}
 
 
 @router.post("/hospitals/{hid}/clients")
@@ -183,14 +208,23 @@ def create_client(hid: int, body: ClientBody, db: Session = Depends(get_db),
     cur = db.execute(select(func.count()).select_from(Client).where(Client.hospital_id == hid)).scalar() or 0
     if h.license_clients > 0 and cur >= h.license_clients:
         raise HTTPException(status_code=409, detail=f"Client 라이선스 한도 초과({h.license_clients}석)")
+    _validate_client_role(body.role)
     c = Client(hospital_id=hid, name=body.name.strip() or f"Client {cur + 1}",
                code=f"{h.code}-C{cur + 1:02d}", location=body.location.strip(), enabled=body.enabled)
     db.add(c)
     db.flush()
+    role = body.role or "staff"
+    if body.role:
+        from app.services.settings_service import set_hospital_setting
+
+        roles = _client_roles(db, hid)
+        roles[str(c.id)] = body.role
+        set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
     db.add(AuditLog(account_id=user.get("uid"), action="client_create",
-                    target_type="client", target_id=str(c.id), detail={"hospital": hid}))
+                    target_type="client", target_id=str(c.id),
+                    detail={"hospital": hid, "role": role}))
     db.commit()
-    return _client_dict(c)
+    return _client_dict(c, role)
 
 
 @router.put("/hospitals/{hid}/clients/{cid}")
@@ -200,11 +234,18 @@ def update_client(hid: int, cid: int, body: ClientBody, db: Session = Depends(ge
     c = db.get(Client, cid)
     if not c or c.hospital_id != hid:
         raise HTTPException(status_code=404, detail="Client를 찾을 수 없습니다")
+    _validate_client_role(body.role)
     c.name = body.name.strip()
     c.location = body.location.strip()
     c.enabled = body.enabled
+    roles = _client_roles(db, hid)
+    if body.role:  # "" = 등급 변경 없음(기존 유지)
+        from app.services.settings_service import set_hospital_setting
+
+        roles[str(c.id)] = body.role
+        set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
     db.commit()
-    return _client_dict(c)
+    return _client_dict(c, roles.get(str(c.id), "staff"))
 
 
 @router.delete("/hospitals/{hid}/clients/{cid}")
@@ -214,6 +255,11 @@ def delete_client(hid: int, cid: int, db: Session = Depends(get_db),
     c = db.get(Client, cid)
     if not c or c.hospital_id != hid:
         raise HTTPException(status_code=404, detail="Client를 찾을 수 없습니다")
+    roles = _client_roles(db, hid)
+    if roles.pop(str(cid), None) is not None:  # 등급 매핑 정리(고아 키 방지)
+        from app.services.settings_service import set_hospital_setting
+
+        set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
     db.delete(c)
     db.commit()
     return {"ok": True}

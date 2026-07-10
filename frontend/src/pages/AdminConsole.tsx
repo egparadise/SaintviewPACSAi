@@ -1,20 +1,17 @@
 // 관리자 콘솔 — 로그인 후 메인 페이지(좌측 트리 메뉴 + 우측 내용)
-// 구조도: 서버 Storage/Database · 등록 병원 → 병원별(정보/Client/Modality/Storage/Database)
+// 구조도: 서버 Storage/Database · 등록 병원 → 병원별 관리 탭 7종
+//   (①계정·등급 ②권한 매트릭스 ③Modality(SCP) ④병원 설정(SCU) ⑤사용량 ⑥연결 대시보드 ⑦DB·영상 관리)
 import { useEffect, useState } from "react";
 import {
-  api, setToken, type ClientRow, type HospitalNetResult, type HospitalResources,
-  type HospitalRow, type ServerStatusAll,
+  api, setToken, type HospitalNetResult, type HospitalRow, type ServerStatusAll,
 } from "../api";
 import {
-  HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel,
+  HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel,
 } from "./admin/ServerAdmin";
+import {
+  AccountsTab, ConnDashboardTab, HospitalModalityTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
+} from "./admin/HospitalAdmin";
 
-function fmtBytes(n?: number | null): string {
-  if (!n || n <= 0) return "—";
-  const u = ["B", "KB", "MB", "GB", "TB"]; let v = n, i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
-}
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
 
 // ── 서버 Database ──
@@ -121,83 +118,6 @@ function HospitalInfoView({ hid }: { hid: number }) {
   );
 }
 
-// ── 병원 Client 정보 및 Setting ──
-function ClientManager({ hid }: { hid: number }) {
-  const [items, setItems] = useState<ClientRow[]>([]);
-  const [name, setName] = useState(""); const [loc, setLoc] = useState(""); const [msg, setMsg] = useState("");
-  const load = () => api.clients(hid).then((r) => setItems(r.items)).catch((e) => setMsg("⚠ " + e.message));
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [hid]);
-  const add = async () => {
-    try { await api.createClient(hid, { name: name.trim(), location: loc.trim() }); setName(""); setLoc(""); load(); }
-    catch (e) { setMsg("⚠ " + (e as Error).message); }
-  };
-  const inp: React.CSSProperties = { background: "var(--bg-canvas)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 4, padding: "5px 8px", fontSize: 12.5 };
-  return (
-    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>👁️ Client 정보 및 Setting</div>
-        <div style={{ flex: 1 }} />
-        <input style={inp} placeholder="좌석 이름" value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={inp} placeholder="위치" value={loc} onChange={(e) => setLoc(e.target.value)} />
-        <button onClick={add} disabled={!name.trim()}>＋ 추가</button>
-      </div>
-      <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th>이름</th><th>코드</th><th>위치</th><th>접속</th><th>마지막</th><th>사용</th><th></th></tr></thead>
-        <tbody>
-          {items.map((c) => (
-            <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.5 }}>
-              <td>{c.name}</td><td>{c.code}</td><td>{c.location || "—"}</td>
-              <td style={{ color: c.online ? "#34d399" : "var(--text-secondary)" }}>{c.online ? "● 접속중" : "○ 대기"}</td>
-              <td>{c.last_seen ? c.last_seen.replace("T", " ").slice(0, 19) : "—"}</td>
-              <td><input type="checkbox" checked={c.enabled} onChange={async (e) => { await api.updateClient(hid, c.id, { name: c.name, location: c.location, enabled: e.target.checked }); load(); }} /></td>
-              <td><button onClick={async () => { if (confirm(`'${c.name}' 삭제?`)) { await api.deleteClient(hid, c.id); load(); } }}>삭제</button></td>
-            </tr>
-          ))}
-          {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>등록된 Client(좌석)가 없습니다.</td></tr>}
-        </tbody>
-      </table>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        Client 뷰어는 별도 로그인(병원 ID + 개별 ID + Password)으로 접속합니다. 위 목록은 좌석 등록·접속 상태 관리입니다.
-      </div>
-      <Msg text={msg} />
-    </div>
-  );
-}
-
-// ── 병원 Storage / Database ──
-function HospitalResView({ hid, kind }: { hid: number; kind: "storage" | "db" }) {
-  const [r, setR] = useState<HospitalResources | null>(null);
-  const load = () => api.hospitalResources(hid).then(setR).catch(() => {});
-  useEffect(() => { load(); }, [hid]);
-  if (!r) return <div style={card}>불러오는 중…</div>;
-  if (kind === "storage") return (
-    <div style={{ ...card }}>
-      <div style={{ fontWeight: 700, marginBottom: 10 }}>🩻 병원 Storage</div>
-      <table className="grid-table" style={{ fontSize: 12.5 }}><tbody>
-        <tr><td>영상 용량(추정)</td><td>{fmtBytes(r.image.bytes_estimate)}</td></tr>
-        <tr><td>검사 / 시리즈 / 인스턴스</td><td>{r.image.studies} / {r.image.series} / {r.image.instances}</td></tr>
-        <tr><td>전체 저장소(Orthanc)</td><td>{fmtBytes(r.image.orthanc_total_bytes)}</td></tr>
-      </tbody></table>
-    </div>
-  );
-  return (
-    <div style={{ ...card }}>
-      <div style={{ fontWeight: 700, marginBottom: 10 }}>🗄️ 병원 Database</div>
-      <table className="grid-table" style={{ fontSize: 12.5 }}><tbody>
-        <tr><td>검사(studies)</td><td>{r.db.studies}</td></tr>
-        <tr><td>판독(reports)</td><td>{r.db.reports}</td></tr>
-        <tr><td>주석(annotations)</td><td>{r.db.annotations}</td></tr>
-        <tr><td>합계 행</td><td>{r.db.studies + r.db.reports + r.db.annotations}</td></tr>
-      </tbody></table>
-    </div>
-  );
-}
-
-function Msg({ text }: { text: string }) {
-  if (!text) return null;
-  return <div style={{ fontSize: 12, color: text.startsWith("⚠") ? "var(--danger,#f87171)" : "var(--accent,#7dd3fc)" }}>{text}</div>;
-}
-
 // ════════════════════════════ 콘솔 본체 ════════════════════════════
 type Node = string; // server-status|server-storage|server-db|hospitals|users|overview | h:{hid}:{sub}
 
@@ -210,12 +130,16 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   const loadHosps = () => api.hospitals().then((r) => setHosps(r.items)).catch(() => {});
   useEffect(() => { loadHosps(); }, []);
 
+  // 병원별 하위 관리 탭 — 병원 정보(기존) + 관리 7종(레인 F)
   const HOSP_SUB: { key: string; label: string }[] = [
     { key: "info", label: "병원 정보" },
-    { key: "client", label: "Client 정보 및 Setting" },
-    { key: "modality", label: "Modality 정보 및 Setting" },
-    { key: "storage", label: "Storage" },
-    { key: "db", label: "Database" },
+    { key: "acct", label: "① 계정 (발급·등급)" },
+    { key: "perm", label: "② 권한 매트릭스" },
+    { key: "scp", label: "③ Modality (SCP)" },
+    { key: "scu", label: "④ 병원 설정 (SCU)" },
+    { key: "usage", label: "⑤ 사용량 (DB·Storage)" },
+    { key: "conn", label: "⑥ 연결 대시보드" },
+    { key: "dbimg", label: "⑦ DB·영상 관리" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -239,10 +163,13 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     const [, hidStr, sub] = sel.split(":");
     const hid = Number(hidStr);
     if (sub === "info") content = <HospitalInfoView hid={hid} />;
-    else if (sub === "client") content = <ClientManager hid={hid} />;
-    else if (sub === "modality") content = <ModalityPanel hospitalId={hid} />;
-    else if (sub === "storage") content = <HospitalResView hid={hid} kind="storage" />;
-    else if (sub === "db") content = <HospitalResView hid={hid} kind="db" />;
+    else if (sub === "acct") content = <AccountsTab hid={hid} />;
+    else if (sub === "perm") content = <PermMatrixTab hid={hid} />;
+    else if (sub === "scp") content = <HospitalModalityTab hid={hid} />;
+    else if (sub === "scu") content = <ScuTab hid={hid} />;
+    else if (sub === "usage") content = <UsageTab hid={hid} />;
+    else if (sub === "conn") content = <ConnDashboardTab hid={hid} />;
+    else if (sub === "dbimg") content = <StudyAdminTab hid={hid} hospitals={hosps} />;
   }
 
   return (

@@ -11,9 +11,12 @@ import {
   useState,
 } from "react";
 import {
+  PERM_DENIED_TIP,
   VIEWER_BASE,
   api,
   downloadReportPdf,
+  hasPerm,
+  loadPermMe,
   openViewer,
   openViewerCompare,
   sttTranscribe,
@@ -22,6 +25,7 @@ import {
   type KeyImage,
   type NlQueryResult,
   type OrderRow,
+  type PermMe,
   type PhraseRow,
   type Report,
   type SeriesNode,
@@ -179,10 +183,36 @@ const INFI_COL_WIDTH: Record<string, number> = {
   modality: 46, series_count: 42, instance_count: 46, body_part: 84, source_aet: 90,
 };
 
+/* ── 유효 권한 게이트 (레인 W) — 액션별 필요 권한 키 (병원 매트릭스 perm/me) ──
+ * 서버가 이미 403 을 강제하므로 이 UI 게이트는 UX(사전 비활성+안내) 목적이다.
+ * 매핑이 없는 액션 = 조회성(검색·조회·뷰어 열기) → 항상 허용.
+ * staff(Medician)는 worklist.view/report.read 만 보유 → 아래 액션 전부 비활성. */
+const ACTION_PERM: Record<string, string> = {
+  pdf: "report.print",          // 판독 출력(PDF)
+  print: "image.print",         // 영상 출력(화면 인쇄)
+  import: "study.import",       // 영상 추가(Import DICOM)
+  batch: "report.write",        // AI 초안 일괄 확정(판독 변경)
+  regen: "report.write",        // AI 초안 재생성
+  copyreport: "report.write",   // 과거 판독 복사(초안 수정)
+  emergency: "report.write",    // 응급 우선순위(판독 워크플로 변경)
+  adm_match: "study.match",     // 오더 매칭
+  adm_unmatch: "study.unmatch", // 언매칭
+  adm_move: "study.move",       // 검사 이동(재귀속)
+  adm_copy: "study.copy",       // 검사 복제
+  adm_delete: "study.delete",   // 검사 삭제
+};
+
+/** perm/me 훅 — loadPermMe 캐시로 창당 1회만 조회. null=폴백(전 기능 허용) */
+function usePermMe(): PermMe | null {
+  const [me, setMe] = useState<PermMe | null>(null);
+  useEffect(() => { loadPermMe().then(setMe).catch(() => {}); }, []);
+  return me;
+}
+
 /* ── [A] 액션 툴바 ─────────────────────────────── */
 function ActionToolbar({
   selected, onAction, searchText, setSearchText, onSearch, onNlSearch,
-  withOpen, setWithOpen, withOpenMode, setWithOpenMode, ohifOn = false,
+  withOpen, setWithOpen, withOpenMode, setWithOpenMode, ohifOn = false, allowed,
 }: {
   selected: StudyDetail | null;
   onAction: (a: string) => void;
@@ -195,15 +225,20 @@ function ActionToolbar({
   withOpenMode: "add" | "stack";
   setWithOpenMode: (m: "add" | "stack") => void;
   ohifOn?: boolean;   // OHIF 아이콘 표시 여부 (설정>뷰어 — 기본 숨김)
+  allowed?: (a: string) => boolean;   // 유효 권한 게이트(레인 W) — 서버 403 이 최종 방어선
 }) {
   const need = !selected;
   const [nlText, setNlText] = useState("");
-  const Btn = ({ a, label, primary, title }: { a: string; label: string; primary?: boolean; title?: string }) => (
-    <button className={primary ? "primary" : ""} disabled={need && a !== "batch" && a !== "refresh"}
-            title={title} onClick={() => onAction(a)}>
-      {label}
-    </button>
-  );
+  const Btn = ({ a, label, primary, title }: { a: string; label: string; primary?: boolean; title?: string }) => {
+    const ok = allowed ? allowed(a) : true;   // 권한 없음 → 비활성 + 안내 툴팁 (UX 목적)
+    return (
+      <button className={primary ? "primary" : ""}
+              disabled={(need && a !== "batch" && a !== "refresh") || !ok}
+              title={ok ? title : PERM_DENIED_TIP} onClick={() => onAction(a)}>
+        {label}
+      </button>
+    );
+  };
   return (
     <div style={{
       display: "flex", gap: 5, padding: "6px 8px", alignItems: "center",
@@ -1144,6 +1179,8 @@ function KeyImageStrip({ studyId }: { studyId: number }) {
   const [selected, setSelected] = useState<Map<string, KeyImage>>(new Map());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  // 키이미지 등록은 image.register 게이트 (조회·표시는 자유) — 서버 403 이 최종 방어선
+  const canRegister = hasPerm(usePermMe(), "image.register");
 
   useEffect(() => {
     api.instances(studyId).then((r) => {
@@ -1184,8 +1221,10 @@ function KeyImageStrip({ studyId }: { studyId: number }) {
                }} />
         ))}
       </div>
-      <MiniBtn onClick={() => save(false)} disabled={busy}>저장</MiniBtn>
-      <MiniBtn onClick={() => save(true)} disabled={busy || selected.size === 0}>KOS</MiniBtn>
+      <MiniBtn onClick={() => save(false)} disabled={busy || !canRegister}
+               title={canRegister ? undefined : PERM_DENIED_TIP}>저장</MiniBtn>
+      <MiniBtn onClick={() => save(true)} disabled={busy || selected.size === 0 || !canRegister}
+               title={canRegister ? undefined : PERM_DENIED_TIP}>KOS</MiniBtn>
       {msg && <span style={{ fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</span>}
     </div>
   );
@@ -1217,6 +1256,11 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
   const [busy, setBusy] = useState(false);
   const [histId, setHistId] = useState<number | null>(null);  // 판독 이력 보기(버전)
   const current = reports[0] ?? null;
+  // 유효 권한(레인 W) — report.write 없으면 편집·저장·확정 비활성(조회는 가능),
+  // report.print 없으면 PDF 비활성. 서버 403 이 최종 방어선(UI 는 사전 안내)
+  const permMe = usePermMe();
+  const canWrite = hasPerm(permMe, "report.write");
+  const canPrint = hasPerm(permMe, "report.print");
 
   // 리포트 구성(Setting>리포트 — Report Composition) + STT 엔진(Setting>AI 정책)
   const [aiPanelOn, setAiPanelOn] = useState(true);
@@ -1426,7 +1470,8 @@ ${rows}
           <Empty>
             리포트 없음
             <div style={{ marginTop: 6 }}>
-              <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>AI 초안 생성</MiniBtn>
+              <MiniBtn disabled={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
+                       onClick={async () => { await api.analyze(detail.id); onChanged(); }}>AI 초안 생성</MiniBtn>
             </div>
           </Empty>
         ) : (
@@ -1442,8 +1487,8 @@ ${rows}
                   <span style={{ flex: 1 }} />
                   <button title="별도 창(모니터)으로 AI 리포트 보기" disabled={!aiDraft} onClick={openAiPopup}
                           style={{ padding: "1px 7px", fontSize: 11 }}>↗</button>
-                  <button className="primary" disabled={!aiDraft || finalized}
-                          title="AI 초안을 우측 Report로 복사 — 검토 후 의료인이 확정(서명)"
+                  <button className="primary" disabled={!aiDraft || finalized || !canWrite}
+                          title={canWrite ? "AI 초안을 우측 Report로 복사 — 검토 후 의료인이 확정(서명)" : PERM_DENIED_TIP}
                           onClick={() => aiDraft && setDraft(structuredClone(aiDraft.sr_json))}
                           style={{ padding: "1px 10px", fontSize: 11 }}>적용 ▶</button>
                 </div>
@@ -1513,7 +1558,8 @@ ${rows}
                 </div>
                 <SectionTitle>CONCLUSION</SectionTitle>
                 {draft.impression.map((imp, i) => (
-                  <textarea key={i} value={imp.statement} disabled={finalized}
+                  <textarea key={i} value={imp.statement} disabled={finalized} readOnly={!canWrite}
+                            title={canWrite ? undefined : PERM_DENIED_TIP}
                             onChange={(e) => setDraft((d) => {
                               const n = structuredClone(d!); n.impression[i].statement = e.target.value; return n;
                             })}
@@ -1544,23 +1590,29 @@ ${rows}
               </div>
             </div>
             <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
-              <MiniBtn onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
-              <MiniBtn onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
+              {/* 판독 작성·변경(report.write)/판독 출력(report.print) 게이트 — 서버 403 이 최종 방어선 */}
+              <MiniBtn disabled={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
+                       onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
+              <MiniBtn disabled={!canPrint} title={canPrint ? undefined : PERM_DENIED_TIP}
+                       onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
               {!finalized && (
-                <MiniBtn onClick={toggleStt}
-                         title={`음성 판독(STT) — 엔진: ${sttEngine === "whisper_local" ? "Whisper 로컬(오픈소스)"
+                <MiniBtn onClick={toggleStt} disabled={!canWrite}
+                         title={!canWrite ? PERM_DENIED_TIP
+                              : `음성 판독(STT) — 엔진: ${sttEngine === "whisper_local" ? "Whisper 로컬(오픈소스)"
                               : sttEngine === "openai_api" ? "OpenAI API" : "브라우저 내장"} (설정>AI 정책)`}
                          style={stt ? { background: "var(--stat-emergency)", color: "#fff" } : undefined}>
                   {stt ? "🎤 녹음중" : `🎤 음성${sttEngine !== "browser" ? "·W" : ""}`}
                 </MiniBtn>
               )}
               {!finalized && (
-                <MiniBtn title="판독 보류(Suspend) — 토글" onClick={async () => {
+                <MiniBtn disabled={!canWrite} title={canWrite ? "판독 보류(Suspend) — 토글" : PERM_DENIED_TIP}
+                         onClick={async () => {
                   await api.suspendReport(current.id); onChanged();
                 }}>{current.status === "suspended" ? "보류 해제" : "보류"}</MiniBtn>
               )}
               {finalized && !(current.diff_metrics as { confirm2?: unknown })?.confirm2 && (
-                <MiniBtn title="2차 승인(Conf2) — 1차와 다른 판독의 권장" onClick={async () => {
+                <MiniBtn disabled={!canWrite} title={canWrite ? "2차 승인(Conf2) — 1차와 다른 판독의 권장" : PERM_DENIED_TIP}
+                         onClick={async () => {
                   await api.confirm2Report(current.id); onChanged();
                 }}>2nd Approve</MiniBtn>
               )}
@@ -1570,9 +1622,11 @@ ${rows}
                 </MiniBtn>
               )}
               <div style={{ flex: 1 }} />
-              <MiniBtn onClick={save} disabled={busy || finalized}>Save</MiniBtn>
+              <MiniBtn onClick={save} disabled={busy || finalized || !canWrite}
+                       title={canWrite ? undefined : PERM_DENIED_TIP}>Save</MiniBtn>
               <button className="primary" style={{ padding: "2px 12px", fontSize: 12 }}
-                      onClick={finalize} disabled={busy || finalized}>
+                      onClick={finalize} disabled={busy || finalized || !canWrite}
+                      title={canWrite ? undefined : PERM_DENIED_TIP}>
                 {finalized ? "확정됨" : "확정 (서명)"}
               </button>
             </div>
@@ -1916,24 +1970,31 @@ function CommentMemoPanel({ detail, onChanged }: { detail: StudyDetail | null; o
 }
 
 /* ── 컨텍스트 메뉴 (디자인 §3.3) ─────────────────── */
-function ContextMenu({ x, y, row, onAction, onClose, ohifOn = false }: {
+function ContextMenu({ x, y, row, onAction, onClose, ohifOn = false, allowed }: {
   x: number; y: number; row: StudyRow;
   onAction: (a: string) => void; onClose: () => void;
   ohifOn?: boolean;
+  allowed?: (a: string) => boolean;   // 유효 권한 게이트(레인 W) — 서버 403 이 최종 방어선
 }) {
   useEffect(() => {
     const h = () => onClose();
     window.addEventListener("click", h);
     return () => window.removeEventListener("click", h);
   }, [onClose]);
-  const Item = ({ a, label, danger }: { a: string; label: string; danger?: boolean }) => (
-    <div onClick={() => { onAction(a); onClose(); }}
-         style={{ padding: "5px 14px", cursor: "pointer", fontSize: 12.5, color: danger ? "var(--stat-emergency)" : undefined }}
-         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-         onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-      {label}
-    </div>
-  );
+  const Item = ({ a, label, danger }: { a: string; label: string; danger?: boolean }) => {
+    const ok = allowed ? allowed(a) : true;   // 권한 없음 → 회색 비활성 + 안내 툴팁 (UX 목적)
+    return (
+      <div onClick={ok ? () => { onAction(a); onClose(); } : (e) => e.stopPropagation()}
+           title={ok ? undefined : PERM_DENIED_TIP}
+           style={{ padding: "5px 14px", cursor: ok ? "pointer" : "not-allowed", fontSize: 12.5,
+                    opacity: ok ? 1 : 0.45,
+                    color: !ok ? "var(--text-secondary)" : danger ? "var(--stat-emergency)" : undefined }}
+           onMouseEnter={ok ? (e) => (e.currentTarget.style.background = "var(--bg-hover)") : undefined}
+           onMouseLeave={ok ? (e) => (e.currentTarget.style.background = "") : undefined}>
+        {label}
+      </div>
+    );
+  };
   const Sep = () => <div style={{ height: 1, background: "var(--border)", margin: "3px 0" }} />;
   return (
     <div style={{
@@ -1955,6 +2016,13 @@ function ContextMenu({ x, y, row, onAction, onClose, ohifOn = false }: {
       <Sep />
       <Item a="bookmark" label={row.bookmark ? "★ 북마크 해제" : "☆ 북마크"} />
       <Item a="emergency" label={row.emergency ? "Emergency 해제" : "⚠ Emergency 지정"} danger={!row.emergency} />
+      <Sep />
+      {/* 검사 관리(admin-action) — 등급별 유효 권한으로 게이트, 서버도 403 강제 */}
+      <Item a="adm_match" label="오더 매칭 (Match)" />
+      <Item a="adm_unmatch" label="오더 언매칭 (Unmatch)" />
+      <Item a="adm_move" label="검사 이동 — 병원 재귀속" />
+      <Item a="adm_copy" label="검사 복제 (Copy)" />
+      <Item a="adm_delete" label="검사 삭제" danger />
     </div>
   );
 }
@@ -2147,6 +2215,14 @@ export function Worklist() {
     });
   }, []);
 
+  // 유효 권한(perm/me) — 로그인 후 1회 로드(캐시). 실패 시 null=전 기능 허용 폴백.
+  // 서버가 403 을 강제하므로 이 게이트는 UX(사전 비활성+안내) 목적이다 (레인 W)
+  const permMe = usePermMe();
+  const allowedAction = useCallback((a: string) => {
+    const perm = ACTION_PERM[a];
+    return !perm || hasPerm(permMe, perm);
+  }, [permMe]);
+
   // 워크리스트 창에 이름 부여 — 뷰어의 🗂 버튼이 window.open("", "sv_worklist") 로
   // 이 창을 전면으로 올릴 수 있게 한다 (opener.focus() 는 브라우저가 무시하는 경우가 많음)
   useEffect(() => {
@@ -2218,13 +2294,14 @@ export function Worklist() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (viewer3dUid || batchOpen) return; // 모달/뷰어 우선
       if (e.key === "Enter" && selected) { e.preventDefault(); void doAction("viewdraft"); }
-      else if (e.key.toLowerCase() === "b") setBatchOpen(true);
-      else if (e.key.toLowerCase() === "e" && selected) void doAction("emergency");
+      // 단축키도 유효 권한 게이트 — 버튼 비활성과 동일 기준 (서버 403 이 최종 방어선)
+      else if (e.key.toLowerCase() === "b") { if (allowedAction("batch")) setBatchOpen(true); }
+      else if (e.key.toLowerCase() === "e" && selected) { if (allowedAction("emergency")) void doAction("emergency"); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, viewer3dUid, batchOpen]);
+  }, [selected, viewer3dUid, batchOpen, allowedAction]);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
@@ -2451,6 +2528,63 @@ export function Worklist() {
         break;
       case "bookmark":
         if (target) { await api.setBookmark(target.id, !target.bookmark); onChanged(); }
+        break;
+      /* ── 검사 관리(admin-action): 삭제/이동/매칭/언매칭/복제 ──
+       * 유효 권한은 서버가 403 으로 강제 — UI 게이트(allowedAction)는 사전 안내(UX)용 */
+      case "adm_delete":
+        if (!target) break;
+        // 파괴 작업 2단계 확인(병원별 관리 탭과 동일 기준)
+        if (!window.confirm(
+          `[1/2] 검사 삭제 — ${target.patient_name} · ${target.modality} · ${target.study_date}\n` +
+          `영상·판독이 함께 삭제되며 되돌릴 수 없습니다. 진행할까요?`)) break;
+        if (!window.confirm("[2/2] 최종 확인 — 영구 삭제됩니다. 정말 삭제할까요?")) break;
+        try {
+          await api.studyAdminAction(target.id, { action: "delete" });
+          if (selected?.id === target.id) setSelected(null);
+          setRefreshKey((k) => k + 1);
+        } catch (e) { alert(e instanceof Error ? e.message : "삭제 실패"); }
+        break;
+      case "adm_move": case "adm_copy": {
+        if (!target) break;
+        const isMove = a === "adm_move";
+        const verb = isMove ? "이동(재귀속)" : "복제";
+        const raw = prompt(isMove
+          ? "검사를 이동(재귀속)할 대상 병원 ID(숫자)를 입력하세요"
+          : "복제 대상 병원 ID(숫자) — 비우면 같은 병원에 사본을 만듭니다");
+        if (raw === null) break;              // 취소
+        const hid = raw.trim();
+        if (isMove && !hid) break;            // 이동은 대상 필수
+        if (hid && !/^\d+$/.test(hid)) { alert("병원 ID는 숫자여야 합니다"); break; }
+        try {
+          await api.studyAdminAction(target.id, {
+            action: isMove ? "move" : "copy",
+            ...(hid ? { target_hid: Number(hid) } : {}),
+          });
+          // 이동 시 검사가 현재 병원 스코프에서 빠질 수 있어 선택 해제 후 목록 갱신
+          if (a === "adm_move" && selected?.id === target.id) setSelected(null);
+          setRefreshKey((k) => k + 1);
+          alert(`검사 ${verb} 완료`);
+        } catch (e) { alert(e instanceof Error ? e.message : `${verb} 실패`); }
+        break;
+      }
+      case "adm_match": {
+        if (!target) break;
+        const oid = prompt("매칭할 오더 ID를 입력하세요 (오더/예약 패널의 오더)")?.trim();
+        if (!oid) break;
+        try {
+          await api.studyAdminAction(target.id, { action: "match", order_id: oid });
+          onChanged();
+          alert("오더 매칭 완료");
+        } catch (e) { alert(e instanceof Error ? e.message : "매칭 실패"); }
+        break;
+      }
+      case "adm_unmatch":
+        if (!target) break;
+        if (!window.confirm("이 검사의 오더 매칭을 해제(언매칭)할까요?")) break;
+        try {
+          await api.studyAdminAction(target.id, { action: "unmatch" });
+          onChanged();
+        } catch (e) { alert(e instanceof Error ? e.message : "언매칭 실패"); }
         break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2728,16 +2862,21 @@ export function Worklist() {
                       padding: "3px 10px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", gap: 4, padding: "3px 6px", border: "1px solid var(--border)",
                         borderRadius: 6, background: "var(--bg-elevated)" }}>
-            {INFI_ICONS.filter((t) => t.a !== "ub_adv" || ohifOn).map((t) => (
-              <button key={t.a} title={t.l} onClick={() => infiTool(t.a)}
-                      style={{ width: 46, height: 40, fontSize: 22, padding: 0, border: "none",
-                               display: "flex", alignItems: "center", justifyContent: "center",
-                               background: "transparent", cursor: "pointer", borderRadius: 5 }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-subtle)")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                {t.i}
-              </button>
-            ))}
+            {INFI_ICONS.filter((t) => t.a !== "ub_adv" || ohifOn).map((t) => {
+              const ok = allowedAction(t.a);   // 유효 권한 게이트 — 비활성+안내 툴팁 (UX 목적)
+              return (
+                <button key={t.a} title={ok ? t.l : `${t.l} — ${PERM_DENIED_TIP}`} disabled={!ok}
+                        onClick={() => infiTool(t.a)}
+                        style={{ width: 46, height: 40, fontSize: 22, padding: 0, border: "none",
+                                 display: "flex", alignItems: "center", justifyContent: "center",
+                                 background: "transparent", cursor: ok ? "pointer" : "not-allowed",
+                                 opacity: ok ? 1 : 0.35, borderRadius: 5 }}
+                        onMouseEnter={ok ? (e) => (e.currentTarget.style.background = "var(--accent-subtle)") : undefined}
+                        onMouseLeave={ok ? (e) => (e.currentTarget.style.background = "transparent") : undefined}>
+                  {t.i}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -2747,7 +2886,7 @@ export function Worklist() {
                      onNlSearch={onNlSearch}
                      withOpen={withOpen} setWithOpen={setWithOpen}
                      withOpenMode={withOpenMode} setWithOpenMode={setWithOpenMode}
-                     ohifOn={ohifOn} />
+                     ohifOn={ohifOn} allowed={allowedAction} />
       <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
                  onSearch={() => setRefreshKey((k) => k + 1)} />
 
@@ -2939,7 +3078,7 @@ export function Worklist() {
         </Suspense>
       )}
       {ctx && (
-        <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn}
+        <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn} allowed={allowedAction}
                      onAction={(a) => doAction(a, ctx.row)} onClose={() => setCtx(null)} />
       )}
     </div>

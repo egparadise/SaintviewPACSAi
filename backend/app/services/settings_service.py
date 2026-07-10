@@ -28,6 +28,22 @@ def get_setting(db: Session, key: str, *, user: str = "", source: str = "", defa
     return default
 
 
+def get_hospital_setting(db: Session, hospital_id: int, key: str, default=None):
+    """병원(hospital) 스코프 설정 — 병원별 권한 매트릭스·장비 노드·SCU 등."""
+    row = db.execute(
+        select(AppSetting).where(
+            AppSetting.scope == "hospital",
+            AppSetting.scope_id == str(hospital_id),
+            AppSetting.key == key,
+        )
+    ).scalar_one_or_none()
+    return row.value if row is not None else default
+
+
+def set_hospital_setting(db: Session, hospital_id: int, key: str, value: dict) -> None:
+    set_setting(db, key, value, scope="hospital", scope_id=str(hospital_id))
+
+
 def set_setting(db: Session, key: str, value: dict, *, scope: str = "global", scope_id: str = "") -> None:
     row = db.execute(
         select(AppSetting).where(

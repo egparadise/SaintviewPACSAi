@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user
+from app.api.deps import current_user, require_effective
 from app.db import get_db
 from app.models import Report
 from app.services.report_service import (
@@ -49,7 +49,7 @@ def put_report(
     report_id: int,
     body: ReportUpdate,
     db: Session = Depends(get_db),
-    user: dict = Depends(current_user),
+    user: dict = Depends(require_effective("report.write")),
 ):
     report = db.get(Report, report_id)
     if not report:
@@ -62,7 +62,8 @@ def put_report(
 
 
 @router.post("/reports/{report_id}/finalize")
-def finalize(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+def finalize(report_id: int, db: Session = Depends(get_db),
+             user: dict = Depends(require_effective("report.finalize"))):
     report = db.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
@@ -74,7 +75,8 @@ def finalize(report_id: int, db: Session = Depends(get_db), user: dict = Depends
 
 
 @router.post("/reports/{report_id}/suspend")
-def suspend(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+def suspend(report_id: int, db: Session = Depends(get_db),
+            user: dict = Depends(require_effective("report.write"))):
     """판독 보류(07 A.5 suspended — UBPACS Suspend): 확정 전 상태 유지·후순위 표시."""
     from app.models import AuditLog
 
@@ -92,7 +94,8 @@ def suspend(report_id: int, db: Session = Depends(get_db), user: dict = Depends(
 
 
 @router.post("/reports/{report_id}/confirm2")
-def confirm2(report_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+def confirm2(report_id: int, db: Session = Depends(get_db),
+             user: dict = Depends(require_effective("report.confirm2"))):
     """F-17 2차 승인(Conf2): 확정본에 2차 확인자 기록. 1차 확정자와 동일 계정이면 경고만."""
     from datetime import datetime, timezone
 
@@ -118,7 +121,7 @@ def export_report(
     report_id: int,
     format: str = "pdf",
     db: Session = Depends(get_db),
-    user: dict = Depends(current_user),
+    user: dict = Depends(require_effective("report.print")),
 ):
     """판독서 출력 (F-9/D-4: PDF 우선). 출력 행위는 감사 로그 기록."""
     from fastapi.responses import Response
@@ -329,7 +332,8 @@ class MergeBody(BaseModel):
 
 
 @router.post("/reports/merge")
-def merge(body: MergeBody, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+def merge(body: MergeBody, db: Session = Depends(get_db),
+          user: dict = Depends(require_effective("report.write"))):
     """묶음판독(report_merge) — 동일 환자 다검사를 primary 검사 판독 하나로 병합."""
     try:
         report = merge_reports(db, body.study_ids, username=user["sub"])
@@ -344,7 +348,8 @@ class BatchFinalize(BaseModel):
 
 @router.post("/reports/batch-finalize")
 def batch_finalize(
-    body: BatchFinalize, db: Session = Depends(get_db), user: dict = Depends(current_user)
+    body: BatchFinalize, db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("report.finalize")),
 ):
     """F-22: 일괄 확정. critical 포함 초안은 거부(개별 검토 강제)."""
     from app.rag.schemas import has_critical

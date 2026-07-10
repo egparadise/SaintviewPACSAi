@@ -201,9 +201,9 @@ export const api = {
   myHospitals: () => req<MyHospitals>("/api/my/hospitals"),
   hospitalResources: (hid: number) => req<HospitalResources>(`/api/hospitals/${hid}/resources`),
   clients: (hid: number) => req<{ items: ClientRow[] }>(`/api/hospitals/${hid}/clients`),
-  createClient: (hid: number, body: { name: string; location?: string; enabled?: boolean }) =>
+  createClient: (hid: number, body: { name: string; location?: string; enabled?: boolean; role?: string }) =>
     req<ClientRow>(`/api/hospitals/${hid}/clients`, { method: "POST", body: JSON.stringify(body) }),
-  updateClient: (hid: number, cid: number, body: { name: string; location?: string; enabled?: boolean }) =>
+  updateClient: (hid: number, cid: number, body: { name: string; location?: string; enabled?: boolean; role?: string }) =>
     req<ClientRow>(`/api/hospitals/${hid}/clients/${cid}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteClient: (hid: number, cid: number) =>
     req<{ ok: boolean }>(`/api/hospitals/${hid}/clients/${cid}`, { method: "DELETE" }),
@@ -361,6 +361,35 @@ export const api = {
     req<HospitalNetResult>(`/api/admin/hospitals/${id}/net-test`, { method: "POST" }),
   claimStudies: (id: number) =>
     req<{ ok: boolean; assigned: number }>(`/api/admin/hospitals/${id}/claim-studies`, { method: "POST" }),
+
+  // ── 병원별 관리 (레인 F/B 공통 계약 — 백엔드는 레인 B가 병렬 구현) ──
+  /** 병원별 DB·Storage 사용량 */
+  hospitalUsage: (hid: number) => req<HospitalUsage>(`/api/hospitals/${hid}/usage`),
+  /** 병원별 등급 권한 매트릭스 (GET=기본값 폴백 병합) */
+  permMatrix: (hid: number) => req<PermMatrixResp>(`/api/hospitals/${hid}/perm-matrix`),
+  /** 병원별 권한 매트릭스 저장 (관리자 — hospital 스코프 setting 'perm.matrix') */
+  putPermMatrix: (hid: number, matrix: Record<string, string[]>) =>
+    req<PermMatrixResp>(`/api/hospitals/${hid}/perm-matrix`, { method: "PUT", body: JSON.stringify({ matrix }) }),
+  /** 병원별 SCP Modality 노드 목록 (setting 'modality.nodes') */
+  hospitalModalities: (hid: number) => req<{ items: ModalityNode[] }>(`/api/hospitals/${hid}/modalities`),
+  putHospitalModalities: (hid: number, items: ModalityNode[]) =>
+    req<{ items: ModalityNode[] }>(`/api/hospitals/${hid}/modalities`, { method: "PUT", body: JSON.stringify({ items }) }),
+  /** 병원별 Modality 연결 테스트 (ping/echo — admin net-test 재사용, 병원 접근 가드) */
+  testHospitalModality: (hid: number, body: { ip: string; port: number; ae_title?: string; mode: "ping" | "echo" }) =>
+    req<ModalityTestResult>(`/api/hospitals/${hid}/modalities/test`, { method: "POST", body: JSON.stringify(body) }),
+  /** 병원 SCU/식별 정보 (병원명·ae_title=Hospital 컬럼, ip/port=setting 'hospital.scu') */
+  hospitalScu: (hid: number) => req<HospitalScu>(`/api/hospitals/${hid}/scu`),
+  putHospitalScu: (hid: number, body: HospitalScu) =>
+    req<HospitalScu>(`/api/hospitals/${hid}/scu`, { method: "PUT", body: JSON.stringify(body) }),
+  /** 내 유효 권한 (병원 매트릭스 반영 — 워크리스트/뷰어 게이트용) */
+  permMe: () => req<PermMe>("/api/perm/me"),
+  /** 검사 관리 작업 (삭제/이동/매칭/언매칭/복제 — 유효 권한 강제, 403 시 안내) */
+  studyAdminAction: (id: number, body: { action: StudyAdminActionKind; target_hid?: number; order_id?: number | string }) =>
+    req<{ ok: boolean; detail?: string }>(`/api/studies/${id}/admin-action`, { method: "POST", body: JSON.stringify(body) }),
+  /** 특정 병원 스코프 워크리스트 (관리 콘솔 — localStorage 선택 병원과 무관) */
+  hospitalWorklist: (hid: number, params: Record<string, string> = {}) =>
+    req<{ items: StudyRow[]; total: number }>(
+      `/api/worklist?${new URLSearchParams({ ...params, hospital_id: String(hid) })}`),
   accounts: () => req<{ items: AccountRow[] }>("/api/admin/accounts"),
   createAccount: (body: AccountCreateBody) =>
     req<AccountRow>("/api/admin/accounts", { method: "POST", body: JSON.stringify(body) }),
@@ -458,6 +487,43 @@ export interface MyHospitals {
 export interface ClientRow {
   id: number; hospital_id?: number; name: string; code: string; location: string;
   enabled: boolean; online: boolean; last_seen: string | null; last_user: string;
+  /** 계정 등급 — doctor|radiologist|technologist|staff (레인 B 확장, 미구현 서버는 미포함) */
+  role?: string; role_label?: string;
+}
+
+// ── 병원별 관리 계약 타입 (레인 F/B 공통) ──
+export interface HospitalUsage {
+  db: { studies: number; reports: number; annotations: number };
+  storage: { disk_mb: number; instances: number; orthanc_ok: boolean };
+}
+export interface PermMatrixResp {
+  roles: { key: string; label: string }[];
+  permissions: { key: string; label: string }[];
+  matrix: Record<string, string[]>;
+}
+export interface ModalityNode {
+  name: string; ae_title: string; ip: string; port: number; kind: "scp" | "scu";
+}
+export interface ModalityTestResult {
+  ok: boolean; detail?: string; icmp?: boolean; icmp_ms?: number; tcp?: boolean | null;
+}
+export interface HospitalScu { name: string; ae_title: string; ip: string; port: number }
+export interface PermMe { role: string; hospital_id: number | null; perms: string[] }
+export type StudyAdminActionKind = "delete" | "move" | "match" | "unmatch" | "copy";
+
+/* ── 유효 권한 게이트 (레인 W) — GET /api/perm/me 1회 로드·캐시 ──
+ * 서버가 관리·판독 API 에서 유효 권한을 403 으로 강제하므로,
+ * 프론트 게이트(버튼 비활성+툴팁)는 어디까지나 UX(사전 안내) 목적이다.
+ * 로드 실패 시 null = 전 기능 허용 폴백(권한 API 미구현 서버·기존 사용자 회귀 방지). */
+export const PERM_DENIED_TIP = "권한 없음 — 관리자에게 문의";
+let permMePromise: Promise<PermMe | null> | null = null;
+export function loadPermMe(force = false): Promise<PermMe | null> {
+  if (force || !permMePromise) permMePromise = api.permMe().catch(() => null);
+  return permMePromise;
+}
+/** me=null(미로드·실패 폴백)=허용. 그 외에는 병원 매트릭스가 반영된 perms 로 판단 */
+export function hasPerm(me: PermMe | null, key: string): boolean {
+  return !me || me.perms.includes(key);
 }
 export interface HospitalResources {
   hospital: { id: number; code: string; name: string; departments: string; address: string; phone: string };
