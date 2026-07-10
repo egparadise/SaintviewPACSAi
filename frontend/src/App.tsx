@@ -133,7 +133,6 @@ export default function App() {
                        background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 40 }}>
         <span style={{ fontWeight: 700 }}>Saintview <span style={{ color: "var(--ai)" }}>AI</span></span>
         {session.hospitalName && <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>🏥 {session.hospitalName}</span>}
-        <div style={{ background: "var(--accent)", padding: "4px 16px", borderRadius: "4px 4px 0 0", fontWeight: 600, alignSelf: "flex-end", fontSize: 12.5 }}>WORKLIST 1</div>
         <div style={{ flex: 1 }} />
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{session.name} [{session.role}]</span>
         <button onClick={() => setSettingsOpen(true)}>설정</button>
