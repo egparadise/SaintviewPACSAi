@@ -307,6 +307,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // Compare — 같은 환자 과거검사 선택 비교 (선택 검사들을 페인으로 추가 + Sync With Other Exams)
   const [cmpOpen, setCmpOpen] = useState(false);
   const [cmpSel, setCmpSel] = useState<Set<number>>(new Set());
+  // 워크리스트 ⇄ Compare 진입(?cmp=1) — 로드 직후 Compare 모달 자동 오픈(1회)
+  const cmpParamRef = useRef(new URLSearchParams(window.location.search).get("cmp") === "1");
+  useEffect(() => {
+    if (cmpParamRef.current) { cmpParamRef.current = false; setCmpOpen(true); }
+  }, []);
   // IN-2 ①: 행잉 프로토콜 규칙(viewer.hp) — 검사 로드 시 자동 매칭 + 행잉 콤보에서 선택 (TY applyHp 등가)
   const [hpRules, setHpRules] = useState<HpRule[]>([]);
   const [hpName, setHpName] = useState("기본");

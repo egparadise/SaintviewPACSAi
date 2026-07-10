@@ -218,6 +218,7 @@ function ActionToolbar({
       <Btn a="ub_stack" label="⧉ Stack" title="③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩" />
       {ohifOn && <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />}
       <Btn a="ub_key" label="🔑 Key" title="⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)" />
+      <Btn a="compareOpen" label="⇄ Compare" title="Compare — 뷰어에서 같은 환자의 과거검사를 골라 나란히 비교(모달, In Viewer 동일)" />
       {/* Study With Open (p.13): 더블클릭 시 Related Study를 함께 오픈 */}
       <label title="Study With Open — 더블클릭으로 열 때 Related Study List의 검사를 한번에 같이 오픈"
              style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11.5, marginLeft: 3 }}>
@@ -2274,9 +2275,11 @@ export function Worklist() {
   const openV2 = useCallback((cfg: {
     detail: StudyDetail; addDetail?: StudyDetail; stackDetail?: StudyDetail; keySops?: string[];
     withOpen?: { mode: "add" | "stack"; ids: number[] };
+    cmp?: boolean;  // ⇄ Compare 진입 — 뷰어 로드 후 Compare 모달 자동 오픈
   }) => {
     lastViewerRef.current = cfg.addDetail ?? cfg.stackDetail ?? cfg.detail;
     const p = new URLSearchParams({ viewer: "2d", study: String(cfg.detail.id) });
+    if (cfg.cmp) p.set("cmp", "1");
     if (cfg.addDetail) p.set("add", String(cfg.addDetail.id));
     if (cfg.stackDetail) p.set("stack", String(cfg.stackDetail.id));
     if (cfg.keySops?.length) p.set("keysops", cfg.keySops.join(","));
@@ -2376,6 +2379,14 @@ export function Worklist() {
         if (target) setCompareSet((prev) =>
           prev.some((c) => c.study_uid === target.study_uid) ? prev
             : [...prev, { id: target.id, study_uid: target.study_uid, study_date: target.study_date, modality: target.modality, study_desc: target.study_desc }]);
+        break;
+      case "compareOpen":
+        // ⇄ Compare — In Viewer 와 동일: 선택 검사를 뷰어로 열고 과거검사 선택 Compare 모달 자동 오픈
+        if (target) {
+          const d = await api.study(target.id);
+          selectAndSync(d);
+          openV2({ detail: d, cmp: true });
+        }
         break;
       case "pdf": {
         if (!target) break;
@@ -2664,7 +2675,7 @@ export function Worklist() {
     { i: "🖥", l: "View — 선택 검사를 In Viewer 로 열기", a: "viewer2d" },
     { i: "🌐", l: "Advanced View — OHIF 웹뷰어", a: "ub_adv" },
     { i: "🧊", l: "3D — MPR/MIP 뷰어", a: "3d" },
-    { i: "⇄", l: "Compare — 과거검사 비교 열기", a: "compare" },
+    { i: "⇄", l: "Compare — 뷰어에서 과거검사 선택 비교(모달) 열기", a: "compareOpen" },
     { i: "📥", l: "Import — DICOM 파일 업로드(Orthanc)", a: "import" },
     { i: "📤", l: "Export — 워크리스트 CSV 내보내기", a: "csv" },
     { i: "🖨", l: "Print — 화면 인쇄", a: "print" },

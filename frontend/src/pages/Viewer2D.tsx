@@ -319,6 +319,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   });
   // TY-3(3): Crosslink 5모드 — 기존 syncScroll(Link 단일)을 확장. off/auto_sync/sync_other/scout/all_lines
   const [xmode, setXmode] = useState<XlinkMode>("off");
+  const xmodeRef = useRef(xmode);
+  useEffect(() => { xmodeRef.current = xmode; }, [xmode]);
   // TY-3(2): 멀티 페인 선택 — Shift=범위/Ctrl=토글/A=전체, 선택 페인 연동 조작 (In selPanes 이식)
   const [selPanes, setSelPanes] = useState<Set<string>>(new Set());
   const selPanesRef = useRef(selPanes);
@@ -336,6 +338,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // TY-3(9): Compare 모달 — 같은 환자 과거검사 다중 선택 비교
   const [cmpOpen, setCmpOpen] = useState(false);
   const [cmpSel, setCmpSel] = useState<Set<number>>(new Set());
+  // 워크리스트 ⇄ Compare 진입(?cmp=1) — 로드 직후 Compare 모달 자동 오픈(1회)
+  const cmpParamRef = useRef(new URLSearchParams(window.location.search).get("cmp") === "1");
+  useEffect(() => {
+    if (cmpParamRef.current) { cmpParamRef.current = false; setCmpOpen(true); }
+  }, []);
   const [thumbOpen, setThumbOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [overlayOn, setOverlayOn] = useState(true);
@@ -471,8 +478,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     });
   }, []);
   const targetsOf = (pid: string): string[] => {
+    // In Viewer 정합: 멀티 선택 연동 조작은 Crosslink 마스터(xmode≠off)일 때만 (In targetsOf 동일 게이트)
     const s = selPanesRef.current;
-    return s.size > 1 && s.has(pid) ? [...s] : [pid];
+    return xmodeRef.current !== "off" && s.size > 1 && s.has(pid) ? [...s] : [pid];
   };
 
   /* ── TY-3(1): 작업 히스토리 ◀◯▶ — 스냅샷 최대 50, Undo/초기화/Redo (In pushHist/histGo 이식) ── */
@@ -2055,9 +2063,31 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     }}>
       {prefs.thumbMode === "series" ? thumbSeries.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
-          <div onClick={() => setSelSeries(selSeries === s.series_uid ? null : s.series_uid)}
+          <div onClick={(e) => {
+                 // In Viewer 정합 — 썸네일에서도 다중 선택: Ctrl=해당 시리즈 표시 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
+                 const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+                 if (e.ctrlKey) {
+                   const pid2 = vis.find((id) => panes[id].series?.series_uid === s.series_uid);
+                   if (pid2) setSelPanes((prev) => {
+                     const n = new Set(prev.size ? prev : [activePane]);
+                     if (n.has(pid2) && pid2 !== activePane) n.delete(pid2); else n.add(pid2);
+                     return n;
+                   });
+                   return;
+                 }
+                 if (e.shiftKey) {
+                   const idx = thumbSeries.findIndex((x) => x.series_uid === s.series_uid);
+                   const uids = new Set(thumbSeries.slice(0, idx + 1).map((x) => x.series_uid));
+                   setSelPanes(new Set(vis.filter((id) => {
+                     const su = panes[id].series?.series_uid;
+                     return !!su && uids.has(su);
+                   })));
+                   return;
+                 }
+                 setSelSeries(selSeries === s.series_uid ? null : s.series_uid);
+               }}
                onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
-               title={`${s.series_desc || s.modality} — 더블클릭: 활성 페인 로드`}
+               title={`${s.series_desc || s.modality} — 더블클릭: 활성 페인 로드\n(Ctrl=페인 선택 토글 · Shift=범위 선택)`}
                style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)" : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
             {s.instances[Math.floor(s.instances.length / 2)] && (
