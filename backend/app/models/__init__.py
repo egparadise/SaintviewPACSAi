@@ -9,6 +9,7 @@ from app.models.entities import (  # noqa: F401
     Hl7Inbox,
     Hl7Outbox,
     Hospital,
+    Instance,
     Modality,
     Order,
     Patient,

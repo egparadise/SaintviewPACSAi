@@ -266,6 +266,7 @@ def study_detail(db: Session, study_id: int) -> dict | None:
             "instance_count": s.instance_count,
         }
         for s in study.series
+        if s.deleted_at is None  # Exam Control 소프트 삭제 제외
     ]
     # F-14 Related Exams: 동일 환자 다른 검사
     related = [

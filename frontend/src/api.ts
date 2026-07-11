@@ -524,7 +524,72 @@ export const api = {
   localTree: (id: number) => req<{ series: LocalSeriesNode[] }>(`/api/local/studies/${id}/tree`),
   /** 로컬 검사 삭제 (파일+local.db) */
   localDelete: (id: number) => req<{ ok: boolean }>(`/api/local/studies/${id}`, { method: "DELETE" }),
+
+  // ── Exam Control (관리자 검사 QC — 레인 F/B 공통 계약 /api/examctl, 전부 감사 로그) ──
+  /** 검사 목록(deleted 제외) — hid 생략 시 접근 가능한 전체 */
+  examctlStudies: (hid?: number, q?: string) => {
+    const p = new URLSearchParams();
+    if (hid) p.set("hid", String(hid));
+    if (q) p.set("q", q);
+    const qs = p.toString();
+    return req<{ items: StudyRow[]; total?: number }>(`/api/examctl/studies${qs ? `?${qs}` : ""}`);
+  },
+  /** 선택 검사의 Series→Image 트리(deleted 포함 — 표시는 회색 취소선) */
+  examctlTree: (studyId: number) =>
+    req<{ series: ExamCtlSeries[] }>(`/api/examctl/studies/${studyId}/tree`),
+  /** 소프트 삭제(휴지통) — Recovery 로 복구 가능 */
+  examctlDelete: (body: ExamCtlUids) =>
+    req<{ deleted_series: number; deleted_images: number }>(
+      "/api/examctl/delete", { method: "POST", body: JSON.stringify(body) }),
+  /** 휴지통 복구 */
+  examctlRestore: (body: ExamCtlUids) =>
+    req<{ ok?: boolean; restored_series?: number; restored_images?: number }>(
+      "/api/examctl/restore", { method: "POST", body: JSON.stringify(body) }),
+  /** 휴지통 목록(검사/시리즈/이미지 단위 표시용) */
+  examctlTrash: (hid?: number) =>
+    req<{ items: ExamCtlTrashItem[] }>(`/api/examctl/trash${hid ? `?hid=${hid}` : ""}`),
+  /** 현재 검사에서 분리 → 병원별 미배정(UNASSIGNED) 버킷 검사로 이동 */
+  examctlUnassign: (body: ExamCtlUids) =>
+    req<{ moved: number; bucket_study_id: number }>(
+      "/api/examctl/unassign", { method: "POST", body: JSON.stringify(body) }),
+  /** 대상 검사로 이동(재귀속) — 앱 DB 계층만 변경, Orthanc 원본·DICOM 태그 불변 */
+  examctlAssign: (body: ExamCtlUids & { target_study_id: number }) =>
+    req<{ moved: number }>("/api/examctl/assign", { method: "POST", body: JSON.stringify(body) }),
 };
+
+// ── Exam Control 타입 (레인 F/B 공통 계약 /api/examctl) ──
+export interface ExamCtlUids { series_uids?: string[]; sop_uids?: string[] }
+export interface ExamCtlImage {
+  sop_uid: string;
+  instance_number: number;
+  rows: number;
+  cols: number;
+  deleted: boolean;
+  preview_url: string;
+}
+export interface ExamCtlSeries {
+  series_uid: string;
+  series_number: number;
+  series_desc: string;
+  modality: string;
+  deleted: boolean;
+  instances: ExamCtlImage[];
+}
+/** 휴지통 항목 — kind+uid 가 계약 최소, 나머지는 표시 보조(없으면 '—') */
+export interface ExamCtlTrashItem {
+  kind: "study" | "series" | "image";
+  study_id?: number;
+  patient_name?: string;
+  patient_key?: string;
+  modality?: string;
+  study_date?: string;
+  study_desc?: string;
+  series_uid?: string;
+  series_desc?: string;
+  sop_uid?: string;
+  instance_number?: number;
+  deleted_at?: string;
+}
 
 // ── Local Server 모드 타입 (레인 F/B 공통 계약) ──
 export interface LocalStudyRow {

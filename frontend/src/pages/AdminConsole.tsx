@@ -12,8 +12,8 @@ import {
   HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel,
 } from "./admin/ServerAdmin";
 import {
-  AccountsTab, ConnDashboardTab, HospitalDataTab, HospitalLogsTab, HospitalModalityTab,
-  HospitalStatsTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
+  AccountsTab, ConnDashboardTab, ExamControlTab, HospitalDataTab, HospitalLogsTab,
+  HospitalModalityTab, HospitalStatsTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
 } from "./admin/HospitalAdmin";
 import {
   BackupMirrorPanel, DataWipePanel, MaintStoragePanel, RestorePanel, ServerConfigPanel,
@@ -165,6 +165,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     { key: "data", label: "⑩ 데이터 (지우기·복원)" },
     { key: "link", label: "⑪ 연동 (HL7·원격판독·MWL·가상환자)" },
     { key: "cont", label: "⑫ 컨테이너 (Orthanc)" },
+    { key: "examctl", label: "⑬ Exam Control (검사 QC)" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -242,6 +243,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     else if (sub === "data") content = <HospitalDataTab hid={hid} hospitals={hosps} />;
     else if (sub === "link") content = <Hl7Panel hid={hid} />;
     else if (sub === "cont") content = <HospitalContainersSection hid={hid} />;
+    else if (sub === "examctl") content = <ExamControlTab hid={hid} />;
   }
 
   return (

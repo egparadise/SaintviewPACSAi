@@ -60,6 +60,8 @@ import { Splitter, clampSz } from "../lib/Splitter";
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
 const LocalViewer = lazy(() => import("./LocalViewer").then((m) => ({ default: m.LocalViewer })));
+// EXAM CONTROL (레인 F) — 관리자 전용 검사 QC 화면 (워크리스트 탭 바에서 전환)
+const ExamControl = lazy(() => import("./admin/ExamControl").then((m) => ({ default: m.ExamControl })));
 
 /* ── Local Server 모드 (레인 F) — 로컬 검사(local.db)를 그리드 공용 StudyRow 로 매핑 ── */
 function localToRow(r: LocalStudyRow): StudyRow {
@@ -801,12 +803,13 @@ function ServerButtons({ mode, onMode }: {
 }
 
 /* ── 워크리스트 페이지 탭 바 (UBPACS-Z — 저장된 검색 정의를 페이지로, 최대 10) ── */
-function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, serverMode, onServerMode }: {
+function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, serverMode, onServerMode, extraTab }: {
   tabs: WorklistTab[]; activeId: string;
   onPick: (t: WorklistTab) => void; onAdd: () => void; onRemove: (id: string) => void;
   actions?: React.ReactNode;  // Local Server 왼쪽에 노출할 액션 버튼 그룹
   serverMode: "local" | "web" | null;              // 데이터 소스 모드 (레인 F — Worklist 소유)
   onServerMode: (m: "local" | "web") => void;
+  extraTab?: React.ReactNode; // WORKLIST 탭들 옆 추가 탭 (관리자 EXAM CONTROL — 레인 F)
 }) {
   return (
     <div style={{
@@ -829,6 +832,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, ser
           )}
         </div>
       ))}
+      {extraTab}
       <button onClick={onAdd} title="현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)"
               style={{ padding: "1px 9px", fontSize: 13, marginLeft: 4, marginBottom: 3 }}>＋</button>
       {/* 우측 그룹: 액션 버튼(요청 — Local Server 왼쪽) + 서버 버튼 */}
@@ -2202,6 +2206,10 @@ export function Worklist() {
   const [serverMode, setServerMode] = useState<"local" | "web" | null>(
     () => (localStorage.getItem("sv_server_mode") as "local" | "web") || null);
   const localMode = serverMode === "local";
+  // EXAM CONTROL (레인 F) — 관리자 역할일 때만 탭 노출, 선택 시 본문을 검사 QC 화면으로 전환.
+  // 탭 바는 TY·In 양 모드 공유이므로 두 모드 모두 자동 지원. 워크리스트 탭 클릭 시 원복.
+  const isAdminRole = (localStorage.getItem("sv_role") ?? sessionStorage.getItem("sv_role") ?? "") === "admin";
+  const [examCtl, setExamCtl] = useState(false);
   const [localRoot, setLocalRoot] = useState("");           // localInit 결과 루트(배지·Import 안내)
   const [localErr, setLocalErr] = useState("");             // 백엔드 미구현/미설정 → '⚠ 준비 중' 우아 처리
   const [localViewerRow, setLocalViewerRow] = useState<StudyRow | null>(null);   // 로컬 뷰어 모달 대상
@@ -2920,10 +2928,26 @@ export function Worklist() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
       {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환.
           우측(Local Server 왼쪽)에 액션 버튼 그룹 노출(요청) — Infi 모드는 아래 아이콘 툴바가 동일 기능이라 생략 */}
-      <WorklistTabsBar tabs={tabs} activeId={activeTabId}
-                       onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)}
+      <WorklistTabsBar tabs={tabs} activeId={examCtl ? "" : activeTabId}
+                       onPick={(t) => { setExamCtl(false); pickTab(t); }}
+                       onAdd={() => { setExamCtl(false); void addTab(); }}
+                       onRemove={(id) => void removeTab(id)}
                        serverMode={serverMode} onServerMode={pickServerMode}
-                       actions={!infiMode && (
+                       extraTab={isAdminRole && (
+                         /* 관리자 전용 EXAM CONTROL 탭 — 기존 탭과 동일 스타일 + 보라 포인트 */
+                         <div onClick={() => setExamCtl(true)}
+                              title="Exam Control — 관리자 검사 QC (삭제·복구·Unassign·Assign)"
+                              style={{
+                                display: "flex", alignItems: "center", gap: 6, padding: "4px 11px",
+                                borderRadius: "4px 4px 0 0", cursor: "pointer", fontSize: 11.5, fontWeight: 700,
+                                background: examCtl ? "var(--ai,#a78bfa)" : "var(--bg-elevated)",
+                                color: examCtl ? "#fff" : "var(--ai,#a78bfa)",
+                                border: "1px solid var(--ai,#a78bfa)", borderBottom: "none", whiteSpace: "nowrap",
+                              }}>
+                           EXAM CONTROL
+                         </div>
+                       )}
+                       actions={!infiMode && !examCtl && (
                          <>
                            {([
                              ["reading", "📝 Reading", "Report 창 — 판독 작성 창 열기(선택 검사)"],
@@ -2950,6 +2974,15 @@ export function Worklist() {
                            })}
                          </>
                        )} />
+      {/* EXAM CONTROL 본문 (레인 F) — 관리자 검사 QC. 선택 시 워크리스트 본문 전체를 대체 */}
+      {examCtl ? (
+        <Suspense fallback={<div style={{ padding: 20, color: "var(--text-secondary)" }}>Exam Control 로딩…</div>}>
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 8, display: "flex", flexDirection: "column" }}>
+            <ExamControl />
+          </div>
+        </Suspense>
+      ) : (
+      <>
       {/* LOCAL 모드 배지 — 데이터 소스·루트 표시 + 서버 데이터 숨김 안내 (레인 F) */}
       {localMode && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 10px",
@@ -3233,6 +3266,8 @@ export function Worklist() {
       ) : ctx && (
         <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn} allowed={allowedAction}
                      onAction={(a) => doAction(a, ctx.row)} onClose={() => setCtx(null)} />
+      )}
+      </>
       )}
     </div>
   );

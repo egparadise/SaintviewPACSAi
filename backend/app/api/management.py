@@ -785,7 +785,7 @@ def _delete_study_rows(db: Session, study: Study) -> None:
     """검사 + 종속 행(리포트·임베딩·시리즈·주석·AI잡) 정리."""
     from sqlalchemy import delete
 
-    from app.models import AiJob, Annotation, Report, ReportEmbedding, Series
+    from app.models import AiJob, Annotation, Instance, Report, ReportEmbedding, Series
 
     report_ids = [r for (r,) in db.execute(
         select(Report.id).where(Report.study_id == study.id)
@@ -793,6 +793,11 @@ def _delete_study_rows(db: Session, study: Study) -> None:
     if report_ids:
         db.execute(delete(ReportEmbedding).where(ReportEmbedding.report_id.in_(report_ids)))
     db.execute(delete(Report).where(Report.study_id == study.id))
+    series_ids = [sid for (sid,) in db.execute(
+        select(Series.id).where(Series.study_id == study.id)
+    ).all()]
+    if series_ids:
+        db.execute(delete(Instance).where(Instance.series_id.in_(series_ids)))
     db.execute(delete(Series).where(Series.study_id == study.id))
     db.execute(delete(Annotation).where(Annotation.study_id == study.id))
     db.execute(delete(AiJob).where(AiJob.study_id == study.id))

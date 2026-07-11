@@ -8,6 +8,7 @@ import {
 } from "../../api";
 import { LogsPanel, StatsPanel } from "./ServerInsights";
 import { DataWipePanel, RestorePanel } from "./ServerMaintenance";
+import { ExamControl } from "./ExamControl";
 
 // ── 공통 상수/소형 UI (기존 AdminConsole 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -630,6 +631,15 @@ export function HospitalDataTab({ hid, hospitals }: { hid: number; hospitals: Ho
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <DataWipePanel hospitals={hospitals} fixedHid={hid} />
       <RestorePanel hospitals={hospitals} fixedHid={hid} />
+    </div>
+  );
+}
+
+// ════════════════════════════ ⑬ Exam Control (검사 QC — 병원 스코프 고정, 레인 F) ════════════════════════════
+export function ExamControlTab({ hid }: { hid: number }) {
+  return (
+    <div style={{ height: "calc(100vh - 120px)", minHeight: 420, display: "flex", flexDirection: "column" }}>
+      <ExamControl hid={hid} />
     </div>
   );
 }

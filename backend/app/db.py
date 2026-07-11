@@ -35,11 +35,12 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def _sqlite_sync_columns() -> None:
-    """SQLite 개발 DB 한정 — 모델에 새로 추가된 단순 컬럼을 ALTER로 보정.
+def _sync_columns() -> None:
+    """모델에 새로 추가된 단순 컬럼을 ALTER로 보정 (가산 전용, SQLite·Postgres 공통).
 
-    create_all은 기존 테이블을 변경하지 않아 모델 진화 시 dev.db가 깨진다
-    (운영 Postgres는 Alembic이 담당). NOT NULL은 default와 함께만 추가한다.
+    create_all은 기존 테이블을 변경하지 않아 모델 진화 시 스키마가 어긋난다 —
+    개발 환경은 이 보정으로 자가 치유한다(운영 정식 배포는 Alembic 권장).
+    NOT NULL은 default와 함께만 추가한다.
     """
     from sqlalchemy import inspect, text
 
@@ -69,5 +70,5 @@ def init_db() -> None:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
     Base.metadata.create_all(engine)
-    if not get_settings().is_postgres:
-        _sqlite_sync_columns()
+    # 신규 컬럼 보정 — Postgres 도 포함(기존엔 SQLite 한정이라 모델 진화 시 dev Postgres 가 500 나던 문제)
+    _sync_columns()

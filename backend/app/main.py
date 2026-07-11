@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     admin,
     auth,
+    examctl,
     hospital_admin,
     hospitals,
     localpacs,
@@ -107,6 +108,7 @@ app.include_router(stt.router)
 app.include_router(share.router)
 app.include_router(maintenance.router)
 app.include_router(localpacs.router)  # Local Server 모드(/api/local — 레인 B)
+app.include_router(examctl.router)  # Exam Control — 관리자용 검사 QC(/api/examctl)
 if insights_api is not None:
     app.include_router(insights_api.router)
 if hl7_api is not None:

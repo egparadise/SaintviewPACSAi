@@ -100,9 +100,36 @@ class Series(Base):
     series_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     modality: Mapped[str] = mapped_column(String(16), default="")
     series_desc: Mapped[str] = mapped_column(String(256), default="")
+    series_number: Mapped[int] = mapped_column(Integer, default=0)  # Exam Control 트리 정렬
     instance_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Exam Control 소프트 삭제(휴지통) — NULL=정상. 삭제 시리즈는 일반 트리/뷰어에서 제외
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     study: Mapped[Study] = relationship(back_populates="series")
+    instances: Mapped[list["Instance"]] = relationship(back_populates="series")
+
+
+class Instance(Base):
+    """이미지(SOP 인스턴스) — 앱 DB 트리. Exam Control 소프트 삭제·재귀속(검사 이동)의 단위.
+
+    Orthanc 물리 저장·DICOM 태그는 불변이고, 귀속(series_id→study)·삭제 상태만
+    앱 DB에서 관리한다(뷰어/워크리스트는 이 트리를 따른다). 행은 Exam Control 진입 시
+    Orthanc 트리에서 구체화(materialize)되며, 행이 없는 인스턴스는 물리 트리 그대로다.
+    """
+
+    __tablename__ = "instances"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id"), index=True)
+    sop_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    instance_number: Mapped[int] = mapped_column(Integer, default=0)
+    rows: Mapped[int] = mapped_column(Integer, default=0)
+    cols: Mapped[int] = mapped_column(Integer, default=0)
+    orthanc_id: Mapped[str] = mapped_column(String(64), default="", index=True)  # 프리뷰/파일 접근용
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    series: Mapped[Series] = relationship(back_populates="instances")
 
 
 class Report(Base):

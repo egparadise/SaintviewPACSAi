@@ -190,6 +190,10 @@ def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depen
         tree = client.series_tree(study.orthanc_id)
     finally:
         client.close()
+    # Exam Control 오버레이 — 소프트 삭제·재귀속(이동) 반영(DB 행 없으면 원본 그대로)
+    from app.services.examctl_service import overlay_viewer_tree
+
+    tree = overlay_viewer_tree(db, study, tree)
     base = get_settings().orthanc_url
     for s in tree:
         for inst in s["instances"]:
@@ -215,6 +219,10 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
         items = client.study_instances(study.orthanc_id)
     finally:
         client.close()
+    # Exam Control 반영 — 소프트 삭제 이미지 제외 + 재귀속(이동 In) 추가
+    from app.services.examctl_service import filter_visible_instances
+
+    items = filter_visible_instances(db, study, items)
     base = get_settings().orthanc_url
     for it in items:
         it["preview_url"] = f"{base}/instances/{it['orthanc_id']}/preview"
