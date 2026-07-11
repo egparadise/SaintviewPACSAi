@@ -1,5 +1,7 @@
 // 관리자 콘솔 — 로그인 후 메인 페이지(좌측 트리 메뉴 + 우측 내용)
-// 구조도: 서버(상태·설정·인프라·보안 등) · 등록 병원 → 병원별 관리 탭 12종
+// 개념 계약: 'Admin System — 부모 컨테이너' = 모든 병원(자식 컨테이너)을 담는 시스템 전체의 관리,
+//            '병원 — 자식 컨테이너' = 각 병원 스코프의 운영 관리 탭 12종
+// 구조도: Admin System(상태·설정·인프라·보안·계정 관리 등) · 병원 → 병원별 관리 탭
 //   (①계정·등급 ②권한 매트릭스 ③Modality(SCP) ④병원 설정(SCU) ⑤사용량 ⑥연결 대시보드 ⑦DB·영상 관리
 //    ⑧로그 ⑨통계 ⑩데이터 ⑪연동(HL7·원격판독·MWL·가상환자) ⑫컨테이너(Orthanc))
 import { useEffect, useState } from "react";
@@ -76,6 +78,10 @@ function HospitalInfoView({ hid }: { hid: number }) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontWeight: 700 }}>🏥 병원 정보 — {h.code}</div>
+      <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+        자식 컨테이너(이 병원) 스코프 — 운영 설정(정보·DICOM 네트워크 등)을 편집합니다.
+        등록·라이선스·활성화는 부모(Admin System)의 [＋ 병원 등록·관리]에서.
+      </div>
       {row("병원 이름", <input style={inp} value={h.name} onChange={(e) => f("name", e.target.value)} />)}
       {row("주소", <input style={inp} value={h.address} onChange={(e) => f("address", e.target.value)} />)}
       {row("진료과", <input style={inp} value={h.departments} onChange={(e) => f("departments", e.target.value)} />)}
@@ -164,8 +170,15 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     fontSize: 12.5, marginBottom: 1, background: active ? "var(--accent-subtle)" : undefined,
     color: active ? "var(--text-primary)" : "var(--text-secondary)",
   });
-  const Head = ({ children }: { children: React.ReactNode }) => (
-    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", margin: "10px 0 4px 6px", textTransform: "uppercase" }}>{children}</div>
+  // 트리 섹션 헤더 — 개념 계약: '전체/시스템'=부모 컨테이너(Admin System), 병원별=자식 컨테이너 (tip=한 줄 설명 툴팁)
+  const Head = ({ children, tip }: { children: React.ReactNode; tip?: string }) => (
+    <div title={tip} style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", margin: "10px 0 4px 6px", textTransform: "uppercase" }}>{children}</div>
+  );
+  // 부모(시스템 전체) 스코프 안내 한 줄 — 병원별 대응 탭이 있는 항목(로그/통계/데이터)에 표시
+  const scopeNote = (extra?: string) => (
+    <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 10 }}>
+      🌐 시스템(부모 컨테이너 — Admin System) 전체 범위입니다.{extra ? ` ${extra}` : ""}
+    </div>
   );
 
   // 우측 내용
@@ -173,7 +186,16 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   if (sel === "server-status") content = <ServerPanel />;
   else if (sel === "server-storage") content = <StoragePanel />;
   else if (sel === "server-db") content = <ServerDatabaseView />;
-  else if (sel === "hospitals") content = <HospitalsPanel />;
+  // 역할 분리 — 부모(Admin System)=병원 등록·라이선스·활성화 / 자식(병원 탭)=운영 설정(네트워크·SCU 등)
+  else if (sel === "hospitals") content = (
+    <>
+      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 10 }}>
+        🌐 부모(Admin System) 스코프 — 병원 등록·라이선스·활성화를 담당합니다.
+        각 병원의 운영 설정(DICOM 네트워크·SCU 등)은 병원 트리의 [병원 정보]·[④ 병원 설정] 탭에서.
+      </div>
+      <HospitalsPanel />
+    </>
+  );
   else if (sel === "users") content = <UsersPanel />;
   else if (sel === "overview") content = <OverviewPanel />;
   // 서버 유지보수·인사이트 (14개 요구 — 레인 F)
@@ -183,6 +205,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   else if (sel === "srv-restore") content = <RestorePanel hospitals={hosps} />;
   else if (sel === "srv-wipe") content = (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {scopeNote("병원별 데이터 관리는 각 병원의 [⑩ 데이터] 탭에서 수행하세요.")}
       <DataWipePanel hospitals={hosps} />
       <RestorePanel hospitals={hosps} />
     </div>
@@ -190,8 +213,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   else if (sel === "srv-dbschema") content = <DbSchemaPanel />;
   else if (sel === "srv-signup") content = <SignupFieldsPanel />;
   else if (sel === "srv-admins") content = <AdminAccountsPanel />;
-  else if (sel === "srv-logs") content = <LogsPanel />;
-  else if (sel === "srv-stats") content = <StatsPanel />;
+  else if (sel === "srv-logs") content = <>{scopeNote("병원별 로그는 각 병원의 [⑧ 로그] 탭에서 확인하세요.")}<LogsPanel /></>;
+  else if (sel === "srv-stats") content = <>{scopeNote("병원별 통계는 각 병원의 [⑨ 통계] 탭에서 확인하세요.")}<StatsPanel /></>;
   else if (sel === "srv-ai") content = <AiProvidersPanel />;
   // 병렬 레인 패널 — 인프라(O) · 보안(S)
   else if (sel === "srv-infra") content = <InfraPanel />;
@@ -229,28 +252,29 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
         {/* 좌측 트리 메뉴 */}
         <div style={{ width: 240, borderRight: "1px solid var(--border)", padding: 8, background: "var(--bg-canvas)", overflow: "auto", flexShrink: 0 }}>
           {isSystemAdmin && <>
-            <Head>서버</Head>
+            {/* 개념 계약 — 이 섹션은 모든 병원(자식 컨테이너)을 담는 부모 컨테이너(Admin System) 자체의 관리 */}
+            <Head tip="Admin System(부모 컨테이너) — 모든 병원(자식 컨테이너)을 담는 시스템 전체의 관리">Admin System — 부모 컨테이너</Head>
             <div style={itemStyle(sel === "server-status")} onClick={() => setSel("server-status")}>🖥️ 서버 상태</div>
             <div style={itemStyle(sel === "srv-config")} onClick={() => setSel("srv-config")}>⚙️ 서버 설정 (IP·Port·AE·Name)</div>
-            <div style={itemStyle(sel === "srv-space")} onClick={() => setSel("srv-space")}>📦 저장 공간 (DB·Image·Backup)</div>
-            <div style={itemStyle(sel === "server-storage")} onClick={() => setSel("server-storage")}>💾 서버 Storage</div>
-            <div style={itemStyle(sel === "server-db")} onClick={() => setSel("server-db")}>🗄️ 서버 Database</div>
-            <div style={itemStyle(sel === "srv-backup")} onClick={() => setSel("srv-backup")}>🗓️ 백업 · 미러링</div>
-            <div style={itemStyle(sel === "srv-restore")} onClick={() => setSel("srv-restore")}>⏪ 복원 (백업 시점)</div>
-            <div style={itemStyle(sel === "srv-wipe")} onClick={() => setSel("srv-wipe")}>🧹 데이터 관리 (지우고 복원)</div>
+            <div style={itemStyle(sel === "srv-space")} title="시스템(부모) 전체의 저장 공간" onClick={() => setSel("srv-space")}>📦 저장 공간 (DB·Image·Backup)</div>
+            <div style={itemStyle(sel === "server-storage")} title="시스템(부모) 전체의 Storage" onClick={() => setSel("server-storage")}>💾 서버 Storage</div>
+            <div style={itemStyle(sel === "server-db")} title="시스템(부모) 전체의 Database" onClick={() => setSel("server-db")}>🗄️ 서버 Database</div>
+            <div style={itemStyle(sel === "srv-backup")} title="시스템(부모) 전체의 백업·미러링" onClick={() => setSel("srv-backup")}>🗓️ 백업 · 미러링</div>
+            <div style={itemStyle(sel === "srv-restore")} title="시스템(부모) 전체의 복원" onClick={() => setSel("srv-restore")}>⏪ 복원 (백업 시점)</div>
+            <div style={itemStyle(sel === "srv-wipe")} title="시스템(부모) 전체의 데이터 관리 — 병원별은 각 병원 [⑩ 데이터] 탭" onClick={() => setSel("srv-wipe")}>🧹 데이터 관리 (지우고 복원)</div>
             <div style={itemStyle(sel === "srv-dbschema")} onClick={() => setSel("srv-dbschema")}>🧬 DB 구조 · DB 도구</div>
             <div style={itemStyle(sel === "srv-signup")} onClick={() => setSel("srv-signup")}>📝 가입 환경 설정</div>
-            <div style={itemStyle(sel === "srv-admins")} onClick={() => setSel("srv-admins")}>🛡️ 관리자 계정</div>
-            <div style={itemStyle(sel === "srv-logs")} onClick={() => setSel("srv-logs")}>📜 시스템 로그</div>
-            <div style={itemStyle(sel === "srv-stats")} onClick={() => setSel("srv-stats")}>📈 사용량 통계</div>
+            {/* [사용자 관리]와 [관리자 계정] 중복 → 단일 [계정 관리] 메뉴로 통합 (admin 빠른 등록 + 전체 사용자 표) */}
+            <div style={itemStyle(sel === "srv-admins")} title="관리자 빠른 등록 + 전체 계정/역할 관리 (구 [관리자 계정]·[사용자 관리] 통합)" onClick={() => setSel("srv-admins")}>👤 계정 관리 (관리자·사용자)</div>
+            <div style={itemStyle(sel === "srv-logs")} title="시스템(부모) 전체의 로그 — 병원별은 각 병원 [⑧ 로그] 탭" onClick={() => setSel("srv-logs")}>📜 시스템 로그</div>
+            <div style={itemStyle(sel === "srv-stats")} title="시스템(부모) 전체의 통계 — 병원별은 각 병원 [⑨ 통계] 탭" onClick={() => setSel("srv-stats")}>📈 사용량 통계</div>
             <div style={itemStyle(sel === "srv-ai")} onClick={() => setSel("srv-ai")}>🤖 AI 등록</div>
-            <div style={itemStyle(sel === "srv-infra")} onClick={() => setSel("srv-infra")}>🐳 인프라 (컨테이너·OHIF·DDNS)</div>
-            <div style={itemStyle(sel === "srv-security")} onClick={() => setSel("srv-security")}>🔐 보안 (바이러스·랜섬·접근)</div>
+            <div style={itemStyle(sel === "srv-infra")} title="시스템(부모) 전체의 인프라" onClick={() => setSel("srv-infra")}>🐳 인프라 (컨테이너·OHIF·DDNS)</div>
+            <div style={itemStyle(sel === "srv-security")} title="시스템(부모) 전체의 보안" onClick={() => setSel("srv-security")}>🔐 보안 (바이러스·랜섬·접근)</div>
             <div style={itemStyle(sel === "overview")} onClick={() => setSel("overview")}>📊 운영 현황(감독)</div>
-            <div style={itemStyle(sel === "users")} onClick={() => setSel("users")}>👤 사용자 관리</div>
           </>}
 
-          <Head>등록 병원</Head>
+          <Head tip="병원(자식 컨테이너) — 각 병원 스코프의 운영 관리 탭">병원 — 자식 컨테이너</Head>
           <div style={itemStyle(sel === "hospitals")} onClick={() => { setSel("hospitals"); loadHosps(); }}>＋ 병원 등록·관리</div>
           {hosps.map((h) => (
             <div key={h.id}>

@@ -1,6 +1,7 @@
-"""인사이트 API — 시스템 로그(분류·필터·CSV) · 사용량 통계 · DB 구조 · DB 도구 · 관리자 생성 가드."""
+"""인사이트 API — 시스템 로그(분류·필터·CSV) · 사용량 통계(JSON·Excel) · DB 구조 · DB 도구 · 관리자 생성 가드."""
 from __future__ import annotations
 
+import io
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -161,6 +162,45 @@ def test_stats_groups(client, auth_headers, db):
     # 알 수 없는 group → 400
     assert client.get("/api/insights/stats", headers=auth_headers,
                       params={"group": "nope"}).status_code == 400
+
+
+def test_stats_xlsx_download(client, auth_headers, db):
+    """Excel 내보내기 — content-type · PK 매직 바이트 · 시트명(그룹 라벨) · 데이터 행 검증."""
+    hid = _mk_hospital(client, auth_headers, f"HXLS{uuid.uuid4().hex[:4]}")
+    _seed_studies(db, hid)
+    r = client.get("/api/insights/stats.xlsx", headers=auth_headers, params={
+        "group": "modality", "hid": hid, "date_from": "2026-06-01", "date_to": "2026-06-30",
+    })
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert "attachment" in r.headers.get("content-disposition", "")
+    assert r.content[:2] == b"PK", "xlsx(zip) 매직 바이트로 시작해야 한다"
+
+    from openpyxl import load_workbook
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws.title == "장비별"  # 시트명 = 그룹 한국어 라벨
+    assert [c.value for c in ws[1]] == ["구분", "검사 수", "판독", "미판독"]
+    assert ws[1][0].font.bold, "헤더는 볼드"
+    rows = {row[0].value: (row[1].value, row[2].value, row[3].value)
+            for row in ws.iter_rows(min_row=2)}
+    assert rows["CT"] == (2, 1, 1)  # 시드: CT 확정1+미판독1
+    assert rows["MR"] == (1, 0, 1)
+    assert rows["합계"] == (3, 1, 2)  # 합계 행
+
+    # 알 수 없는 group → 400 (JSON 경로와 동일 검증 공유)
+    assert client.get("/api/insights/stats.xlsx", headers=auth_headers,
+                      params={"group": "nope"}).status_code == 400
+
+
+def test_stats_xlsx_admin_only(client, auth_headers):
+    uname = f"nadx_{uuid.uuid4().hex[:6]}"
+    r = client.post("/api/admin/accounts", headers=auth_headers, json={
+        "username": uname, "password": "pass12345", "role": "technologist",
+    })
+    assert r.status_code == 200, r.text
+    hdrs = _login(client, uname, "pass12345")
+    assert client.get("/api/insights/stats.xlsx", headers=hdrs).status_code == 403
 
 
 # ────────────────────────────── DB 구조 / DB 도구 ──────────────────────────────

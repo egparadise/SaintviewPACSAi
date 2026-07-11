@@ -2,8 +2,8 @@
 // 백엔드 계약(/api/insights/*, settings 키)은 레인 B가 병렬 구현 — 미구현 응답은 '⚠ 준비 중' 우아 처리.
 import { useEffect, useState } from "react";
 import {
-  api, downloadLogsCsv, type AiProvider, type DbSchemaResp, type LogItem,
-  type SignupFieldDef, type SignupFieldsCfg, type StatsResp,
+  api, downloadLogsCsv, downloadStatsXlsx, type AiProvider, type DbSchemaResp, type LogItem,
+  type SignupFieldDef, type SignupFieldsCfg, type StatsResp, type StatsRow,
 } from "../../api";
 import { UsersPanel } from "./ServerAdmin";
 import { pendMsg } from "./ServerMaintenance";
@@ -339,6 +339,115 @@ const STAT_GROUPS: { key: string; label: string }[] = [
   { key: "department", label: "진료과별" },
   { key: "report_status", label: "판독·미판독" },
 ];
+
+// ── 순수 SVG 차트 (외부 라이브러리 없음 — 다크 테마 var(--accent) 계열 + 구분 색) ──
+const CHART_COLORS = [
+  "#7dd3fc", "#a78bfa", "#34d399", "#fbbf24", "#fb7185", "#60a5fa",
+  "#f472b6", "#4ade80", "#fb923c", "#22d3ee", "#c084fc", "#facc15", "#94a3b8",
+];
+/** 축 상한을 보기 좋은 값(1·2·2.5·5×10^k)으로 올림 */
+function niceCeil(v: number): number {
+  if (v <= 4) return Math.max(1, Math.ceil(v));
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= v) return m * mag;
+  return 10 * mag;
+}
+/** 행이 많으면(병원별 등) 검사 수 상위 12 + 나머지는 '기타'로 묶어 차트 과밀 방지 */
+function chartRows(rows: StatsRow[]): StatsRow[] {
+  if (rows.length <= 13) return rows;
+  const sorted = [...rows].sort((a, b) => b.studies - a.studies);
+  const rest = sorted.slice(12);
+  const etc = rest.reduce(
+    (acc, r) => ({ ...acc, studies: acc.studies + r.studies, reports: acc.reports + r.reports,
+                   unreported: acc.unreported + r.unreported }),
+    { key: "__etc", label: `기타 (${rest.length})`, studies: 0, reports: 0, unreported: 0 } as StatsRow,
+  );
+  return [...sorted.slice(0, 12), etc];
+}
+
+/** ① 그룹별 검사 수 세로 막대 차트 — 값 라벨 · Y축 눈금 · 격자 */
+function StatsBarChart({ rows }: { rows: StatsRow[] }) {
+  const W = 680, H = 240, padL = 48, padR = 12, padT = 18, padB = 34;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const max = niceCeil(Math.max(1, ...rows.map((r) => r.studies)));
+  const slot = iw / Math.max(1, rows.length);
+  const barW = Math.max(8, Math.min(46, slot * 0.62));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}
+         role="img" aria-label="그룹별 검사 수 막대 차트">
+      {ticks.map((t, i) => {
+        const y = padT + ih - (t / max) * ih;
+        return (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={y} y2={y} stroke="var(--border)"
+                  strokeWidth={1} strokeDasharray={i === 0 ? undefined : "3 3"} />
+            <text x={padL - 6} y={y + 3.5} textAnchor="end" fontSize={10}
+                  fill="var(--text-secondary)">{t.toLocaleString()}</text>
+          </g>
+        );
+      })}
+      {rows.map((r, i) => {
+        const x = padL + slot * i + (slot - barW) / 2;
+        const h = (r.studies / max) * ih;
+        const y = padT + ih - h;
+        const label = r.label || r.key || "—";
+        const short = label.length > 7 ? label.slice(0, 6) + "…" : label;
+        return (
+          <g key={r.key || i}>
+            <rect x={x} y={y} width={barW} height={Math.max(h, r.studies > 0 ? 1 : 0)} rx={3}
+                  fill={CHART_COLORS[i % CHART_COLORS.length]} opacity={0.9}>
+              <title>{`${label}: 검사 ${r.studies.toLocaleString()}건 (판독 ${r.reports.toLocaleString()} · 미판독 ${r.unreported.toLocaleString()})`}</title>
+            </rect>
+            <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize={10}
+                  fill="var(--text-primary)">{r.studies.toLocaleString()}</text>
+            <text x={x + barW / 2} y={padT + ih + 14} textAnchor="middle" fontSize={10}
+                  fill="var(--text-secondary)">
+              <title>{label}</title>{short}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--border)" />
+    </svg>
+  );
+}
+
+/** ② 판독 vs 미판독 비율 도넛 — 중앙 판독률 + 범례 */
+function StatsDonut({ reports, unreported }: { reports: number; unreported: number }) {
+  const total = reports + unreported;
+  const R = 52, SW = 18, C = 2 * Math.PI * R;
+  const frac = total > 0 ? reports / total : 0;
+  const done = "var(--accent, #7dd3fc)", pend = "#fbbf24";
+  return (
+    <svg viewBox="0 0 250 150" style={{ width: "100%", height: "auto", display: "block" }}
+         role="img" aria-label="판독 대 미판독 비율 도넛 차트">
+      <g transform="translate(75, 75)">
+        <circle r={R} fill="none" stroke={total > 0 ? pend : "var(--border)"} strokeWidth={SW} opacity={0.85}>
+          <title>{`미판독 ${unreported.toLocaleString()}건`}</title>
+        </circle>
+        {frac > 0 && (
+          <circle r={R} fill="none" stroke={done} strokeWidth={SW} transform="rotate(-90)"
+                  strokeDasharray={`${C * frac} ${C}`} opacity={0.95}>
+            <title>{`판독 ${reports.toLocaleString()}건`}</title>
+          </circle>
+        )}
+        <text textAnchor="middle" y={-2} fontSize={20} fontWeight={700}
+              fill="var(--text-primary)">{total > 0 ? `${Math.round(frac * 100)}%` : "—"}</text>
+        <text textAnchor="middle" y={16} fontSize={10}
+              fill="var(--text-secondary)">{total > 0 ? "판독률" : "데이터 없음"}</text>
+      </g>
+      <g transform="translate(155, 55)" fontSize={11.5}>
+        <rect width={10} height={10} rx={2} fill={done} />
+        <text x={16} y={9} fill="var(--text-primary)">판독 {reports.toLocaleString()}건</text>
+        <rect y={20} width={10} height={10} rx={2} fill={pend} />
+        <text x={16} y={29} fill="var(--text-primary)">미판독 {unreported.toLocaleString()}건</text>
+        <text y={48} fill="var(--text-secondary)">합계 {total.toLocaleString()}건</text>
+      </g>
+    </svg>
+  );
+}
+
 export function StatsPanel({ hid }: { hid?: number }) {
   const [group, setGroup] = useState(hid ? "modality" : "hospital");
   const [dateFrom, setDateFrom] = useState("");
@@ -362,8 +471,23 @@ export function StatsPanel({ hid }: { hid?: number }) {
   };
   useEffect(() => { load(); }, [group, hid]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const xlsx = async () => {
+    // 현재 필터 조건 그대로 서버(openpyxl)가 생성한 .xlsx 다운로드 — downloadLogsCsv 패턴
+    try {
+      await downloadStatsXlsx({
+        group,
+        ...(dateFrom ? { date_from: dateFrom } : {}),
+        ...(dateTo ? { date_to: dateTo } : {}),
+        ...(hid ? { hid: String(hid) } : {}),
+      });
+    } catch (e) { setMsg(pendMsg(e)); }
+  };
+
   const rows = data?.rows ?? [];
   const maxStudies = Math.max(1, ...rows.map((r) => r.studies));
+  const cRows = chartRows(rows); // 상위 12 + 기타 (rows 과밀 시)
+  const sumReports = rows.reduce((a, r) => a + r.reports, 0);
+  const sumUnreported = rows.reduce((a, r) => a + r.unreported, 0);
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -376,7 +500,25 @@ export function StatsPanel({ hid }: { hid?: number }) {
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>~</span>
         <input style={{ ...inp, width: 130 }} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="종료일" />
         <button onClick={load} disabled={busy}>{busy ? "조회 중…" : "조회"}</button>
+        <button onClick={xlsx} title="현재 필터 조건 그대로 Excel(.xlsx) 다운로드">Excel 내보내기</button>
       </div>
+
+      {/* 그래프 — 막대(그룹별 검사 수) + 도넛(판독 vs 미판독) · 표는 아래 유지 */}
+      {rows.length > 0 && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 340px", minWidth: 300, border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px" }}>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 4 }}>
+              그룹별 검사 수{cRows.length !== rows.length ? " — 상위 12 + 기타" : ""}
+            </div>
+            <StatsBarChart rows={cRows} />
+          </div>
+          <div style={{ flex: "0 1 260px", minWidth: 220, border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px" }}>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 4 }}>판독 vs 미판독</div>
+            <StatsDonut reports={sumReports} unreported={sumUnreported} />
+          </div>
+        </div>
+      )}
+
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <thead><tr><th>구분</th><th>검사</th><th>판독</th><th>미판독</th><th style={{ width: "38%" }}>검사 수(비율)</th></tr></thead>
         <tbody>

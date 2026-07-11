@@ -999,6 +999,21 @@ export async function downloadLogsCsv(params: Record<string, string>) {
   URL.revokeObjectURL(url);
 }
 
+/** 사용량 통계 Excel(.xlsx) 다운로드 — 인증 헤더 필요라 fetch→blob 방식 (downloadLogsCsv 패턴) */
+export async function downloadStatsXlsx(params: Record<string, string>) {
+  const res = await fetch(`${BASE}/api/insights/stats.xlsx?${new URLSearchParams(params)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) throw new Error(`Excel 다운로드 실패 (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `stats_${params.group ?? "all"}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /** 가입 필드 설정 로드(가입 화면용) — 실패/미설정=null(기존 폼 그대로).
  *  가입 화면은 무인증(공개)이므로 인증이 필요한 /api/settings 대신
  *  공개 엔드포인트 GET /api/signup/fields/{kind} 를 사용한다(빈 목록=미설정=null). */

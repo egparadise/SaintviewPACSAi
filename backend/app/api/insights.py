@@ -3,6 +3,7 @@
 - logs: AuditLog 를 단일 소스로 event/network/dicom 분류(액션 프리픽스 매핑) + 날짜/병원/검색 필터,
   같은 쿼리의 /logs.csv 는 CSV 다운로드(BOM 포함 — 엑셀 한글 안전).
 - stats: Study 집계(병원/장비/진료과/판독상태 × 기간 × 병원 스코프) — 병원별 탭(hid)과 공용.
+  같은 쿼리의 /stats.xlsx 는 openpyxl 기반 Excel 다운로드(헤더 볼드·열 너비·숫자 서식).
 - db-schema: SQLAlchemy inspector 로 read-only 구조 확인(요구 6 "DB 프로그램 열기"의 내장 뷰).
 - db-tool-open: 설정 server.dbtool.path 의 외부 DB 도구를 서버측에서 분리 실행(관리자 전용).
 
@@ -169,6 +170,9 @@ def logs_csv(type: str = "", date_from: str = "", date_to: str = "", hid: int | 
 
 # ════════════════════════════════ 사용량 통계 (요구 10) ════════════════════════════════
 STAT_GROUPS = ("hospital", "modality", "department", "report_status")
+# 그룹 → 한국어 라벨 (Excel 시트명 등 사용자 노출용)
+STAT_GROUP_LABELS = {"hospital": "병원별", "modality": "장비별",
+                     "department": "진료과별", "report_status": "판독상태"}
 
 
 def _norm_date8(value: str) -> str:
@@ -176,11 +180,9 @@ def _norm_date8(value: str) -> str:
     return (value or "").replace("-", "").strip()
 
 
-@router.get("/stats")
-def stats(group: str = "hospital", date_from: str = "", date_to: str = "",
-          hid: int | None = None,
-          db: Session = Depends(get_db), user: dict = Depends(admin_user)):
-    """사용량 통계 — 병원/장비/진료과/판독상태별 검사·판독 집계 (기간·병원 스코프)."""
+def _query_stats(db: Session, *, group: str, date_from: str, date_to: str,
+                 hid: int | None) -> dict:
+    """통계 집계 본체 — /stats(JSON)와 /stats.xlsx(Excel)가 동일 쿼리를 공유한다."""
     if group not in STAT_GROUPS:
         raise HTTPException(status_code=400, detail="group은 hospital|modality|department|report_status")
     conds = []
@@ -225,6 +227,57 @@ def stats(group: str = "hospital", date_from: str = "", date_to: str = "",
             label = k or "(미지정)"
         rows.append({"key": key, "label": label, "studies": n, "reports": f, "unreported": n - f})
     return {"group": group, "rows": rows}
+
+
+@router.get("/stats")
+def stats(group: str = "hospital", date_from: str = "", date_to: str = "",
+          hid: int | None = None,
+          db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """사용량 통계 — 병원/장비/진료과/판독상태별 검사·판독 집계 (기간·병원 스코프)."""
+    return _query_stats(db, group=group, date_from=date_from, date_to=date_to, hid=hid)
+
+
+@router.get("/stats.xlsx")
+def stats_xlsx(group: str = "hospital", date_from: str = "", date_to: str = "",
+               hid: int | None = None,
+               db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """같은 쿼리의 Excel(.xlsx) 다운로드 — 헤더 볼드·열 너비·숫자 서식·시트명=그룹 라벨."""
+    data = _query_stats(db, group=group, date_from=date_from, date_to=date_to, hid=hid)
+
+    from openpyxl import Workbook  # 지연 임포트 — /stats(JSON) 경로는 openpyxl 없이도 동작
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = STAT_GROUP_LABELS.get(group, group)
+    ws.append(["구분", "검사 수", "판독", "미판독"])
+    bold = Font(bold=True)
+    for cell in ws[1]:
+        cell.font = bold
+    total = {"studies": 0, "reports": 0, "unreported": 0}
+    for r in data["rows"]:
+        ws.append([r["label"] or r["key"], r["studies"], r["reports"], r["unreported"]])
+        for k in total:
+            total[k] += r[k]
+    if data["rows"]:  # 합계 행(볼드) — 빈 결과면 생략
+        ws.append(["합계", total["studies"], total["reports"], total["unreported"]])
+        for cell in ws[ws.max_row]:
+            cell.font = bold
+    for col, width in (("A", 26), ("B", 12), ("C", 12), ("D", 12)):
+        ws.column_dimensions[col].width = width
+    for row in ws.iter_rows(min_row=2, min_col=2, max_col=4):
+        for cell in row:
+            cell.number_format = "#,##0"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"usage-stats-{group}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # ════════════════════════════════ DB 구조 확인 (요구 6) ════════════════════════════════
