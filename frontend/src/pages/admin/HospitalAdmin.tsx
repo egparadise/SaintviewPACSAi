@@ -86,6 +86,8 @@ export function AccountsTab({ hid }: { hid: number }) {
         </select>
         <button onClick={add} disabled={!name.trim()}>＋ 발급</button>
       </div>
+      {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <thead><tr><th>이름</th><th>코드</th><th>등급</th><th>위치</th><th>접속</th><th>마지막</th><th>사용</th><th></th></tr></thead>
         <tbody>
@@ -110,6 +112,7 @@ export function AccountsTab({ hid }: { hid: number }) {
           {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>발급된 계정이 없습니다.</td></tr>}
         </tbody>
       </table>
+      </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         등급은 [② 권한 매트릭스]의 병원별 권한과 연동됩니다. 기타 의료인(Medician)은 기본 조회 전용입니다.
         접속 상태등은 Client 하트비트 기반(15초 자동 갱신)입니다.
@@ -195,7 +198,7 @@ export function PermMatrixTab({ hid }: { hid: number }) {
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>🛡️ 등급별 권한 매트릭스 (병원별)</div>
         <div style={{ flex: 1 }} />
         <button onClick={restore}>기본값 복원</button>
@@ -279,7 +282,7 @@ export function HospitalModalityTab({ hid }: { hid: number }) {
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>📡 Modality 등록 (SCP — AE/IP/Port)</div>
         <div style={{ flex: 1 }} />
         <button onClick={add}>＋ 추가</button>
@@ -464,7 +467,7 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700 }}>🔌 연결 대시보드</div>
           <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
             Client {onlineCnt}/{clients.length} 접속 · Modality {okCnt}/{mods.length} 확인 {at && `· ${at}`}
@@ -477,6 +480,7 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
         </div>
 
         <div style={{ fontWeight: 600, fontSize: 12.5 }}>Client (하트비트)</div>
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
           <thead><tr><th>상태</th><th>이름</th><th>등급</th><th>위치</th><th>마지막 하트비트</th></tr></thead>
           <tbody>
@@ -492,8 +496,10 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
             {clients.length === 0 && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>발급된 Client가 없습니다.</td></tr>}
           </tbody>
         </table>
+        </div>
 
         <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>Modality (마지막 Echo)</div>
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
           <thead><tr><th>상태</th><th>이름</th><th>AE Title</th><th>IP:Port</th><th>마지막 확인</th><th>결과</th></tr></thead>
           <tbody>
@@ -511,6 +517,7 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
             {mods.length === 0 && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>등록된 Modality가 없습니다 — [③ Modality(SCP)]에서 등록하세요.</td></tr>}
           </tbody>
         </table>
+        </div>
         <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
           Client 접속 상태는 30초 자동 갱신됩니다. Modality 상태등은 [전체 테스트](순차 C-ECHO) 결과 기준입니다.
         </div>

@@ -292,6 +292,9 @@ class Order(Base):
     body_part: Mapped[str] = mapped_column(String(64), default="")
     projection: Mapped[str] = mapped_column(String(32), default="")  # PA/AP/LAT 등
     dicom_study_id: Mapped[str] = mapped_column(String(16), default="")  # DICOM StudyID (0020,0010)
+    # 의뢰의/진료과 (RIS 오더 입력) — MWL ReferringPhysicianName(0008,0090)·부서(0008,1040) 노출
+    physician: Mapped[str] = mapped_column(String(64), default="")
+    department: Mapped[str] = mapped_column(String(64), default="")
     # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
     status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
     # 경량 테넌시 — HL7 ORM/가상환자 생성기 오더의 병원 귀속(MWL 병원 필터). NULL=전역

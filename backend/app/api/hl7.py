@@ -348,21 +348,61 @@ def mwl_stop(hid: int, db: Session = Depends(get_db), user: dict = Depends(curre
 
 # ════════════════════════════ 가상 환자 생성기 ════════════════════════════
 
+class TestgenExam(BaseModel):
+    """명시 모드 검사 항목 — Region/BodyPart/Projection (오더 1건씩 생성)."""
+    region: str = ""
+    body_part: str = ""
+    projection: str = ""
+
+
+class TestgenPatient(BaseModel):
+    """명시 모드 환자 정보 — RIS 오더 입력 폼. last_name 만 필수(400 검증)."""
+    patient_id: str = ""
+    accession: str = ""
+    sex: str = ""
+    last_name: str = ""
+    first_name: str = ""
+    physician: str = ""
+    department: str = ""
+    modality: str = ""
+
+
 class TestgenBody(BaseModel):
     hospital_id: int
     count: int = 1
-    with_dicom: bool = False   # 합성 DICOM 생성·Orthanc 등록
+    with_dicom: bool = False   # 합성 DICOM 생성·Orthanc 등록 (벌크 모드 전용)
     station_aet: str = ""
+    # 명시 모드(오더 입력형) — patient 가 있으면 exams 항목별 오더 생성(벌크 하위 호환 유지)
+    patient: TestgenPatient | None = None
+    exams: list[TestgenExam] = []
 
 
 @router.post("/testgen")
 def testgen(body: TestgenBody, db: Session = Depends(get_db), user: dict = Depends(current_user)):
-    """가상 환자+오더 생성 — MWL 로 장비가 조회 가능. 옵션: 합성 DICOM Orthanc 등록."""
+    """가상 환자+오더 생성 — MWL 로 장비가 조회 가능.
+
+    - 명시 모드(patient 포함): 환자 1명 + exams 항목별 오더 생성 → {orders: [...]}
+    - 벌크 모드(patient 없음, 기존 동작): count 건 랜덤 생성 → {items: [...], dicom: {...}}
+    """
     _require_admin_access(user, body.hospital_id)
     _get_hospital(db, body.hospital_id)
+    stored = get_hospital_setting(db, body.hospital_id, "testgen.config", default={}) or {}
+    if body.patient is not None:
+        # ── 명시 모드 검증 — 필수값 누락은 400 ──
+        if not body.patient.last_name.strip():
+            raise HTTPException(status_code=400, detail="last_name(성)은 필수입니다")
+        if not body.exams:
+            raise HTTPException(status_code=400, detail="검사 항목(exams)이 최소 1건 필요합니다")
+        if any(not e.body_part.strip() for e in body.exams):
+            raise HTTPException(status_code=400, detail="각 검사 항목의 body_part는 필수입니다")
+        if len(body.exams) > 50:
+            raise HTTPException(status_code=400, detail="검사 항목은 최대 50건")
+        return testgen_svc.generate_explicit(
+            db, body.hospital_id, stored,
+            patient=body.patient.model_dump(),
+            exams=[e.model_dump() for e in body.exams], by=user["sub"])
     if not (1 <= body.count <= 50):
         raise HTTPException(status_code=400, detail="count는 1~50")
-    stored = get_hospital_setting(db, body.hospital_id, "testgen.config", default={}) or {}
     return testgen_svc.generate(db, body.hospital_id, stored, body.count,
                                 with_dicom=body.with_dicom,
                                 station_aet=body.station_aet, by=user["sub"])

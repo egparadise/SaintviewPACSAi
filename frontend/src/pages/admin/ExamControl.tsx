@@ -6,11 +6,12 @@
 //           / Assign=대상 검사로 이동(재귀속). 재배정은 앱 DB 계층 — Orthanc 원본·DICOM 태그 불변.
 // 소스 어댑터(레인 F): source="server"(기본, /api/examctl) | "local"(/api/local/examctl — 워크리스트
 //           Local Server 모드의 로컬 PACS local.db). 프리뷰는 server=preview_url, local=localRendered(iid) blob.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, localRendered,
   type ExamCtlImage, type ExamCtlSeries, type ExamCtlTrashItem, type ExamCtlUids, type StudyRow,
 } from "../../api";
+import { clampSz } from "../../lib/Splitter";
 
 // HospitalAdmin 과 동일한 다크 테마 카드/입력 스타일 (해당 상수는 미export — 로컬 유지)
 const card: React.CSSProperties = {
@@ -22,6 +23,76 @@ const inp: React.CSSProperties = {
 };
 const secTitle: React.CSSProperties = { fontWeight: 700, fontSize: 12.5, marginBottom: 6 };
 const delRow: React.CSSProperties = { opacity: 0.45, textDecoration: "line-through" };
+
+// ── 블록 크기 조절 (스플리터) — localStorage(sv_examctl_sizes) 저장·복원, 최소 크기 클램프 ──
+const SZ_KEY = "sv_examctl_sizes";
+type CtlSizes = {
+  rightW: number;    // 우열(환자 카드·썸네일·프리뷰) 폭
+  seriesH: number;   // 좌열 ② Series 높이
+  imageH: number;    // 좌열 ③ Image 높이
+  thumbH: number;    // 우열 썸네일 높이
+};
+const DEF_SIZES: CtlSizes = { rightW: 340, seriesH: 150, imageH: 150, thumbH: 160 };
+/** 저장된 크기 복원 — 파싱 실패/이상값은 기본값·클램프로 방어 (각 블록 80px+) */
+function loadSizes(): CtlSizes {
+  let v: Partial<CtlSizes> = {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(SZ_KEY) ?? "null");
+    if (raw && typeof raw === "object") v = raw as Partial<CtlSizes>;
+  } catch { /* 파싱 실패 → 기본값 */ }
+  const num = (x: unknown, d: number, lo: number, hi: number) =>
+    clampSz(typeof x === "number" && Number.isFinite(x) ? x : d, lo, hi);
+  return {
+    rightW: num(v.rightW, DEF_SIZES.rightW, 220, 720),
+    seriesH: num(v.seriesH, DEF_SIZES.seriesH, 80, 600),
+    imageH: num(v.imageH, DEF_SIZES.imageH, 80, 600),
+    thumbH: num(v.thumbH, DEF_SIZES.thumbH, 80, 600),
+  };
+}
+
+/** 로컬 스플리터 — lib/Splitter 의 드래그(onDrag/onEnd) 패턴 + 호버·드래그 하이라이트 */
+function RSplit({ dir, onDrag, onEnd }: {
+  dir: "v" | "h"; onDrag: (delta: number) => void; onEnd: () => void;
+}) {
+  const [hot, setHot] = useState(false);      // 호버/드래그 중 하이라이트
+  const dragging = useRef(false);
+  const detachRef = useRef<() => void>(() => {});   // 드래그 중 언마운트 대비 리스너 정리
+  useEffect(() => () => detachRef.current(), []);
+  const start = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    setHot(true);
+    let last = dir === "v" ? e.clientX : e.clientY;
+    const move = (ev: MouseEvent) => {
+      const cur = dir === "v" ? ev.clientX : ev.clientY;
+      onDrag(cur - last);
+      last = cur;
+    };
+    const detach = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      dragging.current = false;
+      detachRef.current = () => {};
+    };
+    const up = () => {
+      detach();
+      setHot(false);
+      onEnd();
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    detachRef.current = detach;
+  };
+  return (
+    <div onMouseDown={start} onMouseEnter={() => setHot(true)}
+         onMouseLeave={() => { if (!dragging.current) setHot(false); }}
+         title="드래그=블록 크기 조절"
+         style={{ flexShrink: 0, zIndex: 5, borderRadius: 2,
+                  background: hot ? "var(--accent,#7dd3fc)" : "var(--border)",
+                  opacity: hot ? 0.9 : 0.5, transition: "background .12s, opacity .12s",
+                  ...(dir === "v" ? { width: 5, cursor: "col-resize" } : { height: 5, cursor: "row-resize" }) }} />
+  );
+}
 
 /** examctl 계약 미구현(레인 B 병렬) → '⚠ 준비 중' 우아 처리 (local 소스는 /api/local/examctl 안내) */
 function prepMsg(e: unknown, local = false): string {
@@ -169,6 +240,15 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
   const [trash, setTrash] = useState<ExamCtlTrashItem[]>([]);
   const [trashErr, setTrashErr] = useState("");
   const [trashSel, setTrashSel] = useState<Set<number>>(new Set());   // trash 배열 인덱스
+
+  // ── 레이아웃 크기 — 스플리터 드래그로 조절, localStorage(sv_examctl_sizes) 저장·복원 ──
+  const [sz, setSz] = useState<CtlSizes>(loadSizes);
+  const szRef = useRef(sz);
+  useEffect(() => { szRef.current = sz; }, [sz]);
+  const persistSizes = useCallback(() => {
+    try { localStorage.setItem(SZ_KEY, JSON.stringify(szRef.current)); }
+    catch { /* 저장 불가(프라이빗 모드 등) → 세션 내 조절만 유지 */ }
+  }, []);
 
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
@@ -392,9 +472,9 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
       {/* ── 본문: 좌(검사→Series→Image) | 우(환자 카드·대상·썸네일·프리뷰) ── */}
       <div style={{ display: "flex", gap: 10, flex: 1, minHeight: 0 }}>
         {/* ══ 좌열 ══ */}
-        <div style={{ flex: 1.5, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-          {/* ① 검사 그리드 */}
-          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, flex: 1.2, minHeight: 120 }}>
+        <div style={{ flex: 1, minWidth: 80, display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* ① 검사 그리드 — 가변(flex), ②③은 고정 높이(스플리터 조절) */}
+          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 80 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ ...secTitle, marginBottom: 0 }}>① 검사 (Exam)</div>
               <input style={{ ...inp, flex: 1, minWidth: 120 }} placeholder="환자 ID/이름 검색"
@@ -431,8 +511,12 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             </div>
           </div>
 
+          {/* ①↕② 스플리터 — 아래로 드래그=검사 그리드 확대(Series 축소) */}
+          <RSplit dir="h" onEnd={persistSizes}
+                  onDrag={(dy) => setSz((s) => ({ ...s, seriesH: clampSz(s.seriesH - dy, 80, 600) }))} />
+
           {/* ② 선택 검사의 Series 목록 */}
-          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 100 }}>
+          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, height: sz.seriesH, flexShrink: 0 }}>
             <div style={{ ...secTitle, marginBottom: 0 }}>
               ② Series <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
                 {sel ? `— ${sel.patient_name || sel.patient_key} (선택 ${selSeries.size})` : "— 검사를 선택하세요"}</span>
@@ -466,8 +550,12 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             </div>
           </div>
 
+          {/* ②↕③ 스플리터 — 아래로 드래그=Image 목록 축소 */}
+          <RSplit dir="h" onEnd={persistSizes}
+                  onDrag={(dy) => setSz((s) => ({ ...s, imageH: clampSz(s.imageH - dy, 80, 600) }))} />
+
           {/* ③ 선택 Series 의 Image 목록 */}
-          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 100 }}>
+          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, height: sz.imageH, flexShrink: 0 }}>
             <div style={{ ...secTitle, marginBottom: 0 }}>
               ③ Image <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>
                 {curSeries ? `— S${curSeries.series_number} (선택 ${selImages.size})` : "— Series를 선택하세요"}</span>
@@ -500,8 +588,12 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
           </div>
         </div>
 
+        {/* 좌열↔우열 세로 스플리터 — 우열 폭 조절 */}
+        <RSplit dir="v" onEnd={persistSizes}
+                onDrag={(dx) => setSz((s) => ({ ...s, rightW: clampSz(s.rightW - dx, 220, 720) }))} />
+
         {/* ══ 우열 ══ */}
-        <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
+        <div style={{ width: sz.rightW, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
           {/* ① 선택한 환자 */}
           <PatientCard title="선택한 환자" s={sel} empty="좌측에서 검사를 선택하세요." />
 
@@ -541,13 +633,14 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             )}
           </div>
 
-          {/* ③ Series 썸네일 */}
-          <div style={card}>
+          {/* ③ Series 썸네일 — 고정 높이(스플리터 조절) + 내부 스크롤 */}
+          <div style={{ ...card, height: sz.thumbH, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={secTitle}>Series 썸네일</div>
             {!tree || tree.length === 0 ? (
               <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>표시할 Series가 없습니다.</div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto", alignContent: "start",
+                            display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
                 {tree.map((s) => {
                   const first = s.instances.find((i) => !i.deleted && (i.preview_url || i.iid !== undefined)) ?? s.instances[0];
                   return (
@@ -570,6 +663,10 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
               </div>
             )}
           </div>
+
+          {/* 썸네일↕프리뷰 스플리터 — 아래로 드래그=썸네일 확대(프리뷰 축소) */}
+          <RSplit dir="h" onEnd={persistSizes}
+                  onDrag={(dy) => setSz((s) => ({ ...s, thumbH: clampSz(s.thumbH + dy, 80, 600) }))} />
 
           {/* ④ 선택 Image 프리뷰 (크게) */}
           <div style={{ ...card, flex: 1, minHeight: 180, display: "flex", flexDirection: "column" }}>

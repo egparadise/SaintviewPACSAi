@@ -22,10 +22,7 @@ type Hl7Msg = {
 };
 type ConfigResp = { key: string; hospital_id: number; value: Record<string, unknown> };
 type MwlStatus = { hospital_id: number; running: boolean; port?: number; aet?: string };
-type TestgenItem = {
-  order_id: number; patient_key: string; patient_name: string; accession_no: string;
-  modality: string; body_part: string; sex: string; birth_date: string;
-};
+type TestgenOrder = { order_id: number; accession_no: string; body_part: string; projection: string };
 
 // ── 공통 소형 UI (관리 콘솔 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -140,7 +137,7 @@ export function Hl7ConfigSection({ hid }: { hid: number }) {
         <input style={{ ...inp, width: 90 }} value={cfg.oruPort} onChange={(e) => setCfg({ ...cfg, oruPort: e.target.value })} placeholder="port" />
       </Row>
       <Row label="전송 재시도 최대"><input style={{ ...inp, width: 70 }} value={cfg.retryMax} onChange={(e) => setCfg({ ...cfg, retryMax: e.target.value })} /></Row>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="primary" onClick={save}>저장</button>
         <button onClick={toggleListener} disabled={!cfg.port}>
           {listenerRunning ? "리스너 중지" : "리스너 시작"} (포트 {cfg.port || "—"})
@@ -302,7 +299,7 @@ export function MwlSection({ hid }: { hid: number }) {
         <input type="checkbox" checked={cfg.registeredOnly} onChange={(e) => setCfg({ ...cfg, registeredOnly: e.target.checked })} />
         <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>병원 등록 Modality(modality.nodes)의 AET에서 온 C-FIND만 응답</span>
       </Row>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="primary" onClick={save}>저장</button>
         <button onClick={toggle}>{status?.running ? "SCP 중지" : "SCP 시작"}</button>
         <span style={{ fontSize: 12, color: status?.running ? "var(--success,#4ade80)" : "var(--text-secondary)" }}>
@@ -317,13 +314,73 @@ export function MwlSection({ hid }: { hid: number }) {
   );
 }
 
-// ════════════════════════════ ④ 가상 환자 생성기 ════════════════════════════
+// ════════════════════════════ ④ 가상 환자 생성기 (오더 입력형 — RIS 스타일) ════════════════════════════
+
+// Region → Body Part 표준 매핑 상수
+const REGIONS = ["Skull", "Chest", "Abdomen", "Pelvis", "Upper Extremity", "Lower Extremity", "Spine"] as const;
+const BODY_PARTS: Record<string, string[]> = {
+  Skull: ["SKULL", "FACIAL", "MANDIBLE", "NASAL", "TMJ"],
+  Chest: ["CHEST", "RIB", "STERNUM", "CLAVICLE"],
+  Abdomen: ["ABDOMEN", "KUB"],
+  Pelvis: ["PELVIS", "HIP", "SI-JOINT"],
+  "Upper Extremity": ["SHOULDER", "HUMERUS", "ELBOW", "FOREARM", "WRIST", "HAND"],
+  "Lower Extremity": ["FEMUR", "KNEE", "TIBIA", "ANKLE", "FOOT"],
+  Spine: ["C-SPINE", "T-SPINE", "L-SPINE", "SACRUM", "COCCYX"],
+};
+const PROJECTIONS = ["PA", "AP", "Lateral", "Oblique", "Axial", "Lordotic", "Towne", "Waters", "Caldwell", "Tangential"];
+const MODALITIES = ["CR", "CT", "DX", "MR", "US", "MG", "XA", "NM", "RF"];
+
+type ExamItem = { region: string; body_part: string; projection: string };
+type PatientForm = {
+  patientId: string; accession: string; sex: string; lastName: string;
+  firstName: string; physician: string; department: string; modality: string;
+};
+const EMPTY_PATIENT: PatientForm = {
+  patientId: "", accession: "", sex: "", lastName: "",
+  firstName: "", physician: "", department: "", modality: "CR",
+};
+
+// 컬럼 헤더 + 본문 (목업 5컬럼 공통)
+function Col({ title, children, flex }: { title: React.ReactNode; children: React.ReactNode; flex?: number }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 130, flex: flex ?? 1 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: "var(--text-secondary)", textTransform: "uppercase", borderBottom: "1px solid var(--border)", paddingBottom: 4 }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// 선택 목록 버튼 (Region / Body Part / Projection)
+function PickBtn({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      textAlign: "left", fontSize: 12, padding: "4px 8px", borderRadius: 4, cursor: "pointer",
+      border: `1px solid ${selected ? "var(--accent,#7dd3fc)" : "var(--border)"}`,
+      background: selected ? "color-mix(in srgb, var(--accent,#7dd3fc) 18%, transparent)" : "var(--bg-canvas)",
+      color: selected ? "var(--accent,#7dd3fc)" : "var(--text-primary)", fontWeight: selected ? 700 : 400,
+    }}>{label}</button>
+  );
+}
+
+// PATIENT INFO 필드 (라벨 위·입력 아래 — RIS 폼 스타일)
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11.5, color: "var(--text-secondary)" }}>
+      <span>{label}{required && <span style={{ color: "var(--danger,#f87171)" }}> *</span>}</span>
+      {children}
+    </label>
+  );
+}
+
 export function TestgenSection({ hid }: { hid: number }) {
   const [cfg, setCfg] = useState<{ pidPrefix: string; pidDigits: string; accPrefix: string; modalities: string; bodyParts: string; ageMin: string; ageMax: string } | null>(null);
-  const [count, setCount] = useState("1");
-  const [withDicom, setWithDicom] = useState(false);
-  const [stationAet, setStationAet] = useState("");
-  const [items, setItems] = useState<TestgenItem[]>([]);
+  const [pt, setPt] = useState<PatientForm>(EMPTY_PATIENT);
+  const [region, setRegion] = useState("");
+  const [bodyPart, setBodyPart] = useState("");
+  const [projection, setProjection] = useState("");
+  const [exams, setExams] = useState<ExamItem[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -357,69 +414,159 @@ export function TestgenSection({ hid }: { hid: number }) {
       setMsg("생성 규칙 저장됨 (testgen.config)");
     } catch (e) { setMsg(errMsg(e)); }
   };
-  const generate = async () => {
+
+  // Generate 링크 — testgen.config 프리픽스/자릿수 규칙으로 클라이언트 생성
+  const genDigits = (n: number) =>
+    String(Math.floor(Math.random() * Math.pow(10, n))).padStart(n, "0");
+  const genPid = () => cfg && setPt((p) => ({ ...p, patientId: cfg.pidPrefix + genDigits(Number(cfg.pidDigits) || 6) }));
+  const genAcc = () => cfg && setPt((p) => ({ ...p, accession: cfg.accPrefix + genDigits(8) }));
+
+  const addExam = () => {
+    if (!region || !bodyPart || !projection) { setMsg("⚠ Region → Body Part → Projection 을 먼저 선택하세요"); return; }
+    if (exams.some((e) => e.body_part === bodyPart && e.projection === projection)) {
+      setMsg("⚠ 이미 추가된 검사 항목입니다"); return;
+    }
+    setExams((xs) => [...xs, { region, body_part: bodyPart, projection }]);
+    setMsg("");
+  };
+  const clearAll = () => {
+    setPt(EMPTY_PATIENT); setRegion(""); setBodyPart(""); setProjection(""); setExams([]);
+  };
+  const save = async () => {
+    if (!pt.lastName.trim()) { setMsg("⚠ Last Name 은 필수입니다"); return; }
+    if (exams.length === 0) { setMsg("⚠ 검사 항목을 1건 이상 추가하세요 ([+ Add])"); return; }
     setBusy(true);
     try {
-      const r = await POST<{ items: TestgenItem[]; dicom: { requested: boolean; uploaded: number; warning: string } }>(
-        "/api/hl7/testgen",
-        { hospital_id: hid, count: Number(count) || 1, with_dicom: withDicom, station_aet: stationAet },
-      );
-      setItems(r.items);
-      const d = r.dicom;
-      setMsg(`가상 환자 ${r.items.length}건 생성 완료 (MWL 조회 가능)` +
-        (d.requested ? ` · 합성 DICOM ${d.uploaded}건 등록${d.warning ? ` — ⚠ ${d.warning}` : ""}` : ""));
+      const r = await POST<{ orders: TestgenOrder[]; patient_key: string }>("/api/hl7/testgen", {
+        hospital_id: hid,
+        patient: {
+          patient_id: pt.patientId.trim(), accession: pt.accession.trim(), sex: pt.sex,
+          last_name: pt.lastName.trim(), first_name: pt.firstName.trim(),
+          physician: pt.physician.trim(), department: pt.department.trim(), modality: pt.modality,
+        },
+        exams,
+      });
+      setMsg(`✅ 환자 ${r.patient_key} — 오더 ${r.orders.length}건 저장 완료 (MWL 조회 가능): ${r.orders.map((o) => o.accession_no).join(", ")}`);
+      clearAll();
     } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
   };
 
   if (!cfg) return <div style={card}>불러오는 중…</div>;
+  const bodyParts = region ? (BODY_PARTS[region] ?? []) : [];
   return (
-    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontWeight: 700 }}>🧪 가상 환자 생성기 — 장비 테스트용 환자+오더 (MWL 조회 대상)</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <Row label="환자ID 프리픽스"><input style={{ ...inp, width: 90 }} value={cfg.pidPrefix} onChange={(e) => setCfg({ ...cfg, pidPrefix: e.target.value })} /></Row>
-        <Row label="ID 자릿수"><input style={{ ...inp, width: 60 }} value={cfg.pidDigits} onChange={(e) => setCfg({ ...cfg, pidDigits: e.target.value })} /></Row>
-        <Row label="Accession 프리픽스"><input style={{ ...inp, width: 90 }} value={cfg.accPrefix} onChange={(e) => setCfg({ ...cfg, accPrefix: e.target.value })} /></Row>
-        <Row label="나이 범위">
-          <input style={{ ...inp, width: 55 }} value={cfg.ageMin} onChange={(e) => setCfg({ ...cfg, ageMin: e.target.value })} />
-          <span>~</span>
-          <input style={{ ...inp, width: 55 }} value={cfg.ageMax} onChange={(e) => setCfg({ ...cfg, ageMax: e.target.value })} />
-        </Row>
-        <Row label="Modality(콤마)"><input style={{ ...inp, flex: 1 }} value={cfg.modalities} onChange={(e) => setCfg({ ...cfg, modalities: e.target.value })} placeholder="CR,CT,MR,US" /></Row>
-        <Row label="Body Part(콤마)"><input style={{ ...inp, flex: 1 }} value={cfg.bodyParts} onChange={(e) => setCfg({ ...cfg, bodyParts: e.target.value })} placeholder="CHEST,ABDOMEN" /></Row>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={saveCfg}>생성 규칙 저장</button>
-        <button onClick={load}>다시 불러오기</button>
-      </div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-          생성 수 <input style={{ ...inp, width: 55 }} value={count} onChange={(e) => setCount(e.target.value)} />
-        </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-          <input type="checkbox" checked={withDicom} onChange={(e) => setWithDicom(e.target.checked)} />
-          합성 DICOM 생성·Orthanc 등록
-        </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-          장비 AET(선택) <input style={{ ...inp, width: 110 }} value={stationAet} onChange={(e) => setStationAet(e.target.value)} />
-        </label>
-        <button className="primary" onClick={generate} disabled={busy}>{busy ? "생성 중…" : "가상 환자 생성"}</button>
+    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontWeight: 700 }}>🧪 가상 환자 생성기 — 오더 입력(RIS) · 생성 오더는 MWL 조회 대상</div>
+
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 14, minWidth: 860, alignItems: "stretch" }}>
+          {/* ① PATIENT INFO */}
+          <Col title="Patient Info" flex={1.5}>
+            <Field label="Patient ID">
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input style={{ ...inp, flex: 1 }} value={pt.patientId} onChange={(e) => setPt({ ...pt, patientId: e.target.value })} />
+                <a href="#" style={{ fontSize: 11, color: "var(--accent,#7dd3fc)", whiteSpace: "nowrap" }}
+                   onClick={(e) => { e.preventDefault(); genPid(); }}>Generate</a>
+              </span>
+            </Field>
+            <Field label="Accession No.">
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input style={{ ...inp, flex: 1 }} value={pt.accession} onChange={(e) => setPt({ ...pt, accession: e.target.value })} />
+                <a href="#" style={{ fontSize: 11, color: "var(--accent,#7dd3fc)", whiteSpace: "nowrap" }}
+                   onClick={(e) => { e.preventDefault(); genAcc(); }}>Generate</a>
+              </span>
+            </Field>
+            <Field label="Sex">
+              <select style={inp} value={pt.sex} onChange={(e) => setPt({ ...pt, sex: e.target.value })}>
+                <option value="">--</option><option value="M">M</option><option value="F">F</option><option value="O">O</option>
+              </select>
+            </Field>
+            <Field label="Last Name" required>
+              <input style={inp} value={pt.lastName} onChange={(e) => setPt({ ...pt, lastName: e.target.value })} />
+            </Field>
+            <Field label="First Name">
+              <input style={inp} value={pt.firstName} onChange={(e) => setPt({ ...pt, firstName: e.target.value })} />
+            </Field>
+            <Field label="Physician">
+              <input style={inp} value={pt.physician} onChange={(e) => setPt({ ...pt, physician: e.target.value })} />
+            </Field>
+            <Field label="Department">
+              <input style={inp} value={pt.department} onChange={(e) => setPt({ ...pt, department: e.target.value })} />
+            </Field>
+            <Field label="Modality">
+              <select style={inp} value={pt.modality} onChange={(e) => setPt({ ...pt, modality: e.target.value })}>
+                {MODALITIES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Field>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <button className="primary" onClick={save} disabled={busy} style={{ flex: 1 }}>{busy ? "저장 중…" : "Save"}</button>
+              <button onClick={clearAll} style={{ flex: 1 }}>Clear</button>
+            </div>
+          </Col>
+
+          {/* ② REGION */}
+          <Col title="Region">
+            {REGIONS.map((rg) => (
+              <PickBtn key={rg} label={rg} selected={region === rg}
+                       onClick={() => { setRegion(rg); setBodyPart(""); }} />
+            ))}
+          </Col>
+
+          {/* ③ BODY PART */}
+          <Col title="Body Part">
+            {!region && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>Region을 선택하세요</div>}
+            {bodyParts.map((bp) => (
+              <PickBtn key={bp} label={bp} selected={bodyPart === bp} onClick={() => setBodyPart(bp)} />
+            ))}
+          </Col>
+
+          {/* ④ PROJECTION */}
+          <Col title="Projection">
+            {PROJECTIONS.map((pj) => (
+              <PickBtn key={pj} label={pj} selected={projection === pj} onClick={() => setProjection(pj)} />
+            ))}
+            <button onClick={addExam} style={{ marginTop: 4, fontWeight: 700 }}>+ Add</button>
+          </Col>
+
+          {/* ⑤ 검사 항목 */}
+          <Col title={`검사 항목 (${exams.length})`} flex={1.4}>
+            {exams.length === 0 && (
+              <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                추가된 검사 항목이 없습니다.<br />Region → Body Part → Projection 선택 후 [+ Add] 하세요.
+              </div>
+            )}
+            {exams.map((x, i) => (
+              <div key={`${x.body_part}-${x.projection}-${i}`}
+                   style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-canvas)" }}>
+                <span style={{ flex: 1 }}>{x.body_part} · {x.projection} · {pt.modality || "—"}</span>
+                <button onClick={() => setExams((xs) => xs.filter((_, j) => j !== i))}
+                        title="삭제" style={{ padding: "0 6px" }}>✕</button>
+              </div>
+            ))}
+          </Col>
+        </div>
       </div>
       <Msg text={msg} />
-      {items.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="grid-table" style={{ fontSize: 12 }}>
-            <thead><tr><th>오더#</th><th>환자ID</th><th>이름</th><th>Accession</th><th>Modality</th><th>부위</th><th>성별</th><th>생일</th></tr></thead>
-            <tbody>
-              {items.map((i) => (
-                <tr key={i.order_id}>
-                  <td>{i.order_id}</td><td>{i.patient_key}</td><td>{i.patient_name}</td><td>{i.accession_no}</td>
-                  <td>{i.modality}</td><td>{i.body_part}</td><td>{i.sex}</td><td>{i.birth_date}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+      {/* 생성 규칙 (프리픽스/자릿수) — 접이식 유지, 위 Generate 링크가 이 규칙 사용 */}
+      <details style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+        <summary style={{ fontSize: 12.5, cursor: "pointer", color: "var(--text-secondary)" }}>⚙ 생성 규칙 저장 (프리픽스/자릿수)</summary>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <Row label="환자ID 프리픽스"><input style={{ ...inp, width: 90 }} value={cfg.pidPrefix} onChange={(e) => setCfg({ ...cfg, pidPrefix: e.target.value })} /></Row>
+          <Row label="ID 자릿수"><input style={{ ...inp, width: 60 }} value={cfg.pidDigits} onChange={(e) => setCfg({ ...cfg, pidDigits: e.target.value })} /></Row>
+          <Row label="Accession 프리픽스"><input style={{ ...inp, width: 90 }} value={cfg.accPrefix} onChange={(e) => setCfg({ ...cfg, accPrefix: e.target.value })} /></Row>
+          <Row label="나이 범위">
+            <input style={{ ...inp, width: 55 }} value={cfg.ageMin} onChange={(e) => setCfg({ ...cfg, ageMin: e.target.value })} />
+            <span>~</span>
+            <input style={{ ...inp, width: 55 }} value={cfg.ageMax} onChange={(e) => setCfg({ ...cfg, ageMax: e.target.value })} />
+          </Row>
+          <Row label="Modality(콤마)"><input style={{ ...inp, flex: 1 }} value={cfg.modalities} onChange={(e) => setCfg({ ...cfg, modalities: e.target.value })} placeholder="CR,CT,MR,US" /></Row>
+          <Row label="Body Part(콤마)"><input style={{ ...inp, flex: 1 }} value={cfg.bodyParts} onChange={(e) => setCfg({ ...cfg, bodyParts: e.target.value })} placeholder="CHEST,ABDOMEN" /></Row>
         </div>
-      )}
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={saveCfg}>생성 규칙 저장</button>
+          <button onClick={load}>다시 불러오기</button>
+        </div>
+      </details>
     </div>
   );
 }

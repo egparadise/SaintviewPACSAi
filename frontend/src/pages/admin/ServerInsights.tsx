@@ -68,10 +68,13 @@ export function DbSchemaPanel() {
             {sel ? (
               <>
                 <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>{sel.name} — {sel.rows.toLocaleString()}행 · 컬럼 {sel.columns.length}개</div>
+                {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
+                <div style={{ overflowX: "auto" }}>
                 <table className="grid-table" style={{ fontSize: 12 }}>
                   <thead><tr><th>컬럼</th><th>타입</th></tr></thead>
                   <tbody>{sel.columns.map((c) => <tr key={c.name}><td>{c.name}</td><td><code style={{ fontSize: 11.5 }}>{c.type}</code></td></tr>)}</tbody>
                 </table>
+                </div>
               </>
             ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>좌측에서 테이블을 선택하면 컬럼·행수를 표시합니다.</div>}
           </div>
@@ -519,6 +522,7 @@ export function StatsPanel({ hid }: { hid?: number }) {
         </div>
       )}
 
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <thead><tr><th>구분</th><th>검사</th><th>판독</th><th>미판독</th><th style={{ width: "38%" }}>검사 수(비율)</th></tr></thead>
         <tbody>
@@ -539,6 +543,7 @@ export function StatsPanel({ hid }: { hid?: number }) {
           {rows.length === 0 && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>{busy ? "조회 중…" : "데이터가 없습니다."}</td></tr>}
         </tbody>
       </table>
+      </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         기간 미지정=전체. 막대는 목록 내 최대 검사 수 기준 상대 비율입니다.
       </div>

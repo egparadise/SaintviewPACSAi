@@ -35,7 +35,11 @@ def build_mwl_dataset(order) -> Dataset:
     ds.StudyID = order.dicom_study_id or f"S{order.id:06d}"  # (0020,0010)
     ds.RequestedProcedureID = f"RP{order.id}"
     ds.RequestedProcedureDescription = order.procedure_desc or ""
-    ds.ReferringPhysicianName = ""
+    # 의뢰의/진료과 — RIS 오더 입력(가상 생성기 명시 모드) 값 노출 (없으면 빈 값 유지)
+    ds.ReferringPhysicianName = getattr(order, "physician", "") or ""
+    dept = getattr(order, "department", "") or ""
+    if dept:
+        ds.InstitutionalDepartmentName = dept  # (0008,1040)
 
     sps = Dataset()
     sps.Modality = order.modality or "OT"

@@ -104,7 +104,7 @@ export function ServerConfigPanel() {
   if (!web) return <div style={card}>불러오는 중…</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700 }}>🖥️ 서버 설정 — IP / Port / AE Title / Name</div>
         <div style={{ flex: 1 }} />
         <span title={dot.t} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)" }}>
@@ -160,6 +160,8 @@ export function MaintStoragePanel() {
         <button onClick={load}>새로고침</button>
       </div>
       {!st ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
+        /* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
           <thead><tr><th>구분</th><th>사용량</th><th>상세</th></tr></thead>
           <tbody>
@@ -184,6 +186,7 @@ export function MaintStoragePanel() {
             </tr>
           </tbody>
         </table>
+        </div>
       )}
       <Msg text={msg} />
 

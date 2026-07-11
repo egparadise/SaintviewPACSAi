@@ -71,7 +71,7 @@ export function OhifSection() {
   const ds = cfg?.datasource ?? {};
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Dot state={c?.state ?? ""} />
         <div style={{ fontWeight: 700 }}>OHIF 뷰어 (saintview-ohif)</div>
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{c ? `${c.image} · ${c.status}` : "컨테이너 상태 미확인"}</span>
@@ -81,6 +81,8 @@ export function OhifSection() {
         <button className="primary" onClick={() => act("restart")}>재시작</button>
         <button onClick={load}>새로고침</button>
       </div>
+      {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <tbody>
           <tr><td style={{ width: 160 }}>뷰어 주소</td><td>{cfg ? <a href={cfg.ohif_url} target="_blank" rel="noreferrer">{cfg.ohif_url}</a> : "—"}</td></tr>
@@ -89,6 +91,7 @@ export function OhifSection() {
           <tr><td>설정 파일</td><td style={{ color: "var(--text-secondary)" }}>{cfg?.config_path || "—"} (호스트 파일 수정 → 재시작으로 반영)</td></tr>
         </tbody>
       </table>
+      </div>
       <button style={{ alignSelf: "flex-start" }} onClick={() => setShowGuide(!showGuide)}>
         {showGuide ? "▲ 가이드 접기" : "▼ 어떻게 동작하나 (운영 가이드)"}
       </button>
@@ -138,6 +141,7 @@ export function ContainersSection() {
         <div style={{ flex: 1 }} />
         <button onClick={load}>새로고침</button>
       </div>
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <thead><tr><th style={{ width: 24 }}></th><th>이름</th><th>이미지</th><th>상태</th><th>포트</th><th style={{ width: 190 }}>제어</th></tr></thead>
         <tbody>
@@ -162,6 +166,7 @@ export function ContainersSection() {
           )}
         </tbody>
       </table>
+      </div>
       <Msg text={msg} />
     </div>
   );
@@ -207,6 +212,7 @@ export function HospitalContainersSection({ hid }: { hid?: number } = {}) {
         <button onClick={load}>새로고침</button>
       </div>
       {res?.db_note && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{res.db_note}</div>}
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <thead><tr><th style={{ width: 24 }}></th><th>병원</th><th>컨테이너</th><th>포트(Web/DICOM)</th><th>볼륨</th><th style={{ width: 230 }}>제어</th></tr></thead>
         <tbody>
@@ -237,6 +243,7 @@ export function HospitalContainersSection({ hid }: { hid?: number } = {}) {
           )}
         </tbody>
       </table>
+      </div>
       <Msg text={msg} />
     </div>
   );

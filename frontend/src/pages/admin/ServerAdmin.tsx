@@ -36,6 +36,8 @@ export function ServerPanel() {
              <button onClick={load}>새로고침</button>
            </>}>
       {!st ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
+        /* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
           <thead><tr><th>서비스</th><th>주소</th><th>상태</th><th>관리</th></tr></thead>
           <tbody>
@@ -63,6 +65,7 @@ export function ServerPanel() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
       <Msg text={msg} />
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
@@ -95,6 +98,7 @@ export function OverviewPanel() {
           <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
             병원 {ov.totals.hospitals} · 계정 {ov.totals.accounts} · 장비 {ov.totals.modalities} · 검사 {ov.totals.studies} · 로그 {ov.totals.audit_logs}
           </div>
+          <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12 }}>
             <thead><tr><th>병원</th><th>코드</th><th>진료과</th><th>계정(활성/전체)</th><th>Client</th><th>Modality</th><th>검사</th><th>결재</th><th>상태</th></tr></thead>
             <tbody>
@@ -112,6 +116,7 @@ export function OverviewPanel() {
               {ov.hospitals.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>가입된 병원이 없습니다.</td></tr>}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </Group>
@@ -184,6 +189,7 @@ export function HospitalsPanel() {
 
   return (
     <Group title="가입자 병원 (다기관)" right={<button onClick={() => { setForm({ ...EMPTY_HOSP }); setEditId(null); }}>＋ 추가</button>}>
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12 }}>
         <thead><tr><th>코드</th><th>병원명</th><th>AET</th><th>계정</th><th>격리</th><th>사용</th><th></th></tr></thead>
         <tbody>
@@ -202,6 +208,7 @@ export function HospitalsPanel() {
           {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>등록된 병원이 없습니다.</td></tr>}
         </tbody>
       </table>
+      </div>
       <Msg text={msg} />
       {form && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
@@ -265,6 +272,7 @@ export function UsersPanel() {
 
   return (
     <Group title="계정 / 역할 관리" right={<button onClick={openNew}>＋ 계정 추가</button>}>
+      <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12 }}>
         <thead><tr><th>아이디</th><th>이름</th><th>역할</th><th>병원</th><th>면허</th><th>사용</th><th></th></tr></thead>
         <tbody>
@@ -281,6 +289,7 @@ export function UsersPanel() {
           ))}
         </tbody>
       </table>
+      </div>
       <Msg text={msg} />
       {form && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
@@ -366,6 +375,7 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
         <button onClick={() => { setForm({ ...EMPTY_MOD, hospital_id: hospitalId ?? null }); setEditId(null); }}>＋ 추가</button>
         <button onClick={apply}>Orthanc 반영</button>
       </>}>
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
           <thead><tr><th>이름</th><th>종류</th><th>AET</th><th>IP</th><th>Port</th><th>역할</th><th>수신</th><th>병원</th><th></th></tr></thead>
           <tbody>
@@ -382,6 +392,7 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
             {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>등록된 장비가 없습니다.</td></tr>}
           </tbody>
         </table>
+        </div>
         <Msg text={msg} />
         {form && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
@@ -512,6 +523,7 @@ export function StoragePanel() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Group title="저장공간 현황" right={<button onClick={loadOv}>새로고침</button>}>
         {ov ? (
+          <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12 }}>
             <tbody>
               <tr><td>DICOM 저장소(Orthanc)</td><td>{o?.alive
@@ -526,6 +538,7 @@ export function StoragePanel() {
                 : "미적용 (보존 기간 0)"}</td></tr>
             </tbody>
           </table>
+          </div>
         ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>확인 중…</div>}
         <Msg text={msg} />
       </Group>
@@ -566,6 +579,7 @@ export function StoragePanel() {
       </Group>
 
       <Group title="백업 이력" right={<button onClick={loadJobs}>새로고침</button>}>
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 11.5 }}>
           <thead><tr><th>#</th><th>유형</th><th>상태</th><th>압축</th><th>검사</th><th>인스턴스</th><th>용량</th><th>완료</th></tr></thead>
           <tbody>
@@ -581,6 +595,7 @@ export function StoragePanel() {
             {jobs.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>백업 이력이 없습니다.</td></tr>}
           </tbody>
         </table>
+        </div>
       </Group>
 
       <Group title="보존 정책 — 기간 초과 검사 삭제 (파괴적)">

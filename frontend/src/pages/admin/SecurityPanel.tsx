@@ -137,13 +137,15 @@ export function SecurityPanel() {
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* ── 보안 대시보드 (상태등) ── */}
       <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700 }}>🛡️ 보안 대시보드 — 랜섬·바이러스·접근 (탐지·경고 전용)</div>
           <div style={{ flex: 1 }} />
           <button onClick={quickScan} disabled={busy}>빠른 스캔</button>
           <button onClick={integrityScan} disabled={busy}>무결성 검사</button>
           <button onClick={load}>새로고침</button>
         </div>
+        {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
+        <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
           <thead><tr><th>항목</th><th>상태</th><th>상세</th></tr></thead>
           <tbody>
@@ -183,6 +185,7 @@ export function SecurityPanel() {
             </tr>
           </tbody>
         </table>
+        </div>
         <Msg text={msg} />
         {scanAlerts && scanAlerts.length > 0 && (
           <div style={{ fontSize: 12, color: "var(--danger,#f87171)", whiteSpace: "pre-wrap" }}>
@@ -195,6 +198,7 @@ export function SecurityPanel() {
       {sum.lockouts.locked.length > 0 && (
         <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ fontWeight: 700 }}>🔒 활성 로그인 잠금</div>
+          <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12.5 }}>
             <thead><tr><th>대상 (계정/IP)</th><th>잔여 시간</th><th /></tr></thead>
             <tbody>
@@ -207,6 +211,7 @@ export function SecurityPanel() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

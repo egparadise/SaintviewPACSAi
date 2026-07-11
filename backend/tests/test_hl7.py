@@ -237,6 +237,86 @@ def test_testgen_api_unique(client, db, auth_headers):
     assert order.status == "scheduled" and order.hospital_id == h.id
 
 
+def test_testgen_explicit_orders(client, db, auth_headers):
+    """명시 모드(오더 입력형) — 환자 1명 + 검사 항목별 오더 n건, Accession -1,-2… 유일화."""
+    h = _mk_hospital(db, "TGE")
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id,
+        "patient": {"patient_id": "TGE-P1", "accession": "TGE-ACC", "sex": "M",
+                    "last_name": "KIM", "first_name": "CHULSOO",
+                    "physician": "DR.LEE", "department": "영상의학과", "modality": "CR"},
+        "exams": [
+            {"region": "Chest", "body_part": "CHEST", "projection": "PA"},
+            {"region": "Chest", "body_part": "RIB", "projection": "Oblique"},
+            {"region": "Skull", "body_part": "SKULL", "projection": "AP"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    orders = body["orders"]
+    assert len(orders) == 3 and body["patient_key"] == "TGE-P1"
+    accs = [o["accession_no"] for o in orders]
+    assert accs == ["TGE-ACC-1", "TGE-ACC-2", "TGE-ACC-3"]  # 항목별 접미사·유일
+    assert len(set(accs)) == 3
+    assert orders[0]["body_part"] == "CHEST" and orders[0]["projection"] == "PA"
+    for o in orders:
+        order = db.get(Order, o["order_id"])
+        assert order.patient_key == "TGE-P1"
+        assert order.patient_name == "KIM^CHULSOO"
+        assert order.modality == "CR" and order.sex == "M"
+        assert order.status == "scheduled" and order.hospital_id == h.id  # MWL 조회 대상
+        assert order.physician == "DR.LEE" and order.department == "영상의학과"  # 오더 컬럼 보존
+    # MWL 데이터셋에 의뢰의/진료과 노출 — ReferringPhysicianName(0008,0090)·부서(0008,1040)
+    from app.dicom.mwl import build_mwl_dataset
+
+    ds = build_mwl_dataset(db.get(Order, orders[0]["order_id"]))
+    assert str(ds.ReferringPhysicianName) == "DR.LEE"
+    assert str(ds.InstitutionalDepartmentName) == "영상의학과"
+
+
+def test_testgen_explicit_autogen_ids(client, db, auth_headers):
+    """명시 모드 — patient_id/accession 미입력 시 생성 규칙(프리픽스/자릿수)으로 채움."""
+    h = _mk_hospital(db, "TGF")
+    set_hospital_setting(db, h.id, "testgen.config",
+                         {"pid_prefix": "TGF", "pid_digits": 5, "acc_prefix": "TGFA"})
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id,
+        "patient": {"last_name": "PARK"},
+        "exams": [{"region": "Abdomen", "body_part": "KUB", "projection": "AP"}],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["patient_key"].startswith("TGF") and len(body["patient_key"]) == 8  # TGF+5자리
+    assert body["orders"][0]["accession_no"].startswith("TGFA")
+
+
+def test_testgen_explicit_validation_400(client, db, auth_headers):
+    """명시 모드 필수값 — last_name 누락·exams 빈 목록·body_part 누락은 400."""
+    h = _mk_hospital(db, "TGV")
+    exam = {"region": "Chest", "body_part": "CHEST", "projection": "PA"}
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id, "patient": {"last_name": "  "}, "exams": [exam]})
+    assert r.status_code == 400
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id, "patient": {"last_name": "KIM"}, "exams": []})
+    assert r.status_code == 400
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id, "patient": {"last_name": "KIM"},
+        "exams": [{"region": "Chest", "body_part": "", "projection": "PA"}]})
+    assert r.status_code == 400
+
+
+def test_testgen_bulk_mode_regression(client, db, auth_headers):
+    """벌크 모드 하위 호환 — patient 없는 요청은 기존 count 기반 동작({items, dicom})."""
+    h = _mk_hospital(db, "TGB")
+    r = client.post("/api/hl7/testgen", headers=auth_headers,
+                    json={"hospital_id": h.id, "count": 2})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "items" in body and len(body["items"]) == 2
+    assert "dicom" in body and body["dicom"]["requested"] is False
+
+
 def test_testgen_synthetic_dicom_bytes(db):
     """합성 SC DICOM 이 생성 ID/Accession 을 반영하는지 (Orthanc 없이 바이트 검증)."""
     import io
