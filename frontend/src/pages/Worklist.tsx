@@ -266,18 +266,7 @@ function ActionToolbar({
         <option value="add">ADD VIEW</option>
         <option value="stack">STACK VIEW</option>
       </select>
-      <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
-      {/* In 모드 아이콘 툴바와 기능 동일(패리티) — Import/Export/Print/Reading/AI 재생성 */}
-      <Btn a="reading" label="📝 Reading" title="Report 창 — 판독 작성 창 열기(선택 검사)" />
-      <Btn a="import" label="📥 Import" title="Import — DICOM 파일/폴더 업로드(Orthanc, USB/CD 포함)" />
-      <Btn a="csv" label="📤 Export" title="Export — 워크리스트 CSV 내보내기" />
-      <Btn a="print" label="🖨 Print" title="Print — 화면 인쇄" />
-      <Btn a="pdf" label="PDF" title="판독서 PDF" />
-      <Btn a="emergency" label="⚠ Emergency" title="응급 우선순위 토글 (F-15)" />
-      <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
-      <Btn a="regen" label="🤖 AI" title="AI — 초안 재생성" />
-      <Btn a="batch" label="일괄 검토" title="AI 초안 일괄 검토 (F-22)" />
-      <Btn a="refresh" label="새로고침" />
+      {/* Reading/Import/Export/Print/PDF/Emergency/AI/일괄검토/새로고침은 상단 탭 바(Local Server 왼쪽)로 이동(요청) */}
       <div style={{ flex: 1 }} />
       {/* 07 A.2 SearchShortcut: 검색 바로가기 저장/적용 */}
       <select title="검색 바로가기" defaultValue="" onChange={(e) => {
@@ -694,7 +683,7 @@ function ServerButtons() {
   const fmtSize = (n: number) => n > 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n > 1024 ? `${(n / 1024).toFixed(0)}KB` : `${n}B`;
 
   return (
-    <span style={{ position: "relative", display: "flex", gap: 3, marginLeft: "auto", alignSelf: "center" }}>
+    <span style={{ position: "relative", display: "flex", gap: 3, alignSelf: "center" }}>
       <button onClick={() => pick("local")}
               title="Local Server — 공유 폴더 보기/다운로드 (설정>서버 네트워크에서 디렉토리 지정)"
               style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
@@ -794,9 +783,10 @@ function ServerButtons() {
 }
 
 /* ── 워크리스트 페이지 탭 바 (UBPACS-Z — 저장된 검색 정의를 페이지로, 최대 10) ── */
-function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
+function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions }: {
   tabs: WorklistTab[]; activeId: string;
   onPick: (t: WorklistTab) => void; onAdd: () => void; onRemove: (id: string) => void;
+  actions?: React.ReactNode;  // Local Server 왼쪽에 노출할 액션 버튼 그룹
 }) {
   return (
     <div style={{
@@ -821,7 +811,11 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove }: {
       ))}
       <button onClick={onAdd} title="현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)"
               style={{ padding: "1px 9px", fontSize: 13, marginLeft: 4, marginBottom: 3 }}>＋</button>
-      <ServerButtons />
+      {/* 우측 그룹: 액션 버튼(요청 — Local Server 왼쪽) + 서버 버튼 */}
+      <span style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center", alignSelf: "center" }}>
+        {actions}
+        <ServerButtons />
+      </span>
     </div>
   );
 }
@@ -2865,9 +2859,34 @@ export function Worklist() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
-      {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환 */}
+      {/* UBPACS-Z: 워크리스트 페이지 탭 — 저장된 검색 정의 전환.
+          우측(Local Server 왼쪽)에 액션 버튼 그룹 노출(요청) — Infi 모드는 아래 아이콘 툴바가 동일 기능이라 생략 */}
       <WorklistTabsBar tabs={tabs} activeId={activeTabId}
-                       onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)} />
+                       onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)}
+                       actions={!infiMode && (
+                         <>
+                           {([
+                             ["reading", "📝 Reading", "Report 창 — 판독 작성 창 열기(선택 검사)"],
+                             ["import", "📥 Import", "Import — DICOM 파일/폴더 업로드(Orthanc)"],
+                             ["csv", "📤 Export", "Export — 워크리스트 CSV 내보내기"],
+                             ["print", "🖨 Print", "Print — 화면 인쇄"],
+                             ["pdf", "📄 PDF", "판독서 PDF"],
+                             ["emergency", "⚠ Emergency", "응급 우선순위 토글 (F-15)"],
+                             ["regen", "🤖 AI", "AI — 초안 재생성"],
+                             ["batch", "📋 일괄 검토", "AI 초안 일괄 검토 (F-22)"],
+                             ["refresh", "🔄 새로고침", "목록 새로고침"],
+                           ] as const).map(([a, label, title]) => {
+                             const ok = allowedAction(a);
+                             return (
+                               <button key={a} disabled={!ok} title={ok ? title : PERM_DENIED_TIP}
+                                       onClick={() => void doAction(a)}
+                                       style={{ padding: "2px 8px", fontSize: 11, whiteSpace: "nowrap" }}>
+                                 {label}
+                               </button>
+                             );
+                           })}
+                         </>
+                       )} />
       {/* ── In 모드 ① 아이콘 툴바 (원본 우측 상단 13종) ── */}
       {infiMode && (
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
