@@ -480,6 +480,17 @@ export const api = {
     req<{ ok: boolean; detail?: string; copied?: number; skipped?: number; errors?: string[] }>(
       "/api/maintenance/mirror-run", { method: "POST" }),
 
+  // ── 서버 포털 리스너 (서버 설정 IP:Port → 실제 응답하는 리다이렉트 리스너) ──
+  /** 포털 리스너 현재 상태 */
+  portalStatus: () => req<PortalStatus>("/api/maintenance/portal/status"),
+  /** 지정 IP:Port 에 포털 리스너 (재)기동 — 바인드 실패는 예외(400) */
+  portalApply: (ip: string, port: number) =>
+    req<PortalStatus & { ok: boolean; warning?: string }>(
+      "/api/maintenance/portal/apply", { method: "POST", body: JSON.stringify({ ip, port }) }),
+  /** 포털 리스너 중지 */
+  portalStop: () =>
+    req<PortalStatus & { ok: boolean }>("/api/maintenance/portal/stop", { method: "POST" }),
+
   // ── 서버 인사이트 (DB 구조 · 시스템 로그 · 사용량 통계) ──
   /** DB 구조(read-only introspection) — 테이블/컬럼/행수 */
   insightsDbSchema: () => req<DbSchemaResp>("/api/insights/db-schema"),
@@ -965,6 +976,15 @@ export interface MaintRestoreResult {
   prepared_file?: string;     // DB 복원 준비 파일 경로
   files_found?: number; size_mb?: number; studies?: number; instances?: number;
   uploaded?: number; failed?: number; studies_registered?: number;
+}
+/** 서버 포털 리다이렉트 리스너 상태 (서버 설정 IP:Port 가 실제 응답하는지) */
+export interface PortalStatus {
+  running: boolean;
+  host: string;
+  port: number;
+  target: string;       // 고정 리다이렉트 대상(빈값=요청 Host 기준 랜딩 포털 추정)
+  since?: number | null; // 기동 시각(epoch)
+  error?: string;        // 바인드 실패 등 원인
 }
 export interface DbSchemaResp {
   tables: { name: string; rows: number; columns: { name: string; type: string }[] }[];

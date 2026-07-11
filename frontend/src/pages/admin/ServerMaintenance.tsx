@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   api, type HospitalRow, type MaintBackupItem, type MaintBackupPolicy, type MaintRepeat,
-  type MaintRestoreResult, type MaintStorage, type ServerNetwork,
+  type MaintRestoreResult, type MaintStorage, type PortalStatus, type ServerNetwork,
 } from "../../api";
 
 // ── 공통 소형 UI (기존 관리 콘솔 다크 테마·표 스타일 유지) ──
@@ -36,38 +36,98 @@ const fmtMb = (mb?: number) => (mb == null ? "—" : mb >= 1024 ? `${(mb / 1024)
 export function ServerConfigPanel() {
   const [web, setWeb] = useState<{ ip: string; port: string; name: string; ae_title: string } | null>(null);
   const [msg, setMsg] = useState("");
+  const [portal, setPortal] = useState<PortalStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
   const load = () => api.getSetting("server.network")
     .then((r) => {
       const w = (r.value as ServerNetwork).web ?? {};
       setWeb({ ip: String(w.ip ?? ""), port: String(w.port ?? ""), name: String(w.name ?? ""), ae_title: String(w.ae_title ?? "") });
     })
     .catch(() => setWeb({ ip: "", port: "", name: "", ae_title: "" }));
-  useEffect(() => { load(); }, []);
+  const loadStatus = () => api.portalStatus().then(setPortal).catch(() => setPortal(null));
+
+  useEffect(() => {
+    load();
+    loadStatus();
+    const t = setInterval(loadStatus, 30000);  // 30초 폴링
+    return () => clearInterval(t);              // unmount 정리
+  }, []);
+
+  // 기존 설정(local_share_dir·landing_url·autostart 등) 보존 병합 — SettingsModal>서버 네트워크와 같은 키
+  const persistNetwork = async () => {
+    if (!web) return;
+    const cur = (await api.getSetting("server.network").catch(() => ({ value: {} }))).value as Record<string, unknown>;
+    const curWeb = (cur.web ?? {}) as Record<string, unknown>;
+    await api.putSetting("server.network", { ...cur, web: { ...curWeb, ...web } }, "global");
+  };
 
   const save = async () => {
     if (!web) return;
-    try {
-      // 기존 설정(local_share_dir 등) 보존 병합 — SettingsModal>서버 네트워크와 같은 키
-      const cur = (await api.getSetting("server.network").catch(() => ({ value: {} }))).value as Record<string, unknown>;
-      await api.putSetting("server.network", { ...cur, web: { ...web } }, "global");
-      setMsg("저장됨 (전역 server.network — 뷰어 설정>서버 네트워크와 동일 키)");
-    } catch (e) { setMsg(pendMsg(e)); }
+    try { await persistNetwork(); setMsg("저장됨 (전역 server.network — 뷰어 설정>서버 네트워크와 동일 키)"); }
+    catch (e) { setMsg(pendMsg(e)); }
   };
+  const saveApply = async () => {
+    if (!web) return;
+    setBusy(true);
+    try {
+      await persistNetwork();
+      const r = await api.portalApply(web.ip, Number(web.port) || 0);
+      setPortal(r);
+      setMsg(r.running
+        ? `수신 중 — ${r.host}:${r.port} 로 접속하면 로그인 포털로 연결됩니다${r.warning ? ` (${r.warning})` : ""}`
+        : `⚠ ${r.error || "리스너 기동 실패"}`);
+    } catch (e) { setMsg(pendMsg(e)); loadStatus(); }
+    finally { setBusy(false); }
+  };
+  const stop = async () => {
+    setBusy(true);
+    try { const r = await api.portalStop(); setPortal(r); setMsg("리스너 중지됨"); }
+    catch (e) { setMsg(pendMsg(e)); }
+    finally { setBusy(false); }
+  };
+  const openPortal = () => {
+    if (!web) return;
+    const host = (!web.ip.trim() || web.ip.trim() === "0.0.0.0") ? "127.0.0.1" : web.ip.trim();
+    window.open(`http://${host}:${web.port || "8000"}`, "_blank");
+  };
+
+  // 상태등 — 초록=수신중 · 빨강=바인드 실패 · 회색=중지/미확인
+  const dot = !portal
+    ? { c: "var(--text-secondary)", t: "상태 확인 중…" }
+    : portal.running
+      ? { c: "#22c55e", t: `수신 중 — ${portal.host}:${portal.port}` }
+      : portal.error
+        ? { c: "var(--danger,#f87171)", t: `바인드 실패 — ${portal.error}` }
+        : { c: "var(--text-secondary)", t: "중지됨" };
+
   if (!web) return <div style={card}>불러오는 중…</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
-      <div style={{ fontWeight: 700 }}>🖥️ 서버 설정 — IP / Port / AE Title / Name</div>
-      <Row label="서버 IP"><input style={{ ...inp, flex: 1 }} value={web.ip} onChange={(e) => setWeb({ ...web, ip: e.target.value })} placeholder="예: 192.168.0.10" /></Row>
-      <Row label="서버 Port"><input style={{ ...inp, width: 110 }} value={web.port} onChange={(e) => setWeb({ ...web, port: e.target.value })} placeholder="8000" /></Row>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ fontWeight: 700 }}>🖥️ 서버 설정 — IP / Port / AE Title / Name</div>
+        <div style={{ flex: 1 }} />
+        <span title={dot.t} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)" }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: dot.c, flexShrink: 0 }} />
+          {dot.t}
+        </span>
+        <button onClick={loadStatus}>새로고침</button>
+      </div>
+      <Row label="서버 IP"><input style={{ ...inp, flex: 1 }} value={web.ip} onChange={(e) => setWeb({ ...web, ip: e.target.value })} placeholder="예: 192.168.0.10 (빈값=0.0.0.0)" /></Row>
+      <Row label="서버 Port"><input style={{ ...inp, width: 110 }} value={web.port} onChange={(e) => setWeb({ ...web, port: e.target.value })} placeholder="예: 9000" /></Row>
       <Row label="AE Title"><input style={{ ...inp, flex: 1 }} value={web.ae_title} onChange={(e) => setWeb({ ...web, ae_title: e.target.value })} /></Row>
       <Row label="서버 Name"><input style={{ ...inp, flex: 1 }} value={web.name} onChange={(e) => setWeb({ ...web, name: e.target.value })} /></Row>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="primary" onClick={save}>저장</button>
-        <button onClick={load}>다시 불러오기</button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="primary" disabled={busy} onClick={saveApply}>저장·적용</button>
+        <button disabled={busy} onClick={save}>저장</button>
+        <button disabled={busy || !portal?.running} onClick={stop}>중지</button>
+        <button onClick={openPortal} title="지정 주소를 새 탭으로 엽니다">열기 ↗</button>
+        <button disabled={busy} onClick={load}>다시 불러오기</button>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        기존 서버 네트워크 설정(설정 키 server.network)을 그대로 노출한 임베드입니다 — 별도 저장소를 만들지 않습니다.
-        공유 루트 지정·Ping/DICOM Echo/DB 연결 테스트는 뷰어의 [설정 &gt; 서버 네트워크]에서 계속 제공합니다.
+        이 IP:Port 로 접속하면 로그인 포털로 연결됩니다(리다이렉트). [저장·적용]을 눌러야 그 주소에 리스너가 떠 실제 응답합니다
+        — 저장만 하면 리스너가 없어 연결이 거부됩니다. DICOM 통신 포트/뷰어 포털과는 별개입니다.
+        AE Title·Name 은 서버 식별 메타로 유지되며, 공유 루트·Ping/DICOM Echo/DB 연결 테스트는 뷰어의 [설정 &gt; 서버 네트워크]에서 계속 제공합니다.
       </div>
       <Msg text={msg} />
     </div>

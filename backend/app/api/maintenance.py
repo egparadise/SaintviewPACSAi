@@ -397,6 +397,58 @@ def wipe(body: WipeBody, db: Session = Depends(get_db), user: dict = Depends(adm
             "deleted": deleted, "orthanc_removed": orthanc_removed}
 
 
+# ════════════════════════════════ 서버 포털 리스너 (서버 설정 IP:Port 연동) ════════════════════════════════
+# server.network.web(IP·Port) 저장분과 별개로, 지정 주소에 리다이렉트 리스너를 (재)기동한다.
+# 저장만 하고 리스너가 없어 연결 거부되던 문제를 해소 — 접속 시 랜딩 포털로 302.
+class PortalApplyBody(BaseModel):
+    ip: str = ""
+    port: int = 0
+
+
+def _landing_url(db: Session) -> str:
+    """리다이렉트 대상 랜딩 포털 URL — server.network.web.landing_url 설정이 있으면 사용(없으면 빈값)."""
+    from app.services.settings_service import get_setting
+
+    net = get_setting(db, "server.network", default={}) or {}
+    web = net.get("web", {}) if isinstance(net, dict) else {}
+    return str((web or {}).get("landing_url", "") or "").strip()
+
+
+@router.post("/portal/apply")
+def portal_apply(body: PortalApplyBody, db: Session = Depends(get_db),
+                 user: dict = Depends(admin_user)):
+    """지정 ip:port 에 포털 리다이렉트 리스너 (재)기동. 바인드 실패는 400+원인."""
+    from app.services import portal_listener
+
+    res = portal_listener.start(body.ip, body.port, target_url=_landing_url(db))
+    _audit(db, user, "portal_apply", f"{body.ip}:{body.port}",
+           {"ip": body.ip, "port": body.port, "ok": bool(res.get("ok")),
+            "detail": res.get("detail", "")})
+    db.commit()
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("detail", "포털 리스너 기동 실패"))
+    return {"ok": True, "warning": res.get("warning", ""), **portal_listener.status()}
+
+
+@router.post("/portal/stop")
+def portal_stop(db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """포털 리스너 중지."""
+    from app.services import portal_listener
+
+    res = portal_listener.stop()
+    _audit(db, user, "portal_stop", "portal", {"stopped": bool(res.get("stopped"))})
+    db.commit()
+    return {"ok": True, **portal_listener.status()}
+
+
+@router.get("/portal/status")
+def portal_status(user: dict = Depends(admin_user)):
+    """포털 리스너 현재 상태 — {running, host, port, target, since, error}."""
+    from app.services import portal_listener
+
+    return portal_listener.status()
+
+
 # ════════════════════════════════ 미러링 (요구 11) ════════════════════════════════
 @router.post("/mirror-run")
 def mirror_run(db: Session = Depends(get_db), user: dict = Depends(admin_user)):
