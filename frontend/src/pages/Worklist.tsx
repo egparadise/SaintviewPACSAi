@@ -2162,6 +2162,9 @@ export function Worklist() {
   const [compareSet, setCompareSet] = useState<CompareItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshSec, setRefreshSec] = useState(10);
+  // SEARCH 실행 시각 피드백 — 재조회 시작 시 그리드 깜빡임 (동일 keyframes 2개를 번갈아 써서 연속 클릭에도 재시작)
+  const [searchFlash, setSearchFlash] = useState(0);
+  const flashMountRef = useRef(false);
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
   const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
@@ -2315,6 +2318,9 @@ export function Worklist() {
   }, [filters, searchText]);
 
   useEffect(() => {
+    // SEARCH/필터/새로고침으로 재조회가 시작되면 그리드를 짧게 깜빡여 '검색이 동작했음'을 보여준다(최초 로드는 제외)
+    if (flashMountRef.current) setSearchFlash((t) => t + 1);
+    else flashMountRef.current = true;
     api.worklist(queryParams).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => {});
   }, [queryParams, refreshKey]);
 
@@ -2945,7 +2951,8 @@ export function Worklist() {
                     onDrag={(dx) => setSizes((s) => ({ ...s, railW: clampSz(s.railW + dx, 100, 460) }))} />
           {/* 우열: Grid(위) ─h─ Related(priorH) ─h─ Report(repH) */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
-            <div style={{ flex: 1, minHeight: 60, display: "flex" }}>
+            <div style={{ flex: 1, minHeight: 60, display: "flex",
+                          ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
               <StudyGrid items={items} columns={INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
                          onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
                          onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
@@ -2981,9 +2988,12 @@ export function Worklist() {
         } />
         <Splitter dir="v" onEnd={persistSizes}
                   onDrag={(dx) => setSizes((s) => ({ ...s, railW: clampSz(s.railW + dx, 100, 420) }))} />
-        <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
-                   onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
-                   onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
+        <div style={{ flex: 1, minWidth: 0, display: "flex",
+                      ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
+          <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
+                     onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
+                     onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
+        </div>
       </div>
       )}
 

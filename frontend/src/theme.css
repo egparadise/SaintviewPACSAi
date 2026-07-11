@@ -157,3 +157,7 @@ input:focus, select:focus { outline: 1px solid var(--accent); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #3a3f46; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg-panel); }
+
+/* SEARCH 실행 피드백 — 워크리스트 그리드 깜빡임 (A/B는 연속 실행 시 애니메이션 재시작 트릭용 동일 정의) */
+@keyframes wlSearchFlashA { from { opacity: 0.25; } to { opacity: 1; } }
+@keyframes wlSearchFlashB { from { opacity: 0.25; } to { opacity: 1; } }
