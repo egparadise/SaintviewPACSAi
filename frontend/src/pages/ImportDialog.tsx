@@ -3,9 +3,16 @@
 import { useRef, useState } from "react";
 import { api } from "../api";
 
-type Row = { filename: string; size: number; status: string };
+type Row = { filename: string; size: number; status: string };   // size<0 = 표시 생략("-")
 
-export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
+  onClose: () => void;
+  onDone: () => void;
+  /** Local Server 모드 — 업로드 대상을 /api/local/import 로 (Orthanc 대신 로컬 Image 폴더+local.db) */
+  localMode?: boolean;
+  /** 로컬 루트 경로(localInit 결과) — 완료 메시지에 저장 위치 표시 */
+  localRoot?: string;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const allRef = useRef<File[]>([]);   // 마지막 선택 전체 — 필터 토글 시 재스캔용
@@ -69,6 +76,33 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
     try {
       // 대용량 대응: 50개 배치로 나눠 업로드 — 진행률·결과 누적 표시
       const BATCH = 50;
+      if (localMode) {
+        // Local Server 모드 — 서버 Orthanc 대신 로컬 Image 폴더+local.db 로 (레인 F)
+        let imported = 0, skipped = 0;
+        const acc: Row[] = [];
+        const seen = new Set<number>();   // 배치 간 동일 검사 중복 표시 방지
+        for (let i = 0; i < picked.length; i += BATCH) {
+          setSummary(`업로드 중… ${Math.min(i + BATCH, picked.length)}/${picked.length}`);
+          const r = await api.localImport(picked.slice(i, i + BATCH));
+          imported += r.imported; skipped += r.skipped;
+          for (const s of r.studies) {
+            if (seen.has(s.id)) continue;
+            seen.add(s.id);
+            acc.push({
+              filename: `${s.patient_name || s.patient_key} · ${s.modality} ${s.study_date}` +
+                        `${s.study_desc ? ` · ${s.study_desc}` : ""} (${s.images}장)`,
+              size: -1, status: "등록",
+            });
+          }
+          setRows([...acc]);
+        }
+        setSummary(`Total ${imported + skipped} files processed, ${imported} DICOM files imported` +
+                   ` (${skipped} skipped) — 로컬 Image 폴더에 저장됨` +
+                   (localRoot ? `: ${localRoot}\\Image` : "") + ` · 검사 ${seen.size}건`);
+        setDone(true);
+        onDone();   // 로컬 목록 즉시 갱신
+        return;
+      }
       let processed = 0, uploaded = 0, registered = 0, savedDir = "";
       const acc: Row[] = [];
       for (let i = 0; i < picked.length; i += BATCH) {
@@ -98,7 +132,13 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
                     width: "min(680px, 96vw)", maxHeight: "92vh", overflow: "auto",
                     padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center" }}>
-          <b style={{ fontSize: 13 }}>📥 Import DICOM Files</b>
+          <b style={{ fontSize: 13 }}>📥 Import DICOM Files{localMode ? " — LOCAL" : ""}</b>
+          {localMode && (
+            <span style={{ marginLeft: 8, fontSize: 11, color: "#f59e0b" }}
+                  title={localRoot ? `저장 위치: ${localRoot}\\Image` : undefined}>
+              로컬 Image 폴더에 저장됩니다 (서버 업로드 아님)
+            </span>
+          )}
           <button style={{ marginLeft: "auto" }} onClick={onClose}>✕</button>
         </div>
 
@@ -150,7 +190,7 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
                 {rows.map((r, i) => (
                   <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ padding: "2px 6px", wordBreak: "break-all" }}>{r.filename}</td>
-                    <td style={{ padding: "2px 6px" }}>{(r.size / 1024).toFixed(0)} KB</td>
+                    <td style={{ padding: "2px 6px" }}>{r.size < 0 ? "-" : `${(r.size / 1024).toFixed(0)} KB`}</td>
                     <td style={{ padding: "2px 6px",
                                  color: r.status.startsWith("실패") ? "var(--stat-emergency)"
                                       : r.status === "중복" ? "#eab308" : "#4ade80" }}>{r.status}</td>

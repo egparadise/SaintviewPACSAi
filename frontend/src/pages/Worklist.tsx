@@ -23,6 +23,7 @@ import {
   type BatchCandidate,
   type InstanceThumb,
   type KeyImage,
+  type LocalStudyRow,
   type NlQueryResult,
   type OrderRow,
   type PermMe,
@@ -58,6 +59,22 @@ import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
+const LocalViewer = lazy(() => import("./LocalViewer").then((m) => ({ default: m.LocalViewer })));
+
+/* ── Local Server 모드 (레인 F) — 로컬 검사(local.db)를 그리드 공용 StudyRow 로 매핑 ── */
+function localToRow(r: LocalStudyRow): StudyRow {
+  return {
+    id: r.id, study_uid: "", patient_key: r.patient_key, patient_name: r.patient_name,
+    sex: r.sex, birth_date: "", accession_no: "", study_date: r.study_date, study_time: "",
+    modality: r.modality, body_part: "", study_desc: r.study_desc, status: "LOCAL",
+    emergency: false, critical: false, series_count: 0, instance_count: r.images,
+    report_status: null, impression_preview: "", institution: "", referring_physician: "",
+    memo: "", finalized_at: "", department: "", source_aet: "", bookmark: false, order_name: "",
+  };
+}
+/** LOCAL 모드에서 허용되는 툴바 액션 — 그 외 서버 액션은 비활성+툴팁 */
+const LOCAL_OK_ACTIONS = new Set(["import", "csv", "print", "refresh", "logout"]);
+const LOCAL_DENIED_TIP = "LOCAL 모드 — 서버 기능 비활성 (Import/새로고침/로컬 뷰어만 사용 가능)";
 
 /* ── F-18 행잉 매핑 + 모니터 배치(viewer.prefs.monitor) ─────────────────── */
 let hangingMap: Record<string, string> = {};
@@ -649,10 +666,12 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
   );
 }
 
-/* ── 서버 선택 버튼 (탭 바 우측) — Local Server: 폴더 공유 / Web Server: 주소·포트 ── */
-function ServerButtons() {
-  const [mode, setMode] = useState<"local" | "web" | null>(
-    (localStorage.getItem("sv_server_mode") as "local" | "web") || null);
+/* ── 서버 선택 버튼 (탭 바 우측) — Local Server: 로컬 PACS 모드 전환+폴더 보기 / Web Server: 주소·포트 ──
+ * mode 는 워크리스트 데이터 소스 전환(레인 F)을 위해 부모(Worklist)가 소유한다. */
+function ServerButtons({ mode, onMode }: {
+  mode: "local" | "web" | null;
+  onMode: (m: "local" | "web") => void;
+}) {
   const [open, setOpen] = useState<null | "local" | "web">(null);
   const [net, setNet] = useState<ServerNetwork>({});
   const [files, setFiles] = useState<{ name: string; is_dir: boolean; size: number; mtime: number }[]>([]);
@@ -673,8 +692,7 @@ function ServerButtons() {
   }, [open]);
 
   const pick = (m: "local" | "web") => {
-    setMode(m);
-    localStorage.setItem("sv_server_mode", m);
+    onMode(m);
     setErr("");
     if (open === m) { setOpen(null); return; }
     setOpen(m);
@@ -685,7 +703,7 @@ function ServerButtons() {
   return (
     <span style={{ position: "relative", display: "flex", gap: 3, alignSelf: "center" }}>
       <button onClick={() => pick("local")}
-              title="Local Server — 공유 폴더 보기/다운로드 (설정>서버 네트워크에서 디렉토리 지정)"
+              title="Local Server — 로컬 PACS 모드로 전환(서버 데이터 숨김) + 공유 폴더 보기 (설정>서버 네트워크에서 디렉토리 지정)"
               style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
                        background: mode === "local" ? "var(--accent)" : undefined,
                        color: mode === "local" ? "#fff" : undefined }}>
@@ -783,10 +801,12 @@ function ServerButtons() {
 }
 
 /* ── 워크리스트 페이지 탭 바 (UBPACS-Z — 저장된 검색 정의를 페이지로, 최대 10) ── */
-function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions }: {
+function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, serverMode, onServerMode }: {
   tabs: WorklistTab[]; activeId: string;
   onPick: (t: WorklistTab) => void; onAdd: () => void; onRemove: (id: string) => void;
   actions?: React.ReactNode;  // Local Server 왼쪽에 노출할 액션 버튼 그룹
+  serverMode: "local" | "web" | null;              // 데이터 소스 모드 (레인 F — Worklist 소유)
+  onServerMode: (m: "local" | "web") => void;
 }) {
   return (
     <div style={{
@@ -814,7 +834,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions }: {
       {/* 우측 그룹: 액션 버튼(요청 — Local Server 왼쪽) + 서버 버튼 */}
       <span style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center", alignSelf: "center" }}>
         {actions}
-        <ServerButtons />
+        <ServerButtons mode={serverMode} onMode={onServerMode} />
       </span>
     </div>
   );
@@ -822,7 +842,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions }: {
 
 /* ── [C] 메인 검사 그리드 (컬럼 구성형) ───────────── */
 function StudyGrid({
-  items, columns, selectedId, onSelect, onOpen, onContext, variant,
+  items, columns, selectedId, onSelect, onOpen, onContext, variant, treeDisabled,
 }: {
   items: StudyRow[];
   columns: string[];
@@ -831,6 +851,8 @@ function StudyGrid({
   onOpen: (row: StudyRow) => void;
   onContext: (e: React.MouseEvent, row: StudyRow) => void;
   variant?: "infi";
+  /** LOCAL 모드 — Series 펼침(＋)은 서버 seriesTree 라 숨김(로컬 id 오호출 방지) */
+  treeDisabled?: boolean;
 }) {
   const infi = variant === "infi";
   // Exam → Series → Image 계층 확장: '＋' 클릭=아래로 전개('−'로 전환), 다시 클릭=접기
@@ -881,17 +903,21 @@ function StudyGrid({
                   onClick={() => onSelect(row)}
                   onDoubleClick={() => onOpen(row)}
                   onContextMenu={(e) => { e.preventDefault(); onSelect(row); onContext(e, row); }}>
-                <td style={{ ...markStyle, textAlign: "center" }}
-                    title={expanded.has(row.id) ? "접기" : "Series/Image 펼치기"}
-                    onClick={(e) => { e.stopPropagation(); toggleExam(row.id); }}
-                    onDoubleClick={(e) => e.stopPropagation()}>
-                  {expanded.has(row.id) ? "−" : "＋"}
-                </td>
+                {treeDisabled ? (
+                  <td onDoubleClick={(e) => e.stopPropagation()} />
+                ) : (
+                  <td style={{ ...markStyle, textAlign: "center" }}
+                      title={expanded.has(row.id) ? "접기" : "Series/Image 펼치기"}
+                      onClick={(e) => { e.stopPropagation(); toggleExam(row.id); }}
+                      onDoubleClick={(e) => e.stopPropagation()}>
+                    {expanded.has(row.id) ? "−" : "＋"}
+                  </td>
+                )}
                 <td style={{ color: "var(--text-secondary)" }}>{i + 1}</td>
                 {columns.map((c) => <td key={c}>{COLUMN_DEFS[c]?.render(row)}</td>)}
               </tr>
               {/* 1단계: Series 행들 */}
-              {expanded.has(row.id) && (
+              {!treeDisabled && expanded.has(row.id) && (
                 trees[row.id] === null ? (
                   <tr><td /><td colSpan={span - 1}
                           style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
@@ -2171,6 +2197,27 @@ export function Worklist() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [viewer3dUid, setViewer3dUid] = useState<string | null>(null);
+  // Local Server 모드 (레인 F) — ServerButtons 의 sv_server_mode 를 데이터 소스 전환으로 승격.
+  // local 이면 서버 worklist 를 호출하지 않고(서버 검사·환자 완전 숨김) local.db 목록만 표시
+  const [serverMode, setServerMode] = useState<"local" | "web" | null>(
+    () => (localStorage.getItem("sv_server_mode") as "local" | "web") || null);
+  const localMode = serverMode === "local";
+  const [localRoot, setLocalRoot] = useState("");           // localInit 결과 루트(배지·Import 안내)
+  const [localErr, setLocalErr] = useState("");             // 백엔드 미구현/미설정 → '⚠ 준비 중' 우아 처리
+  const [localViewerRow, setLocalViewerRow] = useState<StudyRow | null>(null);   // 로컬 뷰어 모달 대상
+  const pickServerMode = useCallback((m: "local" | "web") => {
+    setServerMode(m);
+    localStorage.setItem("sv_server_mode", m);              // 새로고침에도 유지(기존 키)
+    setRefreshKey((k) => k + 1);
+  }, []);
+  // LOCAL 진입: 폴더 구조 보장(init — 멱등) + 루트 표시, 서버 선택 상태 해제
+  useEffect(() => {
+    if (!localMode) return;
+    setSelected(null);
+    api.localInit()
+      .then((r) => { setLocalRoot(r.root); setLocalErr(""); })
+      .catch((e) => { setLocalRoot(""); setLocalErr(e instanceof Error ? e.message : "준비 중"); });
+  }, [localMode]);
   // UBPACS-Z Study Open 5종 + Study With Open — 뷰어는 새 창(별도 웹페이지)으로 연다
   const lastViewerRef = useRef<StudyDetail | null>(null);  // "기존 영상" = 마지막으로 연 검사
   const [ctx, setCtx] = useState<{ x: number; y: number; row: StudyRow } | null>(null);
@@ -2298,13 +2345,13 @@ export function Worklist() {
       if (viewer3dUid || batchOpen) return; // 모달/뷰어 우선
       if (e.key === "Enter" && selected) { e.preventDefault(); void doAction("viewdraft"); }
       // 단축키도 유효 권한 게이트 — 버튼 비활성과 동일 기준 (서버 403 이 최종 방어선)
-      else if (e.key.toLowerCase() === "b") { if (allowedAction("batch")) setBatchOpen(true); }
+      else if (e.key.toLowerCase() === "b") { if (!localMode && allowedAction("batch")) setBatchOpen(true); }
       else if (e.key.toLowerCase() === "e" && selected) { if (allowedAction("emergency")) void doAction("emergency"); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, viewer3dUid, batchOpen, allowedAction]);
+  }, [selected, viewer3dUid, batchOpen, allowedAction, localMode]);
 
   const queryParams = useMemo(() => {
     const p: Record<string, string> = { q: searchText };
@@ -2321,8 +2368,15 @@ export function Worklist() {
     // SEARCH/필터/새로고침으로 재조회가 시작되면 그리드를 짧게 깜빡여 '검색이 동작했음'을 보여준다(최초 로드는 제외)
     if (flashMountRef.current) setSearchFlash((t) => t + 1);
     else flashMountRef.current = true;
+    if (localMode) {
+      // LOCAL 모드 — 서버 worklist 호출 안 함. local.db 목록(q=검색어)만 표시 (미구현 서버=빈 목록)
+      api.localStudies(searchText.trim() || undefined)
+        .then((r) => { setItems(r.items.map(localToRow)); setTotal(r.items.length); })
+        .catch(() => { setItems([]); setTotal(0); });
+      return;
+    }
     api.worklist(queryParams).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => {});
-  }, [queryParams, refreshKey]);
+  }, [queryParams, refreshKey, localMode, searchText]);
 
   // Search Filter 모달리티 분포 — 모달리티 필터가 꺼진 결과에서만 갱신(필터 중 카운트 유지)
   useEffect(() => {
@@ -2362,10 +2416,11 @@ export function Worklist() {
   }, []);
 
   const onSelect = useCallback((row: StudyRow) => {
+    if (localMode) return;              // LOCAL 모드 — 서버 상세/동기 호출 없음(더블클릭=로컬 뷰어)
     api.study(row.id).then(setSelected);
     postStudySync(row.id, "worklist");  // Viewer·Reading 연동
     ensureReadingWindow(row.id);        // 설정 시 판독 창 자동 오픈(옆 창)
-  }, [ensureReadingWindow]);
+  }, [ensureReadingWindow, localMode]);
 
   // 다른 창(Viewer/Reading)에서 환자가 바뀌면 워크리스트 선택도 따라간다
   useEffect(() => {
@@ -2420,6 +2475,8 @@ export function Worklist() {
   }, [ensureReadingWindow]);
 
   const doAction = useCallback(async (a: string, row?: StudyRow) => {
+    // LOCAL 모드 — 서버 검사 대상 액션 전면 차단(로컬 id 로 서버 API 오호출 방지). refresh 만 통과
+    if (localMode && a !== "refresh") { alert(LOCAL_DENIED_TIP); return; }
     const target = row ?? selected;
     switch (a) {
       case "refresh": setRefreshKey((k) => k + 1); break;
@@ -2594,7 +2651,7 @@ export function Worklist() {
         break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, onSelect, openStudy, onChanged, dblAction, withOpen, withOpenMode, openV2]);
+  }, [selected, onSelect, openStudy, onChanged, dblAction, withOpen, withOpenMode, openV2, localMode]);
 
   const openCompare = useCallback(() => {
     if (!selected) return;
@@ -2778,6 +2835,8 @@ export function Worklist() {
 
   // In 모드 ① 상단 아이콘 툴바 (INFINITT 원본 13종) — 기존 doAction + 특수 동작 매핑
   const infiTool = (act: string) => {
+    // LOCAL 모드 — Import/Export/Print/Refresh/Logout 만 허용, 나머지 서버 액션 차단
+    if (localMode && !LOCAL_OK_ACTIONS.has(act) && act !== "refresh") { alert(LOCAL_DENIED_TIP); return; }
     switch (act) {
       case "import": setImportOpen(true); break;  // Import DICOM — USB/CD .dcm 등록
       case "reading": {   // Report 창 — 판독 작성 (모니터 설정 반영, 선택 연동은 sync)
@@ -2863,6 +2922,7 @@ export function Worklist() {
           우측(Local Server 왼쪽)에 액션 버튼 그룹 노출(요청) — Infi 모드는 아래 아이콘 툴바가 동일 기능이라 생략 */}
       <WorklistTabsBar tabs={tabs} activeId={activeTabId}
                        onPick={pickTab} onAdd={() => void addTab()} onRemove={(id) => void removeTab(id)}
+                       serverMode={serverMode} onServerMode={pickServerMode}
                        actions={!infiMode && (
                          <>
                            {([
@@ -2876,10 +2936,13 @@ export function Worklist() {
                              ["batch", "📋 일괄 검토", "AI 초안 일괄 검토 (F-22)"],
                              ["refresh", "🔄 새로고침", "목록 새로고침"],
                            ] as const).map(([a, label, title]) => {
-                             const ok = allowedAction(a);
+                             // LOCAL 모드: 서버 전용 액션은 비활성+안내 툴팁 (Import/Export/Print/새로고침만 활성)
+                             const localBlocked = localMode && !LOCAL_OK_ACTIONS.has(a);
+                             const ok = allowedAction(a) && !localBlocked;
                              return (
-                               <button key={a} disabled={!ok} title={ok ? title : PERM_DENIED_TIP}
-                                       onClick={() => void doAction(a)}
+                               <button key={a} disabled={!ok}
+                                       title={ok ? title : localBlocked ? LOCAL_DENIED_TIP : PERM_DENIED_TIP}
+                                       onClick={() => infiTool(a)}
                                        style={{ padding: "2px 8px", fontSize: 11, whiteSpace: "nowrap" }}>
                                  {label}
                                </button>
@@ -2887,6 +2950,18 @@ export function Worklist() {
                            })}
                          </>
                        )} />
+      {/* LOCAL 모드 배지 — 데이터 소스·루트 표시 + 서버 데이터 숨김 안내 (레인 F) */}
+      {localMode && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 10px",
+                      background: "rgba(245,158,11,0.12)", borderBottom: "1px solid #f59e0b", fontSize: 12 }}>
+          <b style={{ color: "#f59e0b" }}>LOCAL 모드</b>
+          <span>서버 데이터 숨김 · 데이터: <code style={{ fontSize: 11 }}>
+            {localRoot || (localErr ? `⚠ 준비 중 (${localErr})` : "확인 중…")}</code></span>
+          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>
+            Import·새로고침·로컬 뷰어(더블클릭)만 사용 가능 — 해제: Web Server
+          </span>
+        </div>
+      )}
       {/* ── In 모드 ① 아이콘 툴바 (원본 우측 상단 13종) ── */}
       {infiMode && (
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
@@ -2894,9 +2969,12 @@ export function Worklist() {
           <div style={{ display: "flex", gap: 4, padding: "3px 6px", border: "1px solid var(--border)",
                         borderRadius: 6, background: "var(--bg-elevated)" }}>
             {INFI_ICONS.filter((t) => t.a !== "ub_adv" || ohifOn).map((t) => {
-              const ok = allowedAction(t.a);   // 유효 권한 게이트 — 비활성+안내 툴팁 (UX 목적)
+              // 유효 권한 게이트 + LOCAL 모드 게이트 — 비활성+안내 툴팁 (UX 목적)
+              const localBlocked = localMode && !LOCAL_OK_ACTIONS.has(t.a);
+              const ok = allowedAction(t.a) && !localBlocked;
               return (
-                <button key={t.a} title={ok ? t.l : `${t.l} — ${PERM_DENIED_TIP}`} disabled={!ok}
+                <button key={t.a} disabled={!ok}
+                        title={ok ? t.l : `${t.l} — ${localBlocked ? LOCAL_DENIED_TIP : PERM_DENIED_TIP}`}
                         onClick={() => infiTool(t.a)}
                         style={{ width: 46, height: 40, fontSize: 22, padding: 0, border: "none",
                                  display: "flex", alignItems: "center", justifyContent: "center",
@@ -2979,7 +3057,9 @@ export function Worklist() {
             <div style={{ flex: 1, minHeight: 60, display: "flex",
                           ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
               <StudyGrid items={items} columns={INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
-                         onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
+                         treeDisabled={localMode}
+                         onSelect={onSelect}
+                         onOpen={(r) => { if (localMode) setLocalViewerRow(r); else void doAction("viewdraft", r); }}
                          onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
             </div>
             <Splitter dir="h" onEnd={persistInfiSz}
@@ -3016,7 +3096,9 @@ export function Worklist() {
         <div style={{ flex: 1, minWidth: 0, display: "flex",
                       ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
           <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
-                     onSelect={onSelect} onOpen={(r) => doAction("viewdraft", r)}
+                     treeDisabled={localMode}
+                     onSelect={onSelect}
+                     onOpen={(r) => { if (localMode) setLocalViewerRow(r); else void doAction("viewdraft", r); }}
                      onContext={(e, r) => setCtx({ x: e.clientX, y: e.clientY, row: r })} />
         </div>
       </div>
@@ -3094,12 +3176,23 @@ export function Worklist() {
       {importOpen && (
         <Suspense fallback={null}>
           <ImportDialog onClose={() => setImportOpen(false)}
+                        localMode={localMode} localRoot={localRoot}
                         onDone={() => {
                           // CD 영상은 검사일이 과거인 경우가 많아 기간 필터를 '전체'로 풀어 바로 보이게 한다
                           setDatePreset("all");
                           setFilters((f) => ({ ...f, tree_from: "", date_from_iso: "", date_to_iso: "" }));
                           setRefreshKey((k) => k + 1);
                         }} />
+        </Suspense>
+      )}
+      {/* 로컬 뷰어 — LOCAL 모드 검사 더블클릭(경량 뷰어 모달, 레인 F) */}
+      {localViewerRow && (
+        <Suspense fallback={null}>
+          <LocalViewer studyId={localViewerRow.id}
+                       title={`${localViewerRow.patient_name || localViewerRow.patient_key} · ` +
+                              `${localViewerRow.modality} ${localViewerRow.study_date}` +
+                              (localViewerRow.study_desc ? ` · ${localViewerRow.study_desc}` : "")}
+                       onClose={() => setLocalViewerRow(null)} />
         </Suspense>
       )}
       {/* 자체 뷰어(Viewer2D)는 새 창(?viewer=2d)으로 열린다 — openV2 참조 */}
@@ -3112,7 +3205,32 @@ export function Worklist() {
           <Viewer3D studyUid={viewer3dUid} onClose={() => setViewer3dUid(null)} />
         </Suspense>
       )}
-      {ctx && (
+      {ctx && localMode ? (
+        /* LOCAL 모드 우클릭 — 서버 컨텍스트 메뉴 대신 로컬 전용(뷰어/삭제)만 (로컬 id 서버 오호출 방지) */
+        <div style={{ position: "fixed", left: ctx.x, top: ctx.y, zIndex: 500, minWidth: 168,
+                      background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 6,
+                      boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 12.5, padding: 4 }}
+             onMouseLeave={() => setCtx(null)}>
+          <div className="sv-fav-row" style={{ padding: "5px 10px", borderRadius: 4, cursor: "pointer" }}
+               onClick={() => { setLocalViewerRow(ctx.row); setCtx(null); }}>
+            🗔 로컬 뷰어 열기
+          </div>
+          <div className="sv-fav-row" style={{ padding: "5px 10px", borderRadius: 4, cursor: "pointer",
+                                               color: "var(--stat-emergency)" }}
+               onClick={() => {
+                 const r = ctx.row;
+                 setCtx(null);
+                 if (!window.confirm(
+                   `로컬 검사 삭제 — ${r.patient_name || r.patient_key} · ${r.modality} · ${r.study_date}\n` +
+                   `로컬 Image 파일과 local.db 등록이 함께 삭제됩니다. 진행할까요?`)) return;
+                 api.localDelete(r.id)
+                   .then(() => setRefreshKey((k) => k + 1))
+                   .catch((e) => alert(e instanceof Error ? e.message : "삭제 실패 — ⚠ 준비 중"));
+               }}>
+            🗑 검사 삭제 (로컬)
+          </div>
+        </div>
+      ) : ctx && (
         <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn} allowed={allowedAction}
                      onAction={(a) => doAction(a, ctx.row)} onClose={() => setCtx(null)} />
       )}

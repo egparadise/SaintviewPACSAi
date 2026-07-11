@@ -13,6 +13,7 @@ from app.api import (
     auth,
     hospital_admin,
     hospitals,
+    localpacs,
     maintenance,
     management,
     orders,
@@ -105,6 +106,7 @@ app.include_router(phrases.router)
 app.include_router(stt.router)
 app.include_router(share.router)
 app.include_router(maintenance.router)
+app.include_router(localpacs.router)  # Local Server 모드(/api/local — 레인 B)
 if insights_api is not None:
     app.include_router(insights_api.router)
 if hl7_api is not None:

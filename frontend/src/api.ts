@@ -506,7 +506,68 @@ export const api = {
   // ── 인프라 (시스템 구조도 — InfraPanel 로컬 fetch 와 동일 계약 /api/infra/hospitals) ──
   /** 병원별 Orthanc 컨테이너 현황 — state/ports/aet (미프로비저닝=entry null → 공유 Orthanc 폴백) */
   infraHospitals: () => req<InfraHospitalsRes>("/api/infra/hospitals"),
+
+  // ── Local Server 모드 (레인 F/B 공통 계약 /api/local — 서버 Orthanc/DB 와 완전 분리) ──
+  /** 로컬 루트(server.network.local_share_dir) 하위 DB/Image/Temp 폴더 구조 생성(멱등) */
+  localInit: () => req<{ ok: boolean; root: string; dirs: Record<string, string> }>("/api/local/init", { method: "POST" }),
+  /** 로컬 Import — Temp 저장→pydicom 파싱→Image 배치→local.db 등록 */
+  localImport: (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.name);
+    return req<{ imported: number; skipped: number; studies: LocalStudyRow[] }>(
+      "/api/local/import", { method: "POST", body: fd });
+  },
+  /** 로컬 검사 목록 (local.db — 서버 worklist 와 무관) */
+  localStudies: (q?: string) =>
+    req<{ items: LocalStudyRow[] }>(`/api/local/studies${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  /** 로컬 검사 Series→Instance 트리 */
+  localTree: (id: number) => req<{ series: LocalSeriesNode[] }>(`/api/local/studies/${id}/tree`),
+  /** 로컬 검사 삭제 (파일+local.db) */
+  localDelete: (id: number) => req<{ ok: boolean }>(`/api/local/studies/${id}`, { method: "DELETE" }),
 };
+
+// ── Local Server 모드 타입 (레인 F/B 공통 계약) ──
+export interface LocalStudyRow {
+  id: number;
+  patient_key: string;
+  patient_name: string;
+  sex: string;
+  study_date: string;
+  modality: string;
+  study_desc: string;
+  images: number;
+}
+export interface LocalInstanceNode {
+  iid: number;
+  sop_uid: string;
+  instance_number: number;
+  rows: number;
+  cols: number;
+}
+export interface LocalSeriesNode {
+  series_uid: string;
+  series_number: number;
+  series_desc: string;
+  modality: string;
+  instances: LocalInstanceNode[];
+}
+
+/** 로컬 인스턴스 렌더 PNG — 인증 헤더가 필요하므로 fetch→blob 방식 (wc/ww 생략=자동 W/L) */
+export async function localRendered(iid: number, wc?: number, ww?: number): Promise<Blob> {
+  const p = new URLSearchParams();
+  if (wc !== undefined) p.set("wc", String(wc));
+  if (ww !== undefined) p.set("ww", String(ww));
+  const qs = p.toString();
+  const res = await fetch(`${BASE}/api/local/instances/${iid}/rendered${qs ? `?${qs}` : ""}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = ((await res.json()) as { detail?: string }).detail ?? ""; } catch { /* 본문 없음 */ }
+    throw new Error(detail || `이미지 로드 실패 (HTTP ${res.status})`);
+  }
+  return res.blob();
+}
 
 // ── 인프라 타입 (시스템 구조도·InfraPanel 공통 계약) ──
 export interface InfraHospitalEntry {
