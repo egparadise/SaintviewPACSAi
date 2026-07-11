@@ -357,6 +357,237 @@ def test_rendered_ww_zero_falls_back_minmax(client, db, auth_headers, tmp_path):
         assert png.status_code == 200 and png.content[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+# ════════════════════ Exam Control(로컬) — /api/local/examctl ════════════════════
+def _import_series(client, auth_headers, *, pid, study_uid, series_uid, sops):
+    """한 검사/시리즈에 sop 목록을 업로드하고 study dict 반환."""
+    payloads = [
+        (f"{n}.dcm", _make_dicom(pid=pid, study_uid=study_uid, series_uid=series_uid,
+                                 sop_uid=sop, instance_number=n + 1))
+        for n, sop in enumerate(sops)
+    ]
+    r = _upload(client, auth_headers, payloads)
+    assert r.status_code == 200, r.text
+    return r.json()["studies"][0]
+
+
+def test_examctl_requires_auth(client):
+    """미인증 401 — 전 examctl 엔드포인트."""
+    assert client.get("/api/local/examctl/studies").status_code == 401
+    assert client.get("/api/local/examctl/trash").status_code == 401
+    assert client.post("/api/local/examctl/delete", json={}).status_code == 401
+    assert client.post("/api/local/examctl/restore", json={}).status_code == 401
+    assert client.post("/api/local/examctl/unassign", json={}).status_code == 401
+    assert client.post(
+        "/api/local/examctl/assign", json={"target_study_id": 1}
+    ).status_code == 401
+
+
+def test_examctl_delete_restore_roundtrip(client, db, auth_headers, tmp_path):
+    """삭제→일반 목록/트리 제외·examctl 트리 플래그·휴지통→복구 왕복 + 감사 로그."""
+    root = tmp_path / "share"
+    _set_root(db, root)
+    study_uid, series_uid = generate_uid(), generate_uid()
+    sop1, sop2 = generate_uid(), generate_uid()
+    st = _import_series(client, auth_headers, pid="P001", study_uid=study_uid,
+                        series_uid=series_uid, sops=[sop1, sop2])
+
+    # examctl 목록은 서버 StudyRow 동형 필드 제공 — ExamControl S/I 컬럼 소비
+    rows = client.get("/api/local/examctl/studies", headers=auth_headers).json()["items"]
+    me = next(i for i in rows if i["id"] == st["id"])
+    assert me["series_count"] == 1 and me["instance_count"] == 2
+
+    # 빈 선택 400 / 미존재 uid 404
+    assert client.post("/api/local/examctl/delete", json={},
+                       headers=auth_headers).status_code == 400
+    assert client.post("/api/local/examctl/delete", json={"series_uids": ["no.such.uid"]},
+                       headers=auth_headers).status_code == 404
+
+    # 시리즈 소프트 삭제
+    dr = client.post("/api/local/examctl/delete", json={"series_uids": [series_uid]},
+                     headers=auth_headers)
+    assert dr.status_code == 200, dr.text
+    assert dr.json() == {"deleted_series": 1, "deleted_images": 2}
+
+    # 일반 트리에서 제외 + 목록 이미지 카운트 동기(0)
+    tree = client.get(f"/api/local/studies/{st['id']}/tree", headers=auth_headers).json()
+    assert tree["series"] == []
+    items = client.get("/api/local/studies", headers=auth_headers).json()["items"]
+    assert next(i for i in items if i["id"] == st["id"])["images"] == 0
+
+    # examctl 트리는 deleted 플래그로 계속 표시
+    et = client.get(f"/api/local/examctl/studies/{st['id']}/tree", headers=auth_headers).json()
+    assert len(et["series"]) == 1
+    assert et["series"][0]["deleted"] is True
+    assert [i["deleted"] for i in et["series"][0]["instances"]] == [True, True]
+
+    # 휴지통에 시리즈로 표시
+    trash = client.get("/api/local/examctl/trash", headers=auth_headers).json()["items"]
+    hit = next(t for t in trash if t["kind"] == "series" and t["series_uid"] == series_uid)
+    assert hit["image_count"] == 2 and hit["patient_key"] == "P001"
+
+    # 재삭제 idempotent — 이미 삭제됨이라 카운트 0
+    again = client.post("/api/local/examctl/delete", json={"series_uids": [series_uid]},
+                        headers=auth_headers)
+    assert again.json() == {"deleted_series": 0, "deleted_images": 0}
+
+    # 복구 → 일반 트리/카운트/휴지통 원복
+    rr = client.post("/api/local/examctl/restore", json={"series_uids": [series_uid]},
+                     headers=auth_headers)
+    assert rr.json() == {"restored_series": 1, "restored_images": 2}
+    tree2 = client.get(f"/api/local/studies/{st['id']}/tree", headers=auth_headers).json()
+    assert len(tree2["series"]) == 1 and len(tree2["series"][0]["instances"]) == 2
+    items2 = client.get("/api/local/studies", headers=auth_headers).json()["items"]
+    assert next(i for i in items2 if i["id"] == st["id"])["images"] == 2
+    trash2 = client.get("/api/local/examctl/trash", headers=auth_headers).json()["items"]
+    assert all(t["series_uid"] != series_uid for t in trash2)
+
+    # 감사 로그(서버 DB) — local_examctl_delete / restore
+    from sqlalchemy import select
+
+    from app.models import AuditLog
+
+    actions = {
+        a for (a,) in db.execute(
+            select(AuditLog.action).where(AuditLog.action.like("local_examctl_%"))
+        ).all()
+    }
+    assert {"local_examctl_delete", "local_examctl_restore"} <= actions
+
+
+def test_examctl_image_delete_and_restore_revives_series(client, db, auth_headers, tmp_path):
+    """sop 단위 삭제 → 휴지통 kind=image, 이미지 복구는 부모 시리즈도 살린다."""
+    root = tmp_path / "share"
+    _set_root(db, root)
+    study_uid, series_uid = generate_uid(), generate_uid()
+    sop1, sop2 = generate_uid(), generate_uid()
+    st = _import_series(client, auth_headers, pid="P002", study_uid=study_uid,
+                        series_uid=series_uid, sops=[sop1, sop2])
+
+    dr = client.post("/api/local/examctl/delete", json={"sop_uids": [sop1]},
+                     headers=auth_headers)
+    assert dr.json() == {"deleted_series": 0, "deleted_images": 1}
+    tree = client.get(f"/api/local/studies/{st['id']}/tree", headers=auth_headers).json()
+    assert [i["sop_uid"] for i in tree["series"][0]["instances"]] == [sop2]
+    trash = client.get("/api/local/examctl/trash", headers=auth_headers).json()["items"]
+    assert any(t["kind"] == "image" and t["sop_uid"] == sop1 for t in trash)
+
+    # 시리즈까지 삭제 후 이미지 하나만 복구 → 부모 시리즈도 복구(가시성)
+    client.post("/api/local/examctl/delete", json={"series_uids": [series_uid]},
+                headers=auth_headers)
+    rr = client.post("/api/local/examctl/restore", json={"sop_uids": [sop1]},
+                     headers=auth_headers)
+    assert rr.json() == {"restored_series": 1, "restored_images": 1}
+    tree2 = client.get(f"/api/local/studies/{st['id']}/tree", headers=auth_headers).json()
+    assert [i["sop_uid"] for i in tree2["series"][0]["instances"]] == [sop1]
+
+
+def test_examctl_unassign_bucket_reuse(client, db, auth_headers, tmp_path):
+    """unassign — 로컬 미배정 버킷 1개 생성 후 재사용, 목록에 노출."""
+    root = tmp_path / "share"
+    _set_root(db, root)
+    se_a, se_b = generate_uid(), generate_uid()
+    st_a = _import_series(client, auth_headers, pid="PA", study_uid=generate_uid(),
+                          series_uid=se_a, sops=[generate_uid()])
+    st_b = _import_series(client, auth_headers, pid="PB", study_uid=generate_uid(),
+                          series_uid=se_b, sops=[generate_uid()])
+
+    u1 = client.post("/api/local/examctl/unassign", json={"series_uids": [se_a]},
+                     headers=auth_headers)
+    assert u1.status_code == 200, u1.text
+    assert u1.json()["moved"] == 1
+    bucket_id = u1.json()["bucket_study_id"]
+
+    u2 = client.post("/api/local/examctl/unassign", json={"series_uids": [se_b]},
+                     headers=auth_headers)
+    assert u2.json() == {"moved": 1, "bucket_study_id": bucket_id}  # 같은 버킷 재사용
+
+    # 버킷 검사가 목록에 있고 시리즈 2개 보유, 원 검사들은 0장
+    items = client.get("/api/local/studies", headers=auth_headers).json()["items"]
+    bucket = next(i for i in items if i["id"] == bucket_id)
+    assert bucket["patient_key"] == "UNASSIGNED" and bucket["images"] == 2
+    assert next(i for i in items if i["id"] == st_a["id"])["images"] == 0
+    assert next(i for i in items if i["id"] == st_b["id"])["images"] == 0
+    bt = client.get(f"/api/local/studies/{bucket_id}/tree", headers=auth_headers).json()
+    assert {s["series_uid"] for s in bt["series"]} == {se_a, se_b}
+
+    # 이미 버킷 소속 항목 재-unassign → moved 0(부작용 없음)
+    u3 = client.post("/api/local/examctl/unassign", json={"series_uids": [se_a]},
+                     headers=auth_headers)
+    assert u3.json() == {"moved": 0, "bucket_study_id": bucket_id}
+
+
+def test_examctl_assign_series_sop_split_roundtrip(client, db, auth_headers, tmp_path):
+    """assign — 시리즈 이동·자기자신 400·sop 분할 이동 후 왕복 시 원 시리즈 복귀."""
+    root = tmp_path / "share"
+    _set_root(db, root)
+    se_x, se_y = generate_uid(), generate_uid()
+    sop1, sop2 = generate_uid(), generate_uid()
+    st_a = _import_series(client, auth_headers, pid="PA", study_uid=generate_uid(),
+                          series_uid=se_x, sops=[sop1, sop2])
+    st_b = _import_series(client, auth_headers, pid="PB", study_uid=generate_uid(),
+                          series_uid=se_y, sops=[generate_uid()])
+
+    # 자기 자신으로의 assign → 400
+    self_r = client.post(
+        "/api/local/examctl/assign",
+        json={"target_study_id": st_a["id"], "series_uids": [se_x]},
+        headers=auth_headers,
+    )
+    assert self_r.status_code == 400
+    # 미존재 대상 검사 → 404
+    assert client.post(
+        "/api/local/examctl/assign",
+        json={"target_study_id": 999999, "series_uids": [se_x]},
+        headers=auth_headers,
+    ).status_code == 404
+
+    # sop 단위 이동 A→B: 분할 시리즈 '{원UID}.m{B}' 생성
+    mv = client.post(
+        "/api/local/examctl/assign",
+        json={"target_study_id": st_b["id"], "sop_uids": [sop1]},
+        headers=auth_headers,
+    )
+    assert mv.status_code == 200, mv.text
+    assert mv.json() == {"moved": 1}
+    split_uid = f"{se_x}.m{st_b['id']}"
+    tb = client.get(f"/api/local/studies/{st_b['id']}/tree", headers=auth_headers).json()
+    split = next(s for s in tb["series"] if s["series_uid"] == split_uid)
+    assert [i["sop_uid"] for i in split["instances"]] == [sop1]
+    ta = client.get(f"/api/local/studies/{st_a['id']}/tree", headers=auth_headers).json()
+    assert [i["sop_uid"] for i in ta["series"][0]["instances"]] == [sop2]
+    items = client.get("/api/local/studies", headers=auth_headers).json()["items"]
+    assert next(i for i in items if i["id"] == st_a["id"])["images"] == 1
+    assert next(i for i in items if i["id"] == st_b["id"])["images"] == 2
+
+    # 왕복 B→A: base UID 비교로 원 시리즈(se_x)에 복귀('X.mB.mA' 증식 없음)
+    back = client.post(
+        "/api/local/examctl/assign",
+        json={"target_study_id": st_a["id"], "sop_uids": [sop1]},
+        headers=auth_headers,
+    )
+    assert back.json() == {"moved": 1}
+    ta2 = client.get(f"/api/local/studies/{st_a['id']}/tree", headers=auth_headers).json()
+    orig = next(s for s in ta2["series"] if s["series_uid"] == se_x)
+    assert sorted(i["sop_uid"] for i in orig["instances"]) == sorted([sop1, sop2])
+    assert all(".m" not in s["series_uid"] for s in ta2["series"])
+    # 왕복이 B에 남긴 빈 분할 행은 일반(뷰어) 트리에서 숨김(서버 뷰어 오버레이 동형)
+    tb_back = client.get(f"/api/local/studies/{st_b['id']}/tree", headers=auth_headers).json()
+    assert split_uid not in {s["series_uid"] for s in tb_back["series"]}
+    # examctl 트리에는 행이 계속 보인다(서버 examctl 트리 동형 — 관리자는 잔여 행 확인 가능)
+    eb = client.get(f"/api/local/examctl/studies/{st_b['id']}/tree", headers=auth_headers).json()
+    assert split_uid in {s["series_uid"] for s in eb["series"]}
+
+    # 시리즈 단위 이동 A→B: UID 불변 재귀속
+    mv2 = client.post(
+        "/api/local/examctl/assign",
+        json={"target_study_id": st_b["id"], "series_uids": [se_x]},
+        headers=auth_headers,
+    )
+    assert mv2.json() == {"moved": 1}
+    tb2 = client.get(f"/api/local/studies/{st_b['id']}/tree", headers=auth_headers).json()
+    assert se_x in {s["series_uid"] for s in tb2["series"]}
+
+
 def test_root_change_uses_that_paths_db(client, db, auth_headers, tmp_path):
     """루트 경로 변경 시 그 경로의 local.db 사용 — 서로 격리."""
     root_a = tmp_path / "a"

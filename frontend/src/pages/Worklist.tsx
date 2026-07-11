@@ -2974,11 +2974,12 @@ export function Worklist() {
                            })}
                          </>
                        )} />
-      {/* EXAM CONTROL 본문 (레인 F) — 관리자 검사 QC. 선택 시 워크리스트 본문 전체를 대체 */}
+      {/* EXAM CONTROL 본문 (레인 F) — 관리자 검사 QC. 선택 시 워크리스트 본문 전체를 대체.
+          source: Local Server 모드(sv_server_mode=local)면 로컬 PACS(/api/local/examctl), 아니면 서버(/api/examctl) */}
       {examCtl ? (
         <Suspense fallback={<div style={{ padding: 20, color: "var(--text-secondary)" }}>Exam Control 로딩…</div>}>
           <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 8, display: "flex", flexDirection: "column" }}>
-            <ExamControl />
+            <ExamControl source={serverMode === "local" ? "local" : "server"} />
           </div>
         </Suspense>
       ) : (

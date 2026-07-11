@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sqlite3
 import uuid
 from pathlib import Path
@@ -97,7 +98,16 @@ def _connect(root: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    _migrate_examctl_columns(conn)
     return conn
+
+
+def _migrate_examctl_columns(conn: sqlite3.Connection) -> None:
+    """Exam Control 소프트 삭제용 deleted 컬럼 — 기존 local.db 에 idempotent ALTER."""
+    for table in ("series", "instances"):
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if "deleted" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
 
 
 # ── Import ────────────────────────────────────────────────────────────────
@@ -280,13 +290,18 @@ def _study_row_to_dict(conn: sqlite3.Connection, study_id: int) -> dict:
     row = conn.execute("SELECT * FROM studies WHERE id=?", (study_id,)).fetchone()
     if row is None:
         return {}
+    # 이미지 수는 소프트 삭제(examctl) 제외 실측 — 카운트 컬럼 없이 항상 동기
     images = conn.execute(
         "SELECT COUNT(*) AS n FROM instances i JOIN series s ON i.series_id=s.id"
-        " WHERE s.study_id=?",
+        " WHERE s.study_id=? AND s.deleted=0 AND i.deleted=0",
         (study_id,),
+    ).fetchone()["n"]
+    n_series = conn.execute(
+        "SELECT COUNT(*) AS n FROM series WHERE study_id=? AND deleted=0", (study_id,)
     ).fetchone()["n"]
     return {
         "id": row["id"],
+        "study_uid": row["study_uid"],
         "patient_key": row["patient_key"],
         "patient_name": row["patient_name"],
         "sex": row["sex"],
@@ -294,6 +309,9 @@ def _study_row_to_dict(conn: sqlite3.Connection, study_id: int) -> dict:
         "modality": row["modality"],
         "study_desc": row["study_desc"],
         "images": int(images),
+        # 서버 examctl(StudyRow) 동형 필드 — ExamControl S/I 컬럼이 그대로 소비
+        "series_count": int(n_series),
+        "instance_count": int(images),
     }
 
 
@@ -316,13 +334,16 @@ def list_studies(root: Path, q: str = "") -> dict:
 
 
 def study_tree(root: Path, study_id: int) -> dict | None:
+    """일반(뷰어/워크리스트) 트리 — 소프트 삭제된 시리즈/이미지는 제외."""
     conn = _connect(root)
     try:
         if conn.execute("SELECT 1 FROM studies WHERE id=?", (study_id,)).fetchone() is None:
             return None
         series_out = []
         for se in conn.execute(
-            "SELECT * FROM series WHERE study_id=? ORDER BY series_number, id", (study_id,)
+            "SELECT * FROM series WHERE study_id=? AND deleted=0"
+            " ORDER BY series_number, id",
+            (study_id,),
         ).fetchall():
             instances = [
                 {
@@ -333,10 +354,18 @@ def study_tree(root: Path, study_id: int) -> dict | None:
                     "cols": r["cols"],
                 }
                 for r in conn.execute(
-                    "SELECT * FROM instances WHERE series_id=? ORDER BY instance_number, id",
+                    "SELECT * FROM instances WHERE series_id=? AND deleted=0"
+                    " ORDER BY instance_number, id",
                     (se["id"],),
                 ).fetchall()
             ]
+            if not instances and conn.execute(
+                "SELECT 1 FROM instances WHERE series_id=? LIMIT 1", (se["id"],)
+            ).fetchone() is None:
+                # 구조적으로 빈 시리즈(sop 왕복 이동이 남긴 분할 행 등) — 일반/뷰어
+                # 트리에서 숨김(서버 overlay_viewer_tree 와 동형: 빈 앱 전용 행 미노출).
+                # 소프트 삭제로 비워진 시리즈(행은 존재)는 서버처럼 빈 목록으로 유지.
+                continue
             series_out.append({
                 "series_uid": se["series_uid"],
                 "series_number": se["series_number"],
@@ -482,5 +511,288 @@ def delete_study(root: Path, study_id: int) -> dict | None:
             "patient_key": st["patient_key"],
             "removed_files": removed_files,
         }
+    finally:
+        conn.close()
+
+
+# ── Exam Control(로컬) — 소프트 삭제·복구·휴지통·미배정·재배정 ─────────────────
+# 서버 examctl_service 와 동형 의미론: 파일/DICOM 원본은 불변, local.db 귀속만 변경.
+UNASSIGNED_PATIENT_KEY = "UNASSIGNED"
+UNASSIGNED_STUDY_UID = "local.unassigned"  # 로컬 버킷은 1개 고정(병원 개념 없음)
+UNASSIGNED_DESC = "미배정 보관함"
+
+
+def _base_uid(series_uid: str) -> str:
+    """분할 파생 UID 의 원(base) UID — 꼬리의 '.m<검사id>' 세그먼트를 전부 제거.
+
+    서버 examctl_service._base_uid 와 동일 규칙 — base 비교라서 sop 왕복 이동 시
+    원 시리즈로 되돌아간다(분할 행 증식 'X.m3.m2' 방지).
+    """
+    return re.sub(r"(?:\.m\d+)+$", "", series_uid)
+
+
+def _load_selection(
+    conn: sqlite3.Connection, series_uids: list[str], sop_uids: list[str]
+) -> tuple[list[sqlite3.Row], list[sqlite3.Row]]:
+    """선택 uid → local.db 행(미존재 uid 는 조용히 무시, 중복 제거)."""
+    series = []
+    for uid in dict.fromkeys(u for u in (series_uids or []) if u):
+        row = conn.execute("SELECT * FROM series WHERE series_uid=?", (uid,)).fetchone()
+        if row is not None:
+            series.append(row)
+    instances = []
+    for uid in dict.fromkeys(u for u in (sop_uids or []) if u):
+        row = conn.execute("SELECT * FROM instances WHERE sop_uid=?", (uid,)).fetchone()
+        if row is not None:
+            instances.append(row)
+    return series, instances
+
+
+def examctl_tree(root: Path, study_id: int) -> dict | None:
+    """Exam Control 트리 — 삭제 포함 표시(deleted 플래그). 서버 examctl 트리와 동형."""
+    conn = _connect(root)
+    try:
+        st = conn.execute("SELECT study_uid FROM studies WHERE id=?", (study_id,)).fetchone()
+        if st is None:
+            return None
+        series_out = []
+        for se in conn.execute(
+            "SELECT * FROM series WHERE study_id=? ORDER BY series_number, id", (study_id,)
+        ).fetchall():
+            instances = [
+                {
+                    "iid": r["id"],
+                    "sop_uid": r["sop_uid"],
+                    "instance_number": r["instance_number"],
+                    "rows": r["rows"],
+                    "cols": r["cols"],
+                    "deleted": bool(r["deleted"]),
+                }
+                for r in conn.execute(
+                    "SELECT * FROM instances WHERE series_id=? ORDER BY instance_number, id",
+                    (se["id"],),
+                ).fetchall()
+            ]
+            series_out.append({
+                "series_uid": se["series_uid"],
+                "series_number": se["series_number"],
+                "series_desc": se["series_desc"],
+                "modality": se["modality"],
+                "deleted": bool(se["deleted"]),
+                "instances": instances,
+            })
+        return {"study_uid": st["study_uid"], "series": series_out}
+    finally:
+        conn.close()
+
+
+def examctl_delete(root: Path, series_uids: list[str], sop_uids: list[str]) -> dict | None:
+    """소프트 삭제 — 시리즈 삭제는 하위 이미지 포함. None=선택 대상 미존재. idempotent."""
+    conn = _connect(root)
+    try:
+        series, instances = _load_selection(conn, series_uids, sop_uids)
+        if not series and not instances:
+            return None
+        n_series = 0
+        n_images = 0
+        for s in series:
+            n_series += conn.execute(
+                "UPDATE series SET deleted=1 WHERE id=? AND deleted=0", (s["id"],)
+            ).rowcount
+            n_images += conn.execute(
+                "UPDATE instances SET deleted=1 WHERE series_id=? AND deleted=0", (s["id"],)
+            ).rowcount
+        for i in instances:
+            n_images += conn.execute(
+                "UPDATE instances SET deleted=1 WHERE id=? AND deleted=0", (i["id"],)
+            ).rowcount
+        conn.commit()
+        return {"deleted_series": n_series, "deleted_images": n_images}
+    finally:
+        conn.close()
+
+
+def examctl_restore(root: Path, series_uids: list[str], sop_uids: list[str]) -> dict | None:
+    """복구 — 시리즈 복구는 하위 이미지 포함, 이미지 복구는 부모 시리즈도 살린다(가시성)."""
+    conn = _connect(root)
+    try:
+        series, instances = _load_selection(conn, series_uids, sop_uids)
+        if not series and not instances:
+            return None
+        n_series = 0
+        n_images = 0
+        for s in series:
+            n_series += conn.execute(
+                "UPDATE series SET deleted=0 WHERE id=? AND deleted=1", (s["id"],)
+            ).rowcount
+            n_images += conn.execute(
+                "UPDATE instances SET deleted=0 WHERE series_id=? AND deleted=1", (s["id"],)
+            ).rowcount
+        for i in instances:
+            n_images += conn.execute(
+                "UPDATE instances SET deleted=0 WHERE id=? AND deleted=1", (i["id"],)
+            ).rowcount
+            n_series += conn.execute(
+                "UPDATE series SET deleted=0 WHERE id=? AND deleted=1", (i["series_id"],)
+            ).rowcount
+        conn.commit()
+        return {"restored_series": n_series, "restored_images": n_images}
+    finally:
+        conn.close()
+
+
+def examctl_trash(root: Path) -> list[dict]:
+    """휴지통 — 삭제 시리즈 + (시리즈는 살아있는데 개별 삭제된) 이미지. 서버 trash 동형."""
+    conn = _connect(root)
+    try:
+        items: list[dict] = []
+        for s in conn.execute(
+            "SELECT se.*, st.id AS study_id_, st.patient_key AS pk, st.study_uid AS suid,"
+            " st.study_desc AS sdesc FROM series se JOIN studies st ON se.study_id=st.id"
+            " WHERE se.deleted=1 ORDER BY se.id"
+        ).fetchall():
+            n_imgs = conn.execute(
+                "SELECT COUNT(*) AS n FROM instances WHERE series_id=?", (s["id"],)
+            ).fetchone()["n"]
+            items.append({
+                "kind": "series",
+                "study_id": s["study_id_"],
+                "study_uid": s["suid"],
+                "study_desc": s["sdesc"],
+                "patient_key": s["pk"],
+                "series_uid": s["series_uid"],
+                "series_desc": s["series_desc"],
+                "modality": s["modality"],
+                "image_count": int(n_imgs),
+            })
+        for r in conn.execute(
+            "SELECT i.*, se.series_uid AS seuid, st.id AS study_id_, st.patient_key AS pk,"
+            " st.study_uid AS suid, st.study_desc AS sdesc"
+            " FROM instances i JOIN series se ON i.series_id=se.id"
+            " JOIN studies st ON se.study_id=st.id"
+            " WHERE i.deleted=1 AND se.deleted=0 ORDER BY i.id"
+        ).fetchall():
+            items.append({
+                "kind": "image",
+                "study_id": r["study_id_"],
+                "study_uid": r["suid"],
+                "study_desc": r["sdesc"],
+                "patient_key": r["pk"],
+                "series_uid": r["seuid"],
+                "sop_uid": r["sop_uid"],
+                "instance_number": r["instance_number"] or 0,
+            })
+        return items
+    finally:
+        conn.close()
+
+
+def _bucket_study_id(conn: sqlite3.Connection) -> int:
+    """로컬 미배정 버킷 검사(1개 고정) — 없으면 생성."""
+    row = conn.execute(
+        "SELECT id FROM studies WHERE study_uid=?", (UNASSIGNED_STUDY_UID,)
+    ).fetchone()
+    if row is not None:
+        return int(row["id"])
+    cur = conn.execute(
+        "INSERT INTO studies(patient_key, patient_name, study_uid, study_desc, modality)"
+        " VALUES(?,?,?,?,?)",
+        (UNASSIGNED_PATIENT_KEY, "미배정", UNASSIGNED_STUDY_UID, UNASSIGNED_DESC, "OT"),
+    )
+    return int(cur.lastrowid)
+
+
+def _find_or_create_target_series(
+    conn: sqlite3.Connection, src: sqlite3.Row, target_study_id: int
+) -> int:
+    """sop 단위 이동의 대상 시리즈 — 같은 원(base) UID 시리즈가 대상 검사에 있으면 재사용.
+
+    base 비교라서 왕복 이동 시 원 시리즈로 복귀. 없으면 분할 행 생성
+    (series_uid 전역 UNIQUE — 분할 행은 파생 UID '{base}.m{대상검사id}').
+    """
+    base = _base_uid(src["series_uid"])
+    split_uid = f"{base}.m{target_study_id}"
+    cands = [
+        c for c in conn.execute(
+            "SELECT * FROM series WHERE study_id=?", (target_study_id,)
+        ).fetchall()
+        if _base_uid(c["series_uid"]) == base
+    ]
+    for c in cands:
+        if not c["deleted"]:
+            return int(c["id"])
+    for c in cands:
+        if c["series_uid"] == split_uid:
+            return int(c["id"])  # UNIQUE 제약 — 삭제 상태의 기존 분할 행 재사용(상태 유지)
+    cur = conn.execute(
+        "INSERT INTO series(study_id, series_uid, series_number, series_desc, modality)"
+        " VALUES(?,?,?,?,?)",
+        (target_study_id, split_uid, src["series_number"] or 0,
+         src["series_desc"], src["modality"]),
+    )
+    return int(cur.lastrowid)
+
+
+def _move_items(
+    conn: sqlite3.Connection, target_study_id: int,
+    series: list[sqlite3.Row], instances: list[sqlite3.Row],
+) -> int:
+    """시리즈/이미지를 대상 검사로 이동(재귀속). 반환: 이동 항목 수.
+
+    시리즈는 study_id 만 변경(UID 불변), 이미지는 대상 검사의 시리즈로 붙인다.
+    카운트는 조회 시 실측(_study_row_to_dict)이라 별도 동기 불필요.
+    """
+    moved = 0
+    for s in series:
+        if int(s["study_id"]) == int(target_study_id):
+            continue  # 자기 자신으로의 이동은 무효(부작용 없음)
+        conn.execute("UPDATE series SET study_id=? WHERE id=?", (target_study_id, s["id"]))
+        moved += 1
+    for i in instances:
+        src = conn.execute("SELECT * FROM series WHERE id=?", (i["series_id"],)).fetchone()
+        if src is None or int(src["study_id"]) == int(target_study_id):
+            continue  # 같은 요청에서 부모 시리즈가 이미 이동됐으면 함께 간 것 — 중복 이동 방지
+        tgt_series_id = _find_or_create_target_series(conn, src, target_study_id)
+        conn.execute("UPDATE instances SET series_id=? WHERE id=?", (tgt_series_id, i["id"]))
+        moved += 1
+    return moved
+
+
+def examctl_unassign(root: Path, series_uids: list[str], sop_uids: list[str]) -> dict | None:
+    """선택 항목을 로컬 미배정 버킷 검사로 이동. None=선택 대상 미존재."""
+    conn = _connect(root)
+    try:
+        series, instances = _load_selection(conn, series_uids, sop_uids)
+        if not series and not instances:
+            return None
+        bucket_id = _bucket_study_id(conn)
+        moved = _move_items(conn, bucket_id, series, instances)
+        conn.commit()  # 버킷 생성 포함(재사용 계약)
+        return {"moved": moved, "bucket_study_id": bucket_id}
+    finally:
+        conn.close()
+
+
+def examctl_assign(
+    root: Path, target_study_id: int, series_uids: list[str], sop_uids: list[str]
+) -> dict:
+    """선택 항목(미배정 포함)을 대상 로컬 검사로 이동 — local.db 귀속만 변경.
+
+    반환: {"moved": n} 또는 {"error": "target_not_found" | "not_found" | "self_assign"}.
+    """
+    conn = _connect(root)
+    try:
+        if conn.execute(
+            "SELECT 1 FROM studies WHERE id=?", (target_study_id,)
+        ).fetchone() is None:
+            return {"error": "target_not_found"}
+        series, instances = _load_selection(conn, series_uids, sop_uids)
+        if not series and not instances:
+            return {"error": "not_found"}
+        moved = _move_items(conn, target_study_id, series, instances)
+        if moved == 0:
+            return {"error": "self_assign"}  # 커밋 없음 — 부작용 0
+        conn.commit()
+        return {"moved": moved}
     finally:
         conn.close()

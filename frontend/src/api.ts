@@ -525,6 +525,32 @@ export const api = {
   /** 로컬 검사 삭제 (파일+local.db) */
   localDelete: (id: number) => req<{ ok: boolean }>(`/api/local/studies/${id}`, { method: "DELETE" }),
 
+  // ── Local Exam Control (레인 F/B 공통 계약 /api/local/examctl — 서버 examctl 과 동형 응답, local.db 소프트 삭제) ──
+  /** 로컬 검사 목록(삭제 제외) — 서버 examctlStudies 동형 items */
+  localExamctlStudies: (q?: string) =>
+    req<{ items: StudyRow[]; total?: number }>(
+      `/api/local/examctl/studies${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  /** 로컬 검사 Series→Image 트리(deleted 포함) — 인스턴스는 preview_url 대신 iid(프리뷰=localRendered) */
+  localExamctlTree: (studyId: number) =>
+    req<{ series: LocalExamCtlSeries[] }>(`/api/local/examctl/studies/${studyId}/tree`),
+  /** 로컬 소프트 삭제(local.db deleted 컬럼) — Recovery 복구 가능 */
+  localExamctlDelete: (body: ExamCtlUids) =>
+    req<{ deleted_series: number; deleted_images: number }>(
+      "/api/local/examctl/delete", { method: "POST", body: JSON.stringify(body) }),
+  /** 로컬 휴지통 복구 */
+  localExamctlRestore: (body: ExamCtlUids) =>
+    req<{ ok?: boolean; restored_series?: number; restored_images?: number }>(
+      "/api/local/examctl/restore", { method: "POST", body: JSON.stringify(body) }),
+  /** 로컬 휴지통 목록 */
+  localExamctlTrash: () => req<{ items: ExamCtlTrashItem[] }>("/api/local/examctl/trash"),
+  /** 로컬 Unassign — 로컬 UNASSIGNED 버킷 검사로 이동 */
+  localExamctlUnassign: (body: ExamCtlUids) =>
+    req<{ moved: number; bucket_study_id: number }>(
+      "/api/local/examctl/unassign", { method: "POST", body: JSON.stringify(body) }),
+  /** 로컬 Assign — 로컬 검사 간 이동(자기 자신 400, sop 이동 시 시리즈 분할 — base UID 왕복 규칙 동일) */
+  localExamctlAssign: (body: ExamCtlUids & { target_study_id: number }) =>
+    req<{ moved: number }>("/api/local/examctl/assign", { method: "POST", body: JSON.stringify(body) }),
+
   // ── Exam Control (관리자 검사 QC — 레인 F/B 공통 계약 /api/examctl, 전부 감사 로그) ──
   /** 검사 목록(deleted 제외) — hid 생략 시 접근 가능한 전체 */
   examctlStudies: (hid?: number, q?: string) => {
@@ -615,6 +641,23 @@ export interface LocalSeriesNode {
   series_desc: string;
   modality: string;
   instances: LocalInstanceNode[];
+}
+/** 로컬 Exam Control 트리 — 서버 ExamCtlSeries 동형이나 인스턴스가 preview_url 대신 iid(→localRendered) */
+export interface LocalExamCtlImage {
+  iid: number;
+  sop_uid: string;
+  instance_number: number;
+  rows: number;
+  cols: number;
+  deleted: boolean;
+}
+export interface LocalExamCtlSeries {
+  series_uid: string;
+  series_number: number;
+  series_desc: string;
+  modality: string;
+  deleted: boolean;
+  instances: LocalExamCtlImage[];
 }
 
 /** 로컬 인스턴스 렌더 PNG — 인증 헤더가 필요하므로 fetch→blob 방식 (wc/ww 생략=자동 W/L) */
