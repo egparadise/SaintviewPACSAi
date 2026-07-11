@@ -9,7 +9,7 @@ import {
   api, setToken, type HospitalNetResult, type HospitalRow, type ServerStatusAll,
 } from "../api";
 import {
-  HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel,
+  HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel,
 } from "./admin/ServerAdmin";
 import {
   AccountsTab, ConnDashboardTab, HospitalDataTab, HospitalLogsTab, HospitalModalityTab,
@@ -196,7 +196,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
       <HospitalsPanel />
     </>
   );
-  else if (sel === "users") content = <UsersPanel />;
+  // 구 [사용자 관리] 경로 — 통합된 [계정 관리]와 기능 동일(같은 표)이므로 통합 화면으로 렌더(딥링크·구 상태 호환)
+  else if (sel === "users") content = <AdminAccountsPanel />;
   else if (sel === "overview") content = <OverviewPanel />;
   // 서버 유지보수·인사이트 (14개 요구 — 레인 F)
   else if (sel === "srv-config") content = <ServerConfigPanel />;
