@@ -267,9 +267,15 @@ function ActionToolbar({
         <option value="stack">STACK VIEW</option>
       </select>
       <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
+      {/* In 모드 아이콘 툴바와 기능 동일(패리티) — Import/Export/Print/Reading/AI 재생성 */}
+      <Btn a="reading" label="📝 Reading" title="Report 창 — 판독 작성 창 열기(선택 검사)" />
+      <Btn a="import" label="📥 Import" title="Import — DICOM 파일/폴더 업로드(Orthanc, USB/CD 포함)" />
+      <Btn a="csv" label="📤 Export" title="Export — 워크리스트 CSV 내보내기" />
+      <Btn a="print" label="🖨 Print" title="Print — 화면 인쇄" />
       <Btn a="pdf" label="PDF" title="판독서 PDF" />
       <Btn a="emergency" label="⚠ Emergency" title="응급 우선순위 토글 (F-15)" />
       <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
+      <Btn a="regen" label="🤖 AI" title="AI — 초안 재생성" />
       <Btn a="batch" label="일괄 검토" title="AI 초안 일괄 검토 (F-22)" />
       <Btn a="refresh" label="새로고침" />
       <div style={{ flex: 1 }} />
