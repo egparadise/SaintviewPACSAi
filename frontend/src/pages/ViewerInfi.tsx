@@ -1303,6 +1303,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [ovlFont, setOvlFont] = useState(9.5);
   const [ovlVisible, setOvlVisible] = useState(true);
   const [selColor, setSelColor] = useState("#d946ef");
+  // 이미지 위치 인디케이터(페인 우측 초록 바) — Scout 설정과 무관한 별도 표시라 기본 숨김(설정으로 켬)
+  const [scrollBarOn, setScrollBarOn] = useState(false);
   // 툴바 사용자화 — 설정에서 끈 툴은 팔레트에서 숨김 (viewer.prefs.infi_toolbar)
   const [tbShow, setTbShow] = useState<Record<string, boolean>>({});
   // 팔레트 표시 옵션(설정>뷰어): 열 수(1/2/3) · 이름 표시 · 아이콘 크기(px)
@@ -1326,6 +1328,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       if (v.infi_overlay_visible !== undefined) setOvlVisible(v.infi_overlay_visible);
       if (v.infi_sel_color) setSelColor(v.infi_sel_color);
       if (v.infi_toolbar) setTbShow(v.infi_toolbar);
+      const sb = (r.value as { infi_scrollbar?: boolean }).infi_scrollbar;
+      if (sb !== undefined) setScrollBarOn(sb);
       const tv = r.value as { infi_tool_cols?: number; infi_tool_labels?: boolean; infi_tool_size?: number;
                               infi_cine_sec?: number };
       if (tv.infi_tool_cols) setToolCols(tv.infi_tool_cols);
@@ -1585,7 +1589,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             </div>
           );
         })}
-        {insts.length > 1 && <ScrollBar index={p.index} total={insts.length} />}
+        {scrollBarOn && insts.length > 1 && <ScrollBar index={p.index} total={insts.length} />}
         {/* 페인별 시네 컨트롤 — 각 Layout 프레임 개별 재생/정지 + 간격(초) */}
         {p.series && insts.length > 1 && (
           <div onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}

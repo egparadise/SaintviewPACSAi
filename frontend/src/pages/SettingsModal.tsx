@@ -152,6 +152,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infUsage, setInfUsage] = useState<Record<string, number>>({});
   const [infUsageReset, setInfUsageReset] = useState(false);  // 초기화 눌렀을 때만 저장에 포함(뷰어 집계 덮어쓰기 방지)
   const [infRptDock, setInfRptDock] = useState(false);
+  const [infScrollBar, setInfScrollBar] = useState(false);  // 페인 우측 이미지 위치 인디케이터(초록 바) — 기본 꺼짐
   // TY Viewer 신규 (viewer.prefs ty_* 키 계약) — 아이콘 크기/라벨/3D·★Quick·사용 패턴·오버레이 글자
   const [tyToolSize, setTyToolSize] = useState(17);
   const [tyToolLabels, setTyToolLabels] = useState(true);
@@ -291,6 +292,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (nf.infi_usage_rec !== undefined) setInfUsageRec(nf.infi_usage_rec);
       if (nf.infi_usage) setInfUsage(nf.infi_usage);
       if (nf.infi_report_dock !== undefined) setInfRptDock(nf.infi_report_dock);
+      const sb = (v as { infi_scrollbar?: boolean }).infi_scrollbar;
+      if (sb !== undefined) setInfScrollBar(sb);
       const ty = v as { ty_tool_size?: number; ty_tool_labels?: boolean; ty_icon_3d?: boolean;
                         ty_quick_row?: boolean; ty_usage_rec?: boolean;
                         ty_usage?: Record<string, number>; ty_overlay_font?: number };
@@ -417,6 +420,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_tool_cols: infToolCols, infi_tool_labels: infToolLabels, infi_tool_size: infToolSize,
       infi_cine_sec: infCineSec,
       infi_quick_row: infQuickRow, infi_usage_rec: infUsageRec, infi_report_dock: infRptDock,
+      infi_scrollbar: infScrollBar,
       ty_tool_size: tyToolSize, ty_tool_labels: tyToolLabels, ty_icon_3d: tyIcon3d,
       ty_quick_row: tyQuickRow, ty_usage_rec: tyUsageRec, ty_overlay_font: tyOvlFont,
       ty_sel_color: tySelColor, ty_cine_sec: tyCineSec,
@@ -1226,6 +1230,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     <input type="checkbox" checked={infRptDock}
                            onChange={(e) => setInfRptDock(e.target.checked)} />
                     뷰어를 열 때 판독(Report) 도크를 기본으로 열기 — 도크 열림 상태를 계정에 기억
+                  </label>
+                </Row>
+                <Row label="위치 인디케이터">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={infScrollBar}
+                           onChange={(e) => setInfScrollBar(e.target.checked)} />
+                    페인 우측 이미지 위치 인디케이터(초록 바) 표시 — Scout line 과 무관한 현재 이미지 위치 표시(기본 꺼짐)
                   </label>
                 </Row>
                 <Row label="닫기 동작">
