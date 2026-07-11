@@ -652,9 +652,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         setPanes((prev) => {
           const next = { ...prev };
           PANE_IDS.forEach((pid, i) => {
-            const s = imgSeries[Math.min(i, imgSeries.length - 1)];
-            next[pid] = { ...initPane(detail.study_uid), series: s,
-                          index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" };
+            // 시리즈가 레이아웃보다 적으면 남는 페인은 빈 칸 유지 — 마지막 시리즈 반복 채움 금지(In Viewer 규칙)
+            const s = imgSeries[i];
+            next[pid] = s
+              ? { ...initPane(detail.study_uid), series: s,
+                  index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" }
+              : initPane(detail.study_uid);
           });
           return next;
         });
