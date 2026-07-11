@@ -502,7 +502,21 @@ export const api = {
   /** 사용량 통계 — group=hospital|modality|department|report_status */
   insightsStats: (params: Record<string, string>) =>
     req<StatsResp>(`/api/insights/stats?${new URLSearchParams(params)}`),
+
+  // ── 인프라 (시스템 구조도 — InfraPanel 로컬 fetch 와 동일 계약 /api/infra/hospitals) ──
+  /** 병원별 Orthanc 컨테이너 현황 — state/ports/aet (미프로비저닝=entry null → 공유 Orthanc 폴백) */
+  infraHospitals: () => req<InfraHospitalsRes>("/api/infra/hospitals"),
 };
+
+// ── 인프라 타입 (시스템 구조도·InfraPanel 공통 계약) ──
+export interface InfraHospitalEntry {
+  container: string; url: string; dicom_port: number; web_port: number; volume: string; aet: string;
+}
+export interface InfraHospitalRow {
+  hid: number; code: string; name: string; provisioned: boolean;
+  entry: InfraHospitalEntry | null; state: string; status: string;
+}
+export interface InfraHospitalsRes { docker_ok: boolean; items: InfraHospitalRow[]; db_note: string }
 
 // ── 저장공간/백업 타입 ──
 export interface BackupPolicy {

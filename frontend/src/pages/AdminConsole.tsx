@@ -25,6 +25,7 @@ import {
 import { Hl7Panel } from "./admin/Hl7Panel";
 import InfraPanel, { HospitalContainersSection } from "./admin/InfraPanel";
 import { SecurityPanel } from "./admin/SecurityPanel";
+import SystemMap from "./admin/SystemMap";
 
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
 
@@ -144,7 +145,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
 }) {
   const [hosps, setHosps] = useState<HospitalRow[]>([]);
   const [open, setOpen] = useState<Record<number, boolean>>({});
-  const [sel, setSel] = useState<Node>(isSystemAdmin ? "server-status" : "hospitals");
+  // 기본 선택 — 시스템 관리자는 콘솔 진입 시 시스템 구조도(라이브 대시보드)가 첫 화면
+  const [sel, setSel] = useState<Node>(isSystemAdmin ? "sysmap" : "hospitals");
   const loadHosps = () => api.hospitals().then((r) => setHosps(r.items)).catch(() => {});
   useEffect(() => { loadHosps(); }, []);
 
@@ -183,7 +185,11 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
 
   // 우측 내용
   let content: React.ReactNode = null;
-  if (sel === "server-status") content = <ServerPanel />;
+  // 시스템 구조도 — 병원 박스 클릭 시 해당 병원 [병원 정보] 탭으로 이동(트리 확장 포함)
+  if (sel === "sysmap") content = (
+    <SystemMap onSelectHospital={(hid) => { setOpen((p) => ({ ...p, [hid]: true })); setSel(`h:${hid}:info`); }} />
+  );
+  else if (sel === "server-status") content = <ServerPanel />;
   else if (sel === "server-storage") content = <StoragePanel />;
   else if (sel === "server-db") content = <ServerDatabaseView />;
   // 역할 분리 — 부모(Admin System)=병원 등록·라이선스·활성화 / 자식(병원 탭)=운영 설정(네트워크·SCU 등)
@@ -255,6 +261,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
           {isSystemAdmin && <>
             {/* 개념 계약 — 이 섹션은 모든 병원(자식 컨테이너)을 담는 부모 컨테이너(Admin System) 자체의 관리 */}
             <Head tip="Admin System(부모 컨테이너) — 모든 병원(자식 컨테이너)을 담는 시스템 전체의 관리">Admin System — 부모 컨테이너</Head>
+            <div style={itemStyle(sel === "sysmap")} title="부모(Admin System)와 병원(자식 컨테이너) 전체 현황을 그림으로" onClick={() => setSel("sysmap")}>🗺️ 시스템 구조도</div>
             <div style={itemStyle(sel === "server-status")} onClick={() => setSel("server-status")}>🖥️ 서버 상태</div>
             <div style={itemStyle(sel === "srv-config")} onClick={() => setSel("srv-config")}>⚙️ 서버 설정 (IP·Port·AE·Name)</div>
             <div style={itemStyle(sel === "srv-space")} title="시스템(부모) 전체의 저장 공간" onClick={() => setSel("srv-space")}>📦 저장 공간 (DB·Image·Backup)</div>

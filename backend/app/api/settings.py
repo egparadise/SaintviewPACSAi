@@ -64,7 +64,8 @@ class SettingBody(BaseModel):
 def read_setting(key: str, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
-    value = get_setting(db, key, user=user["sub"], default={})
+    # 전역 전용 키는 user 스코프 무시 — 과거에 남은 user 사본이 전역 값을 가리는 것 방지
+    value = get_setting(db, key, user="" if key in GLOBAL_ONLY_KEYS else user["sub"], default={})
     if key == "mode.profiles" and not value:
         from app.services.mode_profiles import DEFAULT_MODE_PROFILES
 
