@@ -721,16 +721,51 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
 
   /* 탭 클릭: 해당 검사를 활성 페인에 표시 (UBPACS Opened Study List 전환) */
+  /* 전 페인 재행잉 — 탭 전환으로 다른 환자 검사를 볼 때 화면 전체를 그 검사로 교체(환자 혼합 방지).
+     시리즈가 레이아웃보다 적으면 빈 페인 유지(In Viewer 규칙). */
+  const hangAll = (uid: string, list: SeriesNode[]) => {
+    const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+    setPanes((prev) => {
+      const next = { ...prev };
+      for (const pid2 of PANE_IDS) {
+        const i = vis.indexOf(pid2);
+        const s = i >= 0 ? list[i] : undefined;
+        next[pid2] = s
+          ? { ...initPane(uid), series: s, index: Math.floor(s.instances.length / 2) }
+          : initPane(uid);
+      }
+      return next;
+    });
+    setSelPanes(new Set());
+  };
+
   const loadIntoActive = async (id: number) => {
-    if (id === detail.id) {
-      const s = series[0];
-      if (s) patch(activePane, { ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) });
-      return;
-    }
+    const isMain = id === detail.id;
     try {
-      const tree = await getTree(id);
+      const tree = isMain ? { uid: detail.study_uid, series } : await getTree(id);
+      if (!tree.series[0]) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
+      // 대상 검사의 환자 확인(메타 미로드 시 1회 조회) — 탭 전환은 암묵 동선이므로 환자 혼합 금지
+      let targetKey = isMain ? detail.patient_key : studyMeta[tree.uid]?.patient_key;
+      if (!targetKey && !isMain) {
+        try {
+          const d = await api.study(id);
+          targetKey = d.patient_key;
+          setStudyMeta((m) => ({ ...m, [tree.uid]: metaOf(d) }));
+        } catch { /* 메타 실패 시 아래 혼합 판정은 보수적으로 통과 */ }
+      }
+      const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+      const mixed = !!targetKey && vis.some((pid2) => {
+        const u = panes[pid2].studyUid || detail.study_uid;
+        const k = (studyMeta[u] ?? (u === detail.study_uid ? detail : undefined))?.patient_key;
+        return !!k && k !== targetKey;
+      });
+      if (mixed) {
+        // 다른 환자로의 전환 — 활성 페인만 바꾸면 이전 환자 영상이 격자에 남아 섞이므로 전체 재행잉
+        hangAll(tree.uid, tree.series);
+        setStatus("검사 전환 — 다른 환자이므로 화면 전체를 이 검사로 표시했습니다 (혼합 비교는 ⇄ Compare/+Add 사용)");
+        return;
+      }
       const s = tree.series[0];
-      if (!s) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
       patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
     } catch { setStatus("검사 전환 실패"); }
   };
