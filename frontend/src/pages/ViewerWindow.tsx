@@ -12,7 +12,7 @@ const VIEWER_COMPONENTS: Record<string, typeof Viewer2D> = { ty: Viewer2D, infi:
 
 export function ViewerWindow() {
   const params = new URLSearchParams(window.location.search);
-  const studyId = Number(params.get("study") || 0);
+  const [studyId, setStudyId] = useState(Number(params.get("study") || 0));
   const addId = Number(params.get("add") || 0);
   const stackId = Number(params.get("stack") || 0);
   const keySops = (params.get("keysops") ?? "").split(",").filter(Boolean);
@@ -20,6 +20,20 @@ export function ViewerWindow() {
   const woIds = (params.get("wo_ids") ?? "").split(",").map(Number).filter(Boolean);
 
   const [detail, setDetail] = useState<StudyDetail | null>(null);
+  // ◀👤▶ 환자 이동 — 페이지 리로드 없이 제자리 검사 전환 (뷰어가 sv-nav-study 이벤트로 요청)
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const id = Number((e as CustomEvent<{ id?: number }>).detail?.id);
+      if (!id) return;
+      const p = new URLSearchParams(window.location.search);
+      p.set("study", String(id));
+      ["add", "stack", "keysops", "wo_mode", "wo_ids"].forEach((k) => p.delete(k));
+      window.history.replaceState(null, "", `${window.location.pathname}?${p}`);
+      setStudyId(id);
+    };
+    window.addEventListener("sv-nav-study", onNav);
+    return () => window.removeEventListener("sv-nav-study", onNav);
+  }, []);
   // 워크리스트에서 로그아웃하면 뷰어 창도 닫는다 (localStorage 신호 — 같은 출처 창 간 전파)
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {

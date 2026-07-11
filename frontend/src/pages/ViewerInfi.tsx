@@ -1262,8 +1262,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const r = await api.worklist({});
       const idx = r.items.findIndex((it) => it.id === curD.id);
       const nxt = idx >= 0 ? r.items[idx + dir] : undefined;
-      if (nxt) location.search = `?viewer=2d&study=${nxt.id}`;
-      else say(dir < 0 ? "워크리스트에 위 검사가 없습니다" : "워크리스트에 아래 검사가 없습니다");
+      // 페이지 리로드 대신 제자리 전환 — ViewerWindow 가 sv-nav-study 를 받아 studyId 만 교체
+      // (같은 환자 검사는 Exam 탭으로 우측 누적, 다른 환자는 혼합 방지 규칙에 따라 교체)
+      if (nxt) window.dispatchEvent(new CustomEvent("sv-nav-study", { detail: { id: nxt.id } }));
+      else say(dir < 0 ? "워크리스트에 위 검사가 없습니다 (첫 검사)" : "워크리스트에 아래 검사가 없습니다 (마지막 검사)");
     } catch { say("워크리스트 조회 실패"); }
   };
   // Worklist 버튼(§3.1) — 워크리스트 창을 최전면으로 (다른 모니터에 있어도)

@@ -279,20 +279,24 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const leftStep = navLeft === "past" ? 1 : -1;  // 과거 = 목록 아래(idx 증가)
     return wlIds[idx + (visual === -1 ? leftStep : -leftStep)];
   };
-  const navPatient = (visual: 1 | -1) => {
+  const navPatient = async (visual: 1 | -1) => {
     const target = navTarget(visual);
-    if (target === undefined) return;
+    if (target === undefined) {
+      setStatus(visual === -1 ? "이전 검사가 없습니다 (목록 끝)" : "다음 검사가 없습니다 (목록 끝)");
+      return;
+    }
     postStudySync(target, "viewer");  // Worklist·Reading 연동
-    // 이미 열린 환자(Exam 탭)면 → 새로고침 없이 그 탭으로 전환
+    // 이미 열린 환자(Exam 탭)면 → 그 탭으로 전환
     const opened = openTabsRef.current.find((t) => t.id === target);
     if (opened) { void loadIntoActive(opened.id); return; }
-    // 미오픈 → 열면서 이동 (창 네비게이트, 탭은 localStorage로 유지·누적)
-    const p = new URLSearchParams(window.location.search);
-    if (p.get("viewer") === "2d") {
-      p.set("study", String(target));
-      ["add", "stack", "keysops", "wo_mode", "wo_ids"].forEach((k) => p.delete(k));
-      window.location.search = p.toString();
-    }
+    // 미오픈 → 페이지 리로드 없이 제자리 오픈: Exam 탭 우측 누적 + 활성 화면 전환
+    // (다른 환자면 loadIntoActive 의 혼합 방지 규칙이 전체 재행잉)
+    try {
+      const d = await api.study(target);
+      setStudyMeta((m) => ({ ...m, [d.study_uid]: metaOf(d) }));
+      addOpenTab(target, d.study_uid, `${d.modality} ${d.patient_name} ${d.study_date} #${d.id}`);
+      await loadIntoActive(target);
+    } catch { setStatus("검사 이동 실패"); }
   };
   // 다른 창(Worklist/Reading)에서 환자가 바뀌면 — 열린 탭이면 그 탭으로 전환
   const loadIntoActiveRef = useRef<(id: number) => Promise<void>>(async () => {});
@@ -710,8 +714,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (stackDetail?.id === id) return `${stackDetail.modality} ${stackDetail.study_date}`;
     return `검사 #${id}`;
   };
-  const addOpenTab = (id: number, uid: string) =>
-    setOpenTabs((prev) => prev.some((t) => t.id === id) ? prev : [...prev, { id, uid, label: tabLabel(id) }]);
+  const addOpenTab = (id: number, uid: string, label?: string) =>
+    setOpenTabs((prev) => prev.some((t) => t.id === id) ? prev : [...prev, { id, uid, label: label ?? tabLabel(id) }]);
 
   /* Opened 메뉴 부제 — modality · 검사일 */
   const tabSub = (id: number): string | undefined => {
