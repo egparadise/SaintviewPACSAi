@@ -46,7 +46,8 @@ const REF_COLORS: Record<string, string> = {
 let initialized = false;
 async function ensureInit() {
   if (initialized) return;
-  await csInit();
+  // useNorm16Texture: CT/MR 16비트 픽셀을 저정밀 텍스처로 양자화하지 않도록 — 계조 뭉개짐(banding) 방지
+  await csInit({ rendering: { useNorm16Texture: true } });
   dicomImageLoaderInit();
   toolsInit();
   addTool(WindowLevelTool);
@@ -59,20 +60,37 @@ async function ensureInit() {
 
 interface SeriesCand { uid: string; modality: string; count: number; desc: string }
 
-/** 볼륨 적합 시리즈 후보 목록 (비영상 제외, 슬라이스 수 내림차순) */
+/* 비진단 시리즈(보정/로컬라이저/스카우트/선량보고 등) — 슬라이스가 많아도 3D 볼륨 기본 선택에서 후순위 */
+const NON_DIAG_RE = /cal|calib|localizer|3.?plane|scout|screen ?save|dose|report|survey/i;
+
+/** 볼륨 적합 시리즈 후보 목록 (비영상 제외) — 진단 시리즈 우선, 그다음 매트릭스×슬라이스 크기순.
+    기존엔 슬라이스 수만으로 정렬해 128×128 보정(Cal) 시리즈가 기본 선택돼 3D 가 뿌옇게 보였다. */
 async function listSeries(studyUid: string): Promise<SeriesCand[]> {
   const res = await fetch(`${DICOMWEB_ROOT}/studies/${studyUid}/series`);
   if (!res.ok) throw new Error("시리즈 조회 실패");
   const seriesList: Record<string, { Value?: unknown[] }>[] = await res.json();
-  return seriesList
+  const cands = seriesList
     .map((s) => ({
       uid: String(s["0020000E"]?.Value?.[0] ?? ""),
       modality: String(s["00080060"]?.Value?.[0] ?? ""),
       count: Number(s["00201209"]?.Value?.[0] ?? 0),
       desc: String((s["0008103E"]?.Value?.[0] as string) ?? ""),
     }))
-    .filter((s) => s.uid && !["SR", "KO", "PR", "SEG"].includes(s.modality))
-    .sort((a, b) => b.count - a.count);
+    .filter((s) => s.uid && !["SR", "KO", "PR", "SEG"].includes(s.modality));
+  // 각 후보의 매트릭스(Rows×Cols)를 QIDO 인스턴스 1건으로 조회 — 해상도 가중치(실패 시 0=순서 영향 없음)
+  const area = await Promise.all(cands.map(async (s) => {
+    try {
+      const r = await fetch(
+        `${DICOMWEB_ROOT}/studies/${studyUid}/series/${s.uid}/instances?limit=1&includefield=00280010&includefield=00280011`);
+      if (!r.ok) return 0;
+      const [inst] = await r.json() as Record<string, { Value?: unknown[] }>[];
+      return Number(inst?.["00280010"]?.Value?.[0] ?? 0) * Number(inst?.["00280011"]?.Value?.[0] ?? 0);
+    } catch { return 0; }
+  }));
+  return cands
+    .map((s, i) => ({ ...s, _score: (NON_DIAG_RE.test(s.desc) ? 0 : 1e12) + (area[i] || 1) * Math.max(1, s.count) }))
+    .sort((a, b) => b._score - a._score)
+    .map(({ _score, ...s }) => s);
 }
 
 /** 지정 시리즈의 wadors imageId 목록 구성 + 메타데이터 등록 */
@@ -270,6 +288,19 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
           engine.resize(true, true);
           engine.render();
         });
+        // 초기 레이아웃 타이밍에 캔버스가 기본 300×150 백킹으로 남는 경우 재-resize (최대 5회)
+        {
+          let tries = 0;
+          const fix = () => {
+            const c = gridRef.current?.querySelector("canvas");
+            if (c && (c.width === 300 && c.height === 150) && tries++ < 5) {
+              engineRef.current?.resize(true, true);
+              engineRef.current?.render();
+              window.setTimeout(fix, 300);
+            }
+          };
+          window.setTimeout(fix, 300);
+        }
         if (gridRef.current && !resizeObserverRef.current) {
           const ro = new ResizeObserver(() => {
             engineRef.current?.resize(true, true);

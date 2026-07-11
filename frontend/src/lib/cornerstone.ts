@@ -22,7 +22,8 @@ export const DICOMWEB_ROOT =
 let initialized = false;
 export async function ensureCornerstone() {
   if (initialized) return;
-  await csInit();
+  // useNorm16Texture: 16비트 픽셀 정밀 텍스처 — 계조 뭉개짐 방지 (Viewer3D ensureInit 과 동일)
+  await csInit({ rendering: { useNorm16Texture: true } });
   // vite dev에서 디코드 워커 무음 정지 이슈 → 메인스레드 디코드(소량 스택엔 충분)
   dicomImageLoaderInit({ maxWebWorkers: 0 });
   toolsInit();
@@ -58,7 +59,9 @@ export async function registerSeriesImageIds(studyUid: string, seriesUid: string
   return withIds.map((x) => x.imageId);
 }
 
-/** 검사에서 영상 시리즈 중 인스턴스 최다 시리즈의 imageIds (볼륨용) */
+/** 검사에서 3D 볼륨용 시리즈 imageIds — 진단 시리즈 우선(보정/로컬라이저/스카우트 후순위), 그다음 슬라이스 수.
+    기존엔 인스턴스 최다 기준이라 128×128 보정(Cal) 시리즈가 뽑혀 3D 해상도가 낮아 보였다. */
+const NON_DIAG_RE = /cal|calib|localizer|3.?plane|scout|screen ?save|dose|report|survey/i;
 export async function buildVolumeImageIds(studyUid: string): Promise<string[]> {
   const seriesRes = await fetch(`${DICOMWEB_ROOT}/studies/${studyUid}/series`);
   if (!seriesRes.ok) throw new Error("시리즈 조회 실패");
@@ -68,9 +71,11 @@ export async function buildVolumeImageIds(studyUid: string): Promise<string[]> {
       uid: String(s["0020000E"]?.Value?.[0] ?? ""),
       modality: String(s["00080060"]?.Value?.[0] ?? ""),
       count: Number(s["00201209"]?.Value?.[0] ?? 0),
+      desc: String((s["0008103E"]?.Value?.[0] as string) ?? ""),
     }))
     .filter((s) => s.uid && !["SR", "KO", "PR", "SEG"].includes(s.modality));
   if (candidates.length === 0) throw new Error("영상 시리즈가 없습니다");
-  candidates.sort((a, b) => b.count - a.count);
+  candidates.sort((a, b) =>
+    (Number(NON_DIAG_RE.test(a.desc)) - Number(NON_DIAG_RE.test(b.desc))) || (b.count - a.count));
   return registerSeriesImageIds(studyUid, candidates[0].uid);
 }
