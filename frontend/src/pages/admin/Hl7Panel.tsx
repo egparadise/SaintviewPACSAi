@@ -316,18 +316,116 @@ export function MwlSection({ hid }: { hid: number }) {
 
 // ════════════════════════════ ④ 가상 환자 생성기 (오더 입력형 — RIS 스타일) ════════════════════════════
 
-// Region → Body Part 표준 매핑 상수
-const REGIONS = ["Skull", "Chest", "Abdomen", "Pelvis", "Upper Extremity", "Lower Extremity", "Spine"] as const;
-const BODY_PARTS: Record<string, string[]> = {
-  Skull: ["SKULL", "FACIAL", "MANDIBLE", "NASAL", "TMJ"],
-  Chest: ["CHEST", "RIB", "STERNUM", "CLAVICLE"],
-  Abdomen: ["ABDOMEN", "KUB"],
-  Pelvis: ["PELVIS", "HIP", "SI-JOINT"],
-  "Upper Extremity": ["SHOULDER", "HUMERUS", "ELBOW", "FOREARM", "WRIST", "HAND"],
-  "Lower Extremity": ["FEMUR", "KNEE", "TIBIA", "ANKLE", "FOOT"],
-  Spine: ["C-SPINE", "T-SPINE", "L-SPINE", "SACRUM", "COCCYX"],
+// Modality별 카탈로그 — Region/Body Part/3열(촬영법·기법)이 모달리티마다 다르다
+// (예: CT는 Skull이 아니라 Brain이고 FACIAL/MANDIBLE 같은 세부 촬영 부위가 없다)
+type ModCatalog = {
+  third: string;                     // 3열 제목: Projection(일반촬영)/Scan(단면)/View(유방) 등
+  regions: string[];
+  parts: Record<string, string[]>;
+  techniques: string[];              // 3열 선택 항목
 };
-const PROJECTIONS = ["PA", "AP", "Lateral", "Oblique", "Axial", "Lordotic", "Towne", "Waters", "Caldwell", "Tangential"];
+const CAT_RADIOGRAPHY: ModCatalog = { // CR·DX 일반촬영
+  third: "Projection",
+  regions: ["Skull", "Chest", "Abdomen", "Pelvis", "Upper Extremity", "Lower Extremity", "Spine"],
+  parts: {
+    Skull: ["SKULL", "FACIAL", "MANDIBLE", "NASAL", "TMJ"],
+    Chest: ["CHEST", "RIB", "STERNUM", "CLAVICLE"],
+    Abdomen: ["ABDOMEN", "KUB"],
+    Pelvis: ["PELVIS", "HIP", "SI-JOINT"],
+    "Upper Extremity": ["SHOULDER", "HUMERUS", "ELBOW", "FOREARM", "WRIST", "HAND"],
+    "Lower Extremity": ["FEMUR", "KNEE", "TIBIA", "ANKLE", "FOOT"],
+    Spine: ["C-SPINE", "T-SPINE", "L-SPINE", "SACRUM", "COCCYX"],
+  },
+  techniques: ["PA", "AP", "Lateral", "Oblique", "Axial", "Lordotic", "Towne", "Waters", "Caldwell", "Tangential"],
+};
+const CAT_CT: ModCatalog = {
+  third: "Scan",
+  regions: ["Brain", "Neck", "Chest", "Abdomen", "Pelvis", "Spine", "Extremity", "Angio(CTA)"],
+  parts: {
+    Brain: ["BRAIN", "PNS", "ORBIT", "TEMPORAL BONE"],
+    Neck: ["NECK"],
+    Chest: ["CHEST", "LOW-DOSE CHEST"],
+    Abdomen: ["ABDOMEN", "ABDOMEN+PELVIS", "LIVER", "UROGRAPHY"],
+    Pelvis: ["PELVIS"],
+    Spine: ["C-SPINE", "T-SPINE", "L-SPINE", "WHOLE SPINE"],
+    Extremity: ["SHOULDER", "ELBOW", "WRIST", "HIP", "KNEE", "ANKLE"],
+    "Angio(CTA)": ["BRAIN CTA", "NECK CTA", "CORONARY CTA", "AORTA CTA", "PULMONARY CTA", "LOWER EXT CTA"],
+  },
+  techniques: ["Non-Contrast (Pre)", "Contrast (Post)", "Pre + Post", "Dynamic", "HRCT", "3D Recon"],
+};
+const CAT_MR: ModCatalog = {
+  third: "Scan",
+  regions: ["Brain", "Neck", "Spine", "Joint", "Abdomen", "Pelvis", "Angio(MRA)"],
+  parts: {
+    Brain: ["BRAIN", "PITUITARY", "ORBIT", "IAC"],
+    Neck: ["NECK", "THYROID"],
+    Spine: ["C-SPINE", "T-SPINE", "L-SPINE", "WHOLE SPINE"],
+    Joint: ["SHOULDER", "ELBOW", "WRIST", "HIP", "KNEE", "ANKLE"],
+    Abdomen: ["LIVER", "MRCP", "KIDNEY"],
+    Pelvis: ["PELVIS", "PROSTATE", "UTERUS"],
+    "Angio(MRA)": ["BRAIN MRA", "NECK MRA"],
+  },
+  techniques: ["Non-Contrast", "Contrast (Gd)", "Pre + Post", "Diffusion (DWI)", "Perfusion"],
+};
+const CAT_US: ModCatalog = {
+  third: "Technique",
+  regions: ["Abdomen", "Pelvis", "Thyroid/Neck", "Breast", "MSK", "Vascular", "OB"],
+  parts: {
+    Abdomen: ["ABDOMEN", "LIVER", "GALLBLADDER", "KIDNEY", "APPENDIX"],
+    Pelvis: ["PELVIS", "PROSTATE", "GYN"],
+    "Thyroid/Neck": ["THYROID", "NECK", "SALIVARY GLAND"],
+    Breast: ["BREAST (BOTH)", "BREAST (RT)", "BREAST (LT)"],
+    MSK: ["SHOULDER", "KNEE", "ANKLE", "SOFT TISSUE"],
+    Vascular: ["CAROTID DOPPLER", "LOWER EXT VEIN (DVT)", "RENAL DOPPLER"],
+    OB: ["OB (FETAL)", "NT"],
+  },
+  techniques: ["B-Mode (Routine)", "Doppler", "Elastography"],
+};
+const CAT_MG: ModCatalog = {
+  third: "View",
+  regions: ["Breast"],
+  parts: { Breast: ["BREAST (BOTH)", "BREAST (RT)", "BREAST (LT)"] },
+  techniques: ["CC", "MLO", "ML", "LM", "Spot Compression", "Magnification"],
+};
+const CAT_XA: ModCatalog = {
+  third: "Projection",
+  regions: ["Head/Neck", "Coronary", "Aorta", "Peripheral"],
+  parts: {
+    "Head/Neck": ["CEREBRAL ANGIO", "CAROTID ANGIO"],
+    Coronary: ["CORONARY ANGIO (CAG)"],
+    Aorta: ["AORTOGRAPHY"],
+    Peripheral: ["UPPER EXT ANGIO", "LOWER EXT ANGIO"],
+  },
+  techniques: ["AP", "Lateral", "LAO", "RAO", "Cranial", "Caudal"],
+};
+const CAT_NM: ModCatalog = {
+  third: "Phase",
+  regions: ["Whole Body", "Bone", "Thyroid", "Renal", "Cardiac", "Lung"],
+  parts: {
+    "Whole Body": ["WHOLE BODY"],
+    Bone: ["BONE SCAN", "BONE SPECT"],
+    Thyroid: ["THYROID SCAN"],
+    Renal: ["RENAL SCAN (DTPA)", "RENAL SCAN (DMSA)"],
+    Cardiac: ["MYOCARDIAL SPECT"],
+    Lung: ["LUNG PERFUSION"],
+  },
+  techniques: ["Planar", "Dynamic", "SPECT", "Whole Body Sweep"],
+};
+const CAT_RF: ModCatalog = {
+  third: "Projection",
+  regions: ["GI", "GU", "Others"],
+  parts: {
+    GI: ["ESOPHAGOGRAPHY", "UGI", "SMALL BOWEL SERIES", "BARIUM ENEMA"],
+    GU: ["IVP (UROGRAPHY)", "VCUG", "RGP"],
+    Others: ["FISTULOGRAPHY", "T-TUBE CHOLANGIO", "HSG"],
+  },
+  techniques: ["AP", "Lateral", "Oblique", "Spot"],
+};
+const CATALOGS: Record<string, ModCatalog> = {
+  CR: CAT_RADIOGRAPHY, DX: CAT_RADIOGRAPHY, CT: CAT_CT, MR: CAT_MR,
+  US: CAT_US, MG: CAT_MG, XA: CAT_XA, NM: CAT_NM, RF: CAT_RF,
+};
+const catalogFor = (mod: string): ModCatalog => CATALOGS[mod] ?? CAT_RADIOGRAPHY;
 const MODALITIES = ["CR", "CT", "DX", "MR", "US", "MG", "XA", "NM", "RF"];
 
 type ExamItem = { region: string; body_part: string; projection: string };
@@ -421,8 +519,16 @@ export function TestgenSection({ hid }: { hid: number }) {
   const genPid = () => cfg && setPt((p) => ({ ...p, patientId: cfg.pidPrefix + genDigits(Number(cfg.pidDigits) || 6) }));
   const genAcc = () => cfg && setPt((p) => ({ ...p, accession: cfg.accPrefix + genDigits(8) }));
 
+  // Modality 변경 → 카탈로그 전환 (선택·검사 항목 초기화: 이전 Modality 부위는 무효)
+  const cat = catalogFor(pt.modality);
+  const changeModality = (m: string) => {
+    setPt((p) => ({ ...p, modality: m }));
+    setRegion(""); setBodyPart(""); setProjection("");
+    if (exams.length > 0) { setExams([]); setMsg(`Modality 변경(${m}) — 부위 목록이 바뀌어 검사 항목을 초기화했습니다`); }
+  };
+
   const addExam = () => {
-    if (!region || !bodyPart || !projection) { setMsg("⚠ Region → Body Part → Projection 을 먼저 선택하세요"); return; }
+    if (!region || !bodyPart || !projection) { setMsg(`⚠ Region → Body Part → ${cat.third} 을 먼저 선택하세요`); return; }
     if (exams.some((e) => e.body_part === bodyPart && e.projection === projection)) {
       setMsg("⚠ 이미 추가된 검사 항목입니다"); return;
     }
@@ -452,7 +558,7 @@ export function TestgenSection({ hid }: { hid: number }) {
   };
 
   if (!cfg) return <div style={card}>불러오는 중…</div>;
-  const bodyParts = region ? (BODY_PARTS[region] ?? []) : [];
+  const bodyParts = region ? (cat.parts[region] ?? []) : [];
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 700 }}>🧪 가상 환자 생성기 — 오더 입력(RIS) · 생성 오더는 MWL 조회 대상</div>
@@ -493,7 +599,7 @@ export function TestgenSection({ hid }: { hid: number }) {
               <input style={inp} value={pt.department} onChange={(e) => setPt({ ...pt, department: e.target.value })} />
             </Field>
             <Field label="Modality">
-              <select style={inp} value={pt.modality} onChange={(e) => setPt({ ...pt, modality: e.target.value })}>
+              <select style={inp} value={pt.modality} onChange={(e) => changeModality(e.target.value)}>
                 {MODALITIES.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </Field>
@@ -503,9 +609,9 @@ export function TestgenSection({ hid }: { hid: number }) {
             </div>
           </Col>
 
-          {/* ② REGION */}
-          <Col title="Region">
-            {REGIONS.map((rg) => (
+          {/* ② REGION — Modality별 카탈로그 */}
+          <Col title={`Region (${pt.modality})`}>
+            {cat.regions.map((rg) => (
               <PickBtn key={rg} label={rg} selected={region === rg}
                        onClick={() => { setRegion(rg); setBodyPart(""); }} />
             ))}
@@ -519,9 +625,9 @@ export function TestgenSection({ hid }: { hid: number }) {
             ))}
           </Col>
 
-          {/* ④ PROJECTION */}
-          <Col title="Projection">
-            {PROJECTIONS.map((pj) => (
+          {/* ④ PROJECTION/SCAN/VIEW — Modality별 3열 */}
+          <Col title={cat.third}>
+            {cat.techniques.map((pj) => (
               <PickBtn key={pj} label={pj} selected={projection === pj} onClick={() => setProjection(pj)} />
             ))}
             <button onClick={addExam} style={{ marginTop: 4, fontWeight: 700 }}>+ Add</button>
@@ -531,7 +637,7 @@ export function TestgenSection({ hid }: { hid: number }) {
           <Col title={`검사 항목 (${exams.length})`} flex={1.4}>
             {exams.length === 0 && (
               <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                추가된 검사 항목이 없습니다.<br />Region → Body Part → Projection 선택 후 [+ Add] 하세요.
+                추가된 검사 항목이 없습니다.<br />Region → Body Part → {cat.third} 선택 후 [+ Add] 하세요.
               </div>
             )}
             {exams.map((x, i) => (
