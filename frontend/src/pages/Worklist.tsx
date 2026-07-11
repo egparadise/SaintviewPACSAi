@@ -51,6 +51,7 @@ import {
   type WorklistTab,
 } from "./WorklistTree";
 
+import { MergeIcon, ReadStateIcon } from "../components/readState";
 import { GridPicker } from "../lib/GridPicker";
 import { IN_EXAM_STATUSES, IN_STATUS_MAP } from "../lib/infiConfig";
 import { screenFeatures } from "../lib/screens";
@@ -72,6 +73,9 @@ function localToRow(r: LocalStudyRow): StudyRow {
     emergency: false, critical: false, series_count: 0, instance_count: r.images,
     report_status: null, impression_preview: "", institution: "", referring_physician: "",
     memo: "", finalized_at: "", department: "", source_aet: "", bookmark: false, order_name: "",
+    // 로컬 병합 표시 — 로컬 행 응답에 merged 가 있으면 그대로 전달(없으면 undefined → 아이콘 미표시).
+    // read_state 등은 전달하지 않음(undefined → ReadStateIcon 이 unread 회색으로 표시)
+    merged: (r as LocalStudyRow & { merged?: boolean }).merged,
   };
 }
 /** LOCAL 모드에서 허용되는 툴바 액션 — 그 외 서버 액션은 비활성+툴팁 */
@@ -133,6 +137,8 @@ function StatusBadge({ status }: { status: string }) {
 
 /* ── 컬럼 정의 (F-8: 설정에서 구성 가능) ──────────── */
 export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) => React.ReactNode; width?: number }> = {
+  // 판독 상태 아이콘 (fixed/read/reading/open/unread + 보조 인디케이터) — 서버 계산 read_state 소비
+  read_state: { label: "판독", render: (r) => <ReadStateIcon row={r} /> },
   status: { label: "상태", render: (r) => <StatusBadge status={r.status} /> },
   ai: {
     label: "AI",
@@ -143,7 +149,8 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
   patient_key: { label: "ID", render: (r) => r.patient_key },
   patient_name: {
     label: "이름",
-    render: (r) => <>{r.has_key && <span title="키이미지 등록 검사">🔑 </span>}{r.patient_name}</>,
+    // 병합(Merge)된 환자는 이름 앞에 병합 아이콘 표시 (Exam Control 에서 Unmerge 가능)
+    render: (r) => <>{r.merged && <MergeIcon />}{r.has_key && <span title="키이미지 등록 검사">🔑 </span>}{r.patient_name}</>,
   },
   sex: { label: "성별", render: (r) => r.sex },
   birth_date: { label: "생년월일", render: (r) => r.birth_date },
@@ -188,17 +195,17 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
   order_name: { label: "오더명 (ORDER NAME)", render: (r) => r.order_name },
 };
 export const DEFAULT_COLUMNS = [
-  "status", "ai", "patient_key", "patient_name", "sex", "study_date",
+  "read_state", "status", "ai", "patient_key", "patient_name", "sex", "study_date",
   "modality", "body_part", "study_desc", "impression", "series_count", "instance_count", "priority",
 ];
 // Infi(INFINITT) 컬럼 순서 — 원본 Exam List: Status | ID | Name | Sex | Study Date | MOD | Srs | Img | Body | Desc | AETitle
 export const INFI_COLUMNS = [
-  "status", "patient_key", "patient_name", "sex", "study_date",
+  "read_state", "status", "patient_key", "patient_name", "sex", "study_date",
   "modality", "series_count", "instance_count", "body_part", "study_desc", "source_aet",
 ];
 // 컬럼별 폭(px) — Infi 그리드 비율 (없으면 auto)
 const INFI_COL_WIDTH: Record<string, number> = {
-  status: 74, patient_key: 96, patient_name: 130, sex: 40, study_date: 92,
+  read_state: 52, status: 74, patient_key: 96, patient_name: 130, sex: 40, study_date: 92,
   modality: 46, series_count: 42, instance_count: 46, body_part: 84, source_aet: 90,
 };
 
@@ -2297,7 +2304,13 @@ export function Worklist() {
       };
       if (v.auto_refresh_sec !== undefined) setRefreshSec(v.auto_refresh_sec);
       if (v.default_status) setFilters((f) => ({ ...f, status: v.default_status! }));
-      if (v.columns?.length) setColumns(v.columns.filter((c) => COLUMN_DEFS[c]));
+      if (v.columns?.length) {
+        // 저장된 사용자 컬럼 설정(read_state 도입 전 저장분)에 신규 판독 컬럼이 없으면
+        // 맨 앞에 가산 보정한다 — 사용자 설정 무시가 아니라 추가만
+        const cols = v.columns.filter((c) => COLUMN_DEFS[c]);
+        if (!cols.includes("read_state")) cols.unshift("read_state");
+        setColumns(cols);
+      }
       if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
       if (v.dbl_action) setDblAction(v.dbl_action);
       const po = (v as { panel_order?: { d?: string[]; e?: string[] } }).panel_order;

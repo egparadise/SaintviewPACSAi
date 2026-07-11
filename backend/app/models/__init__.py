@@ -13,9 +13,11 @@ from app.models.entities import (  # noqa: F401
     Modality,
     Order,
     Patient,
+    PatientMerge,
     Phrase,
     Report,
     ReportEmbedding,
     Series,
     Study,
+    StudyActivity,
 )

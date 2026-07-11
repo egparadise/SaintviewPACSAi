@@ -433,6 +433,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [openTabs, setOpenTabs] = useState<{ id: number; uid: string; label: string }[]>([]);
   useEffect(() => { if (openTabs.length) savePersistedTabs(openTabs); }, [openTabs]);  // ✕/전체닫기 전까지 유지
   openTabsRef.current = openTabs;  // 동기 리스너·◀▶ 기준점에서 최신값 사용
+  // 뷰어 열림 하트비트(read_state) — 열린 검사 전체를 45s 주기로 서버에 알림(서버 TTL 120s).
+  // 최신 id 목록은 ref 로 읽어 인터벌 재생성 없이 openTabs/detail 변경을 반영. 실패는 조용히 무시.
+  const hbIdsRef = useRef<number[]>([]);
+  hbIdsRef.current = [...new Set([detail.id, ...openTabs.map((t) => t.id)])];
+  useEffect(() => {
+    const beat = () => { api.activityHeartbeat(hbIdsRef.current, "viewer").catch(() => {}); };
+    beat();  // 마운트 즉시 1회
+    const timer = window.setInterval(beat, 45_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [closeDlg, setCloseDlg] = useState(false);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);

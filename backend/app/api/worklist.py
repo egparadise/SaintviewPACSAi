@@ -105,6 +105,11 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
     study = db.get(Study, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if study.report_locked:
+        # 확정 잠금(Fixed) 중 AI 재생성 차단 (SPEC §C)
+        from app.services.report_service import LOCKED_MSG
+
+        raise HTTPException(status_code=409, detail=LOCKED_MSG)
     job = queue_ai_job(db, study, kind="regenerate")
     return {"job_id": job.id, "status": job.status}
 

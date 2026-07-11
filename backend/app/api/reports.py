@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user, require_effective
 from app.db import get_db
-from app.models import Report
+from app.models import Report, Study
 from app.services.report_service import (
+    LOCKED_MSG,
     WorkflowError,
     finalize_report,
     list_reports,
@@ -83,6 +84,8 @@ def suspend(report_id: int, db: Session = Depends(get_db),
     report = db.get(Report, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+    if report.study.report_locked:
+        raise HTTPException(status_code=409, detail=LOCKED_MSG)
     if report.status == "finalized":
         raise HTTPException(status_code=409, detail="확정된 판독은 보류할 수 없습니다")
     report.status = "suspended" if report.status != "suspended" else "in_review"
@@ -258,6 +261,8 @@ def external_ai(
     study = db.get(Study, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    if study.report_locked:
+        raise HTTPException(status_code=409, detail=LOCKED_MSG)
     if not body.vendor.strip():
         raise HTTPException(status_code=400, detail="vendor는 필수입니다")
     if not (1 <= len(body.results) <= 50):
@@ -370,3 +375,47 @@ def batch_finalize(
             results.append({"report_id": rid, "ok": False, "detail": str(e)})
     ok = sum(1 for r in results if r["ok"])
     return {"finalized": ok, "total": len(results), "results": results}
+
+
+class ReportLockBody(BaseModel):
+    locked: bool
+
+
+@router.post("/studies/{study_id}/report-lock")
+def report_lock(
+    study_id: int, body: ReportLockBody, db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("report.finalize")),
+):
+    """판독 확정(Fixed) 잠금 토글 (SPEC §C) — 잠금 중엔 모든 판독 변이가 409 차단된다.
+
+    잠금은 확정(finalized)된 판독이 있는 검사만 가능. 해제는 동일 엔드포인트 locked=false.
+    """
+    from sqlalchemy import select
+
+    from app.models import AuditLog
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    # 병원 스코프(테넌시) — 시스템 관리자=전체, 그 외는 타 병원 검사 잠금/해제 불가
+    # (잠금은 차단·해제 효과가 병원 워크플로 전체에 미친다 — examctl 접근 가드와 동일 취지)
+    is_sys_admin = user.get("role") == "admin" and not user.get("hid")
+    if (not is_sys_admin and study.hospital_id is not None
+            and study.hospital_id != user.get("hid")):
+        raise HTTPException(status_code=403, detail="이 병원의 검사에 접근할 권한이 없습니다")
+    if body.locked:
+        finalized = db.execute(
+            select(Report.id).where(
+                Report.study_id == study_id, Report.status == "finalized"
+            ).limit(1)
+        ).first()
+        if not finalized:
+            raise HTTPException(status_code=400, detail="확정된 판독이 없습니다")
+    study.report_locked = body.locked
+    db.add(AuditLog(
+        action="report_lock" if body.locked else "report_unlock",
+        target_type="study", target_id=str(study_id),
+        detail={"by": user["sub"], "locked": body.locked},
+    ))
+    db.commit()
+    return {"locked": bool(study.report_locked)}

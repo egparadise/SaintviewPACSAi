@@ -259,7 +259,12 @@ def remote_report(body: RemoteReportBody, request: Request, db: Session = Depend
     if study.hospital_id is not None and study.hospital_id != hospital.id:
         raise HTTPException(status_code=403, detail="이 병원 소속 검사가 아닙니다")
 
-    from app.services.report_service import latest_report
+    from app.services.report_service import LOCKED_MSG, latest_report
+
+    # 확정 잠금(Fixed) — 내부 경로(update/finalize/external-ai 등)와 동일하게 외부
+    # 원격판독 입력도 차단(SPEC §C: 잠금 중 모든 판독 변이 409)
+    if bool(study.report_locked):
+        raise HTTPException(status_code=409, detail=LOCKED_MSG)
 
     reporter = (body.reporter or "remote")[:64]
     latest = latest_report(db, study.id)

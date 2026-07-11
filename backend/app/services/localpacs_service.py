@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import sqlite3
@@ -99,6 +100,7 @@ def _connect(root: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
     _migrate_examctl_columns(conn)
+    _migrate_merge_schema(conn)
     return conn
 
 
@@ -108,6 +110,29 @@ def _migrate_examctl_columns(conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if "deleted" not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_merge_schema(conn: sqlite3.Connection) -> None:
+    """환자 병합용 patient_merges 테이블 + studies.merged_from — idempotent 마이그레이션.
+
+    서버(examctl) 병합과 동형 의미론 — originals 는 {study_id: 환자 4필드 원값} JSON,
+    moved_study_ids 는 이동된 검사 id 목록 JSON. undone=1 이면 해제된(비활성) 병합.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS patient_merges ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " master_key TEXT NOT NULL,"
+        " master_name TEXT NOT NULL DEFAULT '',"
+        " slave_key TEXT NOT NULL,"
+        " slave_name TEXT NOT NULL DEFAULT '',"
+        " originals TEXT NOT NULL DEFAULT '{}',"
+        " moved_study_ids TEXT NOT NULL DEFAULT '[]',"
+        " created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+        " undone INTEGER NOT NULL DEFAULT 0)"
+    )
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(studies)").fetchall()}
+    if "merged_from" not in cols:
+        conn.execute("ALTER TABLE studies ADD COLUMN merged_from INTEGER")
 
 
 # ── Import ────────────────────────────────────────────────────────────────
@@ -299,6 +324,13 @@ def _study_row_to_dict(conn: sqlite3.Connection, study_id: int) -> dict:
     n_series = conn.execute(
         "SELECT COUNT(*) AS n FROM series WHERE study_id=? AND deleted=0", (study_id,)
     ).fetchone()["n"]
+    # merged = 이 검사가 병합으로 이동됨(merged_from) 또는 이 환자가 활성 병합의 master
+    merged = row["merged_from"] is not None
+    if not merged:
+        merged = conn.execute(
+            "SELECT 1 FROM patient_merges WHERE undone=0 AND master_key=? LIMIT 1",
+            (row["patient_key"],),
+        ).fetchone() is not None
     return {
         "id": row["id"],
         "study_uid": row["study_uid"],
@@ -312,6 +344,7 @@ def _study_row_to_dict(conn: sqlite3.Connection, study_id: int) -> dict:
         # 서버 examctl(StudyRow) 동형 필드 — ExamControl S/I 컬럼이 그대로 소비
         "series_count": int(n_series),
         "instance_count": int(images),
+        "merged": bool(merged),
     }
 
 
@@ -794,5 +827,162 @@ def examctl_assign(
             return {"error": "self_assign"}  # 커밋 없음 — 부작용 0
         conn.commit()
         return {"moved": moved}
+    finally:
+        conn.close()
+
+
+# ── Exam Control(로컬) — 환자 병합(Merge/Unmerge) ──────────────────────────
+# 서버 examctl merge 와 동형 의미론: Slave 환자의 전 검사를 Master 환자로 귀속.
+# 로컬 studies 는 환자 필드가 행에 인라인 → 환자 4필드 UPDATE + originals 스냅샷.
+# 파일/DICOM 원본 불변 — local.db 계층만 변경(unmerge 로 완전 원복 가능).
+def _is_unassigned_study(row: sqlite3.Row) -> bool:
+    """로컬 미배정 버킷 검사(또는 그 환자) 여부 — 병합 금지 대상."""
+    return (
+        row["study_uid"] == UNASSIGNED_STUDY_UID
+        or row["patient_key"] == UNASSIGNED_PATIENT_KEY
+    )
+
+
+def examctl_merge(root: Path, master_study_id: int, slave_study_id: int) -> dict:
+    """환자 병합 — slave 환자의 전 검사 행을 master 환자 필드로 UPDATE + 스냅샷.
+
+    반환: {"merge_id", "moved"} 또는
+    {"error": "not_found" | "same_patient" | "unassigned" | "already_merged"}.
+    """
+    conn = _connect(root)
+    try:
+        master = conn.execute(
+            "SELECT * FROM studies WHERE id=?", (master_study_id,)
+        ).fetchone()
+        slave = conn.execute(
+            "SELECT * FROM studies WHERE id=?", (slave_study_id,)
+        ).fetchone()
+        if master is None or slave is None:
+            return {"error": "not_found"}
+        if _is_unassigned_study(master) or _is_unassigned_study(slave):
+            return {"error": "unassigned"}
+        master_key = master["patient_key"]
+        slave_key = slave["patient_key"]
+        if master_key == slave_key:
+            return {"error": "same_patient"}
+        # 중복 가드 — slave 환자가 활성 병합의 master/slave 이거나 master 환자가
+        # 활성 병합의 slave 면 거부(master 가 여러 병합의 master 인 것은 허용).
+        dup = conn.execute(
+            "SELECT 1 FROM patient_merges WHERE undone=0"
+            " AND (master_key=? OR slave_key=? OR slave_key=?) LIMIT 1",
+            (slave_key, slave_key, master_key),
+        ).fetchone()
+        if dup is not None:
+            return {"error": "already_merged"}
+        # slave 환자의 전 검사 — 원값 스냅샷 후 master 환자 4필드로 UPDATE
+        targets = conn.execute(
+            "SELECT * FROM studies WHERE patient_key=?", (slave_key,)
+        ).fetchall()
+        originals = {
+            str(r["id"]): {
+                "patient_key": r["patient_key"],
+                "patient_name": r["patient_name"],
+                "sex": r["sex"],
+                "birth_date": r["birth_date"],
+            }
+            for r in targets
+        }
+        moved_ids = [int(r["id"]) for r in targets]
+        cur = conn.execute(
+            "INSERT INTO patient_merges(master_key, master_name, slave_key, slave_name,"
+            " originals, moved_study_ids) VALUES(?,?,?,?,?,?)",
+            (
+                master_key,
+                master["patient_name"],
+                slave_key,
+                slave["patient_name"],
+                json.dumps(originals, ensure_ascii=False),
+                json.dumps(moved_ids),
+            ),
+        )
+        merge_id = int(cur.lastrowid)
+        for sid in moved_ids:
+            conn.execute(
+                "UPDATE studies SET patient_key=?, patient_name=?, sex=?, birth_date=?,"
+                " merged_from=? WHERE id=?",
+                (master_key, master["patient_name"], master["sex"],
+                 master["birth_date"], merge_id, sid),
+            )
+        conn.commit()
+        return {"merge_id": merge_id, "moved": len(moved_ids)}
+    finally:
+        conn.close()
+
+
+def examctl_unmerge(
+    root: Path, study_id: int | None = None, merge_id: int | None = None
+) -> dict:
+    """병합 해제 — originals 스냅샷으로 환자 필드 원복 + merged_from=NULL + undone=1.
+
+    study_id 는 활성 병합의 master 환자 검사 또는 이동된(moved) 검사로 병합을 찾는다.
+    반환: {"restored", "merge_id"} 또는 {"error": "not_found"}.
+    """
+    conn = _connect(root)
+    try:
+        merge = None
+        if merge_id is not None:
+            merge = conn.execute(
+                "SELECT * FROM patient_merges WHERE id=? AND undone=0", (merge_id,)
+            ).fetchone()
+        elif study_id is not None:
+            st = conn.execute(
+                "SELECT * FROM studies WHERE id=?", (study_id,)
+            ).fetchone()
+            if st is not None:
+                if st["merged_from"] is not None:  # 이동된 검사 → 그 병합
+                    merge = conn.execute(
+                        "SELECT * FROM patient_merges WHERE id=? AND undone=0",
+                        (st["merged_from"],),
+                    ).fetchone()
+                if merge is None:  # master 환자의 검사 → 최신 활성 병합
+                    merge = conn.execute(
+                        "SELECT * FROM patient_merges WHERE undone=0 AND master_key=?"
+                        " ORDER BY id DESC LIMIT 1",
+                        (st["patient_key"],),
+                    ).fetchone()
+        if merge is None:
+            return {"error": "not_found"}
+        originals = json.loads(merge["originals"] or "{}")
+        restored = 0
+        for sid, orig in originals.items():
+            restored += conn.execute(
+                "UPDATE studies SET patient_key=?, patient_name=?, sex=?, birth_date=?,"
+                " merged_from=NULL WHERE id=?",
+                (
+                    orig["patient_key"],
+                    orig["patient_name"],
+                    orig.get("sex", ""),
+                    orig.get("birth_date", ""),
+                    int(sid),
+                ),
+            ).rowcount
+        conn.execute("UPDATE patient_merges SET undone=1 WHERE id=?", (merge["id"],))
+        conn.commit()
+        return {"restored": restored, "merge_id": int(merge["id"])}
+    finally:
+        conn.close()
+
+
+def examctl_merges(root: Path) -> list[dict]:
+    """활성(미해제) 병합 목록 — 서버 GET /api/examctl/merges 와 동형 항목."""
+    conn = _connect(root)
+    try:
+        items: list[dict] = []
+        for m in conn.execute(
+            "SELECT * FROM patient_merges WHERE undone=0 ORDER BY id DESC"
+        ).fetchall():
+            items.append({
+                "id": m["id"],
+                "master": {"patient_key": m["master_key"], "patient_name": m["master_name"]},
+                "slave": {"patient_key": m["slave_key"], "patient_name": m["slave_name"]},
+                "moved_study_ids": json.loads(m["moved_study_ids"] or "[]"),
+                "created_at": m["created_at"],
+            })
+        return items
     finally:
         conn.close()

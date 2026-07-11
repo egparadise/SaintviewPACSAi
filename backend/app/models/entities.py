@@ -85,6 +85,10 @@ class Study(Base):
     key_images: Mapped[list] = mapped_column(JSON, default=list)
     series_count: Mapped[int] = mapped_column(Integer, default=0)
     instance_count: Mapped[int] = mapped_column(Integer, default=0)
+    # QC — 환자 병합/판독 잠금. merged_from: 병합으로 이동된 검사가 가리키는 patient_merges.id
+    # (기존 행은 ALTER 추가로 NULL — 소비처는 bool 강제 변환할 것)
+    merged_from: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    report_locked: Mapped[bool] = mapped_column(Boolean, default=False)  # 판독 확정(잠금) — 변경 금지
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     patient: Mapped[Patient] = relationship(back_populates="studies")
@@ -460,4 +464,53 @@ class AppSetting(Base):
     value: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class PatientMerge(Base):
+    """환자 병합(Merge) 기록 — Exam Control QC.
+
+    Master/Slave 환자를 지정해 Slave 의 전 검사를 Master 환자로 귀속한다
+    (앱 DB 계층만 — Orthanc 원본·DICOM 태그 불변, examctl assign 과 동일 원칙).
+    이동된 검사에는 Study.merged_from=이 행 id 가 찍히고, 워크리스트/Exam Control 은
+    병합 아이콘을 표시한다. Unmerge 시 moved_study_ids 를 slave 환자로 원복한다.
+    """
+
+    __tablename__ = "patient_merges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hospital_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hospitals.id"), nullable=True, index=True
+    )
+    master_patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
+    slave_patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
+    # Unmerge 원복용: 이동한 slave 검사 id 목록 + 표시용 환자 스냅샷
+    moved_study_ids: Mapped[list] = mapped_column(JSON, default=list)
+    master_info: Mapped[dict] = mapped_column(JSON, default=dict)  # {patient_key, patient_name, sex, birth_date}
+    slave_info: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StudyActivity(Base):
+    """검사 활동 하트비트 — 뷰어 열림(viewer)/판독창 작업(report) 실시간 신호.
+
+    (study_id, kind, username) 당 1행 upsert. TTL(120s) 내 last_seen 이면 활성으로 본다.
+    typing=True 는 판독문 입력 진행 중(최근 키 입력, TTL 90s). 워크리스트 read_state
+    (unread/open/reading/read/fixed) 계산의 실시간 근거.
+    """
+
+    __tablename__ = "study_activity"
+    __table_args__ = (
+        UniqueConstraint("study_id", "kind", "username", name="uq_activity_study_kind_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    study_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="viewer")  # viewer | report
+    username: Mapped[str] = mapped_column(String(64), default="")
+    typing: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
     )

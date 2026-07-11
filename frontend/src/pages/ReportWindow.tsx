@@ -93,6 +93,42 @@ export function ReportWindow() {
   const finalized = report?.status === "finalized";
   const sig = (report?.diff_metrics as { signature?: { name: string; license_no: string; signed_at: string } })?.signature;
 
+  // ── 판독 확정(Fixed) 잠금 — study.report_locked. 서버 409 가 최종 방어선, UI 는 선반영(UX) ──
+  const [locked, setLocked] = useState(false);
+  useEffect(() => { setLocked(!!detail?.report_locked); }, [detail?.id, detail?.report_locked]);
+  const LOCK_TIP = "판독 확정(잠금) 상태 — 변경할 수 없습니다";
+  // 다른 창(뷰어 도크 등)에서 잠금이 바뀌면 detail 스냅샷이 stale — 저장/토글 실패 시 재조회로 동기화
+  const syncLock = async () => {
+    if (!detail) return;
+    try { setLocked(!!(await api.study(detail.id)).report_locked); } catch { /* 조회 실패 → 현 상태 유지 */ }
+  };
+  const toggleLock = async (checked: boolean) => {
+    if (!detail) return;
+    try {
+      const r = await api.reportLock(detail.id, checked);   // 성공 후에만 반영(실패 시 체크 원복)
+      setLocked(r.locked);
+      setMsg(r.locked ? "판독 확정 잠금 설정됨" : "판독 확정 잠금 해제됨");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "잠금 변경 실패");
+      void syncLock();   // 실패(409/403 등) — 서버 기준 잠금 상태로 재동기화
+    }
+  };
+
+  // ── 판독 하트비트(read_state) — 45s 주기, typing=마지막 에디터 입력 45s 이내. 실패는 조용히 무시 ──
+  const lastTypedRef = useRef(0);
+  const hbStudyId = detail?.id ?? 0;
+  useEffect(() => {
+    if (!hbStudyId) return;
+    lastTypedRef.current = 0;   // 검사 전환 시 이전 검사 typing 상태 미전파
+    const beat = () => {
+      api.activityHeartbeat([hbStudyId], "report", Date.now() - lastTypedRef.current < 45_000)
+        .catch(() => {});
+    };
+    beat();  // 마운트/검사 전환 즉시 1회
+    const timer = window.setInterval(beat, 45_000);
+    return () => window.clearInterval(timer);
+  }, [hbStudyId]);
+
   const initText = (r: Report | null) => {
     setHistView(null);
     setTouched(false);
@@ -203,6 +239,9 @@ export function ReportWindow() {
   };
 
   const save = async () => {
+    if (locked) { setMsg(LOCK_TIP); return; }   // 확정 잠금 — 단축키(Ctrl+S) 경로 포함 차단
+    // 확정본 — Save 버튼 disabled(finalized) 조건과 단축키 경로 일치(서버 400 alert 방지)
+    if (finalized) { setMsg("확정된 판독입니다 — 수정하려면 새 버전(addendum)을 생성하세요"); return; }
     const sr = buildSr();
     if (!report || !sr || !detail) return;
     try {
@@ -212,27 +251,35 @@ export function ReportWindow() {
       setReports(r.items);
       setTouched(false);
       if (rdOpts.save_alert) alert("리포트가 저장되었습니다"); else setMsg("저장됨");
-    } catch (e) { alert(e instanceof Error ? e.message : "저장 실패"); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 실패");
+      void syncLock();   // 다른 창에서 잠금 변경(409) 등 — 서버 기준 잠금 상태 재동기화
+    }
   };
 
   const approve = async () => {
+    if (locked) { setMsg(LOCK_TIP); return; }   // 확정 잠금 — 단축키(Ctrl+Shift+A) 경로 포함 차단
+    // 확정본 — Approve 버튼 disabled(finalized) 조건과 단축키 경로 일치
+    if (finalized) { setMsg("이미 확정된 판독입니다"); return; }
     const sr = buildSr();
     if (!report || !sr || !detail) return;
     if (!window.confirm("판독을 확정(승인·서명)합니다. 확정 후 수정할 수 없습니다.")) return;
     try {
-      if (!finalized) {
-        await api.updateReport(report.id, sr);
-        await api.finalizeReport(report.id);
-      }
+      await api.updateReport(report.id, sr);
+      await api.finalizeReport(report.id);
       const r = await api.reports(detail.id);
       setReports(r.items);
       initText(r.items[0] ?? null);
       setMsg("확정(서명) 완료");
       if (rdOpts.open_next_after_save && navIdx < navList.length - 1) void nav(1);  // 저장 후 다음 레포트 열기
-    } catch (e) { alert(e instanceof Error ? e.message : "승인 실패"); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "승인 실패");
+      void syncLock();   // 다른 창에서 잠금 변경(409) 등 — 서버 기준 잠금 상태 재동기화
+    }
   };
 
   const insertPhrase = (p: PhraseRow) => {
+    if (locked) { setMsg(LOCK_TIP); return; }   // 확정 잠금 — 상용구 삽입 차단
     const join = (cur: string, add: string) => !add ? cur : (cur ? `${cur}\n${add}` : add);
     if (p.reading_text) { setReading((r) => join(r, p.reading_text)); setTouched(true); }
     if (p.text) setConclusion((c) => join(c, p.text));
@@ -242,6 +289,7 @@ export function ReportWindow() {
   const [appliedTpl, setAppliedTpl] = useState<number | null>(null);
   const tplBackup = useRef<{ reading: string; conclusion: string } | null>(null);
   const toggleTemplate = (p: PhraseRow) => {
+    if (locked) { setMsg(LOCK_TIP); return; }   // 확정 잠금 — 템플릿 적용/해제 차단
     if (appliedTpl === p.id) {
       // 체크 해제 — 적용 전 내용 복원
       if (tplBackup.current) {
@@ -447,12 +495,25 @@ export function ReportWindow() {
                     style={{ padding: "1px 10px" }}
                     disabled={navTargetIdx(1) < 0} onClick={() => void nav(1)}>▶</button>
             <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>Reset</button>
-            <button className="primary" title={`저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
-                    disabled={!report || finalized} onClick={() => void save()}>Save</button>
-            <button title={`승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
-                    style={{ padding: "2px 12px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4 }}
-                    disabled={!report || finalized} onClick={() => void approve()}>Approve</button>
+            <button className="primary" title={locked ? LOCK_TIP : `저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
+                    disabled={!report || finalized || locked} onClick={() => void save()}>Save</button>
+            <button title={locked ? LOCK_TIP : `승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
+                    style={{ padding: "2px 12px", background: "var(--stat-final)", color: "#fff", border: "none", borderRadius: 4,
+                             opacity: !report || finalized || locked ? 0.5 : 1 }}
+                    disabled={!report || finalized || locked} onClick={() => void approve()}>Approve</button>
           </div>
+          {/* 확정(Fixed) 잠금 — finalized 리포트가 있을 때만 노출. 잠금 중 판독 변경 전면 차단(§C) */}
+          {finalized && (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "5px 12px",
+                          borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+              <label title="잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다"
+                     style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />
+                🔒 판독 확정(잠금) — 변경 금지
+              </label>
+              {locked && <span style={{ color: "var(--text-secondary)" }}>잠금 상태 — 판독을 변경할 수 없습니다</span>}
+            </div>
+          )}
           {!!rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
             <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 12px", fontWeight: 700 }}>
               ⚠ CVR Notice — CRITICAL 소견 포함 검사
@@ -468,19 +529,21 @@ export function ReportWindow() {
               <span><b>Report Day:</b> <input readOnly value={detail.study_date} style={{ ...inStyle, width: 120, display: "inline-block" }} /></span>
             </div>
             <div style={labelStyle}>Hospital Comment</div>
-            <input value={hosp} disabled={finalized} placeholder="병원 코멘트 (저장 시 함께 기록)"
+            <input value={hosp} disabled={finalized || locked} placeholder="병원 코멘트 (저장 시 함께 기록)"
                    onChange={(e) => setHosp(e.target.value)} style={inStyle} />
             <div style={labelStyle}>Study/Req Comment</div>
             <input readOnly value={detail.clinical_info ?? ""} style={inStyle} />
             <div style={labelStyle}>Refer Comment</div>
             <input readOnly value={detail.referring_physician ?? ""} style={inStyle} />
             <div style={labelStyle}>Reading</div>
-            <textarea value={reading} placeholder="판독 소견을 입력하세요" disabled={finalized}
-                      onChange={(e) => { setReading(e.target.value); setTouched(true); }}
+            <textarea value={reading} placeholder="판독 소견을 입력하세요" disabled={finalized || locked}
+                      title={locked ? LOCK_TIP : undefined}
+                      onChange={(e) => { setReading(e.target.value); setTouched(true); lastTypedRef.current = Date.now(); }}
                       style={{ ...taStyle, minHeight: 140, flex: 1.2 }} />
             <div style={labelStyle}>Conclusion</div>
-            <textarea value={conclusion} placeholder="결론을 입력하세요" disabled={finalized}
-                      onChange={(e) => setConclusion(e.target.value)}
+            <textarea value={conclusion} placeholder="결론을 입력하세요" disabled={finalized || locked}
+                      title={locked ? LOCK_TIP : undefined}
+                      onChange={(e) => { setConclusion(e.target.value); lastTypedRef.current = Date.now(); }}
                       style={{ ...taStyle, minHeight: 110, flex: 1 }} />
             {sig && (
               <div style={{ fontSize: 12.5, color: "var(--stat-final)" }}>

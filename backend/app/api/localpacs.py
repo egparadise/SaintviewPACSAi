@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user
+from app.api.deps import current_user, require_effective
 from app.db import get_db
 from app.services import localpacs_service as svc
 from app.services.settings_service import get_setting
@@ -111,6 +111,18 @@ class SelectionBody(BaseModel):
 
 class AssignBody(SelectionBody):
     target_study_id: int
+
+
+class MergeBody(BaseModel):
+    """환자 병합 요청 — 검사 id 로 받고 환자를 역해석(서버 merge 와 동형)."""
+    master_study_id: int
+    slave_study_id: int
+
+
+class UnmergeBody(BaseModel):
+    """병합 해제 요청 — study_id(이동/마스터 검사) 또는 merge_id 중 하나."""
+    study_id: int | None = None
+    merge_id: int | None = None
 
 
 def _require_selection(body: SelectionBody) -> None:
@@ -226,3 +238,68 @@ def local_examctl_assign(
     _audit_local(db, user, "local_examctl_assign", body,
                  {**result, "target_study_id": body.target_study_id})
     return result
+
+
+@router.post("/examctl/merge")
+def local_examctl_merge(
+    body: MergeBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("study.match")),
+):
+    """환자 병합 — Slave 환자의 전 검사를 Master 환자로 귀속(local.db 계층만, 원본 불변).
+
+    권한: 서버 병합(study.match)과 동일 — 환자 귀속 변경은 모드와 무관하게 같은 요건.
+    """
+    result = svc.examctl_merge(_root(db), body.master_study_id, body.slave_study_id)
+    err = result.get("error")
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="병합 대상 검사를 찾을 수 없습니다")
+    if err == "same_patient":
+        raise HTTPException(
+            status_code=400, detail="동일 환자입니다 — 서로 다른 환자의 검사를 선택하세요"
+        )
+    if err == "unassigned":
+        raise HTTPException(
+            status_code=400, detail="미배정 보관함(UNASSIGNED)은 병합할 수 없습니다"
+        )
+    if err == "already_merged":
+        raise HTTPException(
+            status_code=400,
+            detail="이미 활성 병합에 관여된 환자입니다 — 먼저 병합을 해제하세요",
+        )
+    _audit_local(db, user, "local_examctl_merge", SelectionBody(), {
+        **result,
+        "master_study_id": body.master_study_id,
+        "slave_study_id": body.slave_study_id,
+    })
+    return result
+
+
+@router.post("/examctl/unmerge")
+def local_examctl_unmerge(
+    body: UnmergeBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("study.unmatch")),
+):
+    """병합 해제 — originals 스냅샷으로 환자 필드 원복(서버 unmerge 와 동형).
+
+    권한: 서버 해제(study.unmatch)와 동일.
+    """
+    if body.study_id is None and body.merge_id is None:
+        raise HTTPException(status_code=400, detail="study_id 또는 merge_id 를 지정하세요")
+    result = svc.examctl_unmerge(
+        _root(db), study_id=body.study_id, merge_id=body.merge_id
+    )
+    if result.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="해제할 병합을 찾을 수 없습니다")
+    _audit_local(db, user, "local_examctl_unmerge", SelectionBody(), {
+        **result,
+        "study_id": body.study_id,
+    })
+    return result
+
+
+@router.get("/examctl/merges")
+def local_examctl_merges(db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """활성(미해제) 병합 목록 — Unmerge 대상 선택용."""
+    return {"items": svc.examctl_merges(_root(db))}

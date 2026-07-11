@@ -156,6 +156,14 @@ export interface StudyRow {
   source_aet: string;
   bookmark: boolean;
   order_name: string;
+  // QC/판독 상태 (read_state 아이콘 — 서버 계산, 워크리스트 '판독' 컬럼)
+  read_state?: "fixed" | "read" | "reading" | "open" | "unread";
+  merged?: boolean;          // 병합(Merge)된 환자의 검사 — 이름 앞 병합 아이콘
+  report_locked?: boolean;   // 판독 확정(잠금) — 변경 금지 (🔒)
+  has_report_text?: boolean; // DB에 판독문 존재
+  report_typing?: boolean;   // 판독문 입력 진행 중(실시간 하트비트)
+  viewer_open?: boolean;     // 뷰어에 열려 있음
+  image_changed?: boolean;   // 최초 상태와 다름(주석/키이미지/QC 변경)
 }
 
 export interface RelatedExam {
@@ -581,6 +589,33 @@ export const api = {
   /** 대상 검사로 이동(재귀속) — 앱 DB 계층만 변경, Orthanc 원본·DICOM 태그 불변 */
   examctlAssign: (body: ExamCtlUids & { target_study_id: number }) =>
     req<{ moved: number }>("/api/examctl/assign", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── 환자 병합 (Exam Control Merge — 레인 F/B 공통 계약) ──
+  /** 환자 병합 — Slave 환자의 전 검사를 Master 환자로 귀속(앱 DB 계층, Orthanc 불변) */
+  examctlMerge: (body: { master_study_id: number; slave_study_id: number }) =>
+    req<MergeResp>("/api/examctl/merge", { method: "POST", body: JSON.stringify(body) }),
+  /** 병합 해제 — study_id(병합 환자의 아무 검사) 또는 merge_id 로 원상 복구 */
+  examctlUnmerge: (body: { study_id?: number; merge_id?: number }) =>
+    req<{ restored: number }>("/api/examctl/unmerge", { method: "POST", body: JSON.stringify(body) }),
+  /** 활성(미해제) 병합 목록 */
+  examctlMerges: (hid?: number) =>
+    req<{ items: MergeItem[] }>(`/api/examctl/merges${hid ? `?hid=${hid}` : ""}`),
+  /** 로컬 환자 병합 — 서버 merge 와 동형 (local.db) */
+  localExamctlMerge: (body: { master_study_id: number; slave_study_id: number }) =>
+    req<MergeResp>("/api/local/examctl/merge", { method: "POST", body: JSON.stringify(body) }),
+  localExamctlUnmerge: (body: { study_id?: number; merge_id?: number }) =>
+    req<{ restored: number }>("/api/local/examctl/unmerge", { method: "POST", body: JSON.stringify(body) }),
+  localExamctlMerges: () => req<{ items: MergeItem[] }>("/api/local/examctl/merges"),
+
+  // ── 판독 상태 (read_state — 하트비트/확정 잠금) ──
+  /** 검사 활동 하트비트 — 뷰어 열림(viewer)/판독 작업(report). 45s 주기 권장, 서버 TTL 120s */
+  activityHeartbeat: (study_ids: number[], kind: "viewer" | "report", typing = false) =>
+    req<{ ok: boolean }>("/api/activity/heartbeat", {
+      method: "POST", body: JSON.stringify({ study_ids, kind, typing }) }),
+  /** 판독 확정(잠금) 토글 — 잠금 중 판독 수정·확정·재생성·병합 전부 409 */
+  reportLock: (studyId: number, locked: boolean) =>
+    req<{ locked: boolean }>(`/api/studies/${studyId}/report-lock`, {
+      method: "POST", body: JSON.stringify({ locked }) }),
 };
 
 // ── Exam Control 타입 (레인 F/B 공통 계약 /api/examctl) ──
@@ -616,6 +651,15 @@ export interface ExamCtlTrashItem {
   instance_number?: number;
   deleted_at?: string;
 }
+/** 환자 병합 항목 — master/slave 환자 스냅샷 (Unmerge 대상 선택용) */
+export interface MergeItem {
+  id: number;
+  master: { patient_key: string; patient_name: string };
+  slave: { patient_key: string; patient_name: string };
+  moved_study_ids: number[];
+  created_at: string;
+}
+export interface MergeResp { merge_id: number; moved: number }
 
 // ── Local Server 모드 타입 (레인 F/B 공통 계약) ──
 export interface LocalStudyRow {

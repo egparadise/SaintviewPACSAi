@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Instance, Patient, Series, Study
+from app.models import Instance, Patient, PatientMerge, Series, Study
 
 UNASSIGNED_PATIENT_KEY = "UNASSIGNED"
 UNASSIGNED_DESC = "미배정 보관함"
@@ -431,6 +431,155 @@ def unassign_items(
         b = _bucket_for(src_series.study_id)
         moved += move_items(db, b, [], [i])
     return moved, first_bucket_id, list(buckets.values())
+
+
+# ════════════════════════════════ 환자 병합(Merge) / 원복(Unmerge) ════════════════════════════════
+def _patient_snapshot(p: Patient) -> dict:
+    """Unmerge 원복·표시용 환자 스냅샷 — patient_name 은 원본 필드 name_masked(_study_row 동일 소스)."""
+    return {
+        "patient_key": p.patient_key,
+        "patient_name": p.name_masked,
+        "sex": p.sex,
+        "birth_date": p.birth_date,
+    }
+
+
+def merge_patients(
+    db: Session, master_study_id: int, slave_study_id: int, username: str = ""
+) -> tuple[PatientMerge, int]:
+    """환자 병합 — Slave 환자의 전 검사를 Master 환자로 귀속(앱 DB 계층만, DICOM 태그 불변).
+
+    이동된 검사에는 merged_from=병합 id 를 찍는다(Unmerge 원복 근거).
+    가드 실패는 ValueError(→400), 대상 미존재는 LookupError(→404)로 전파하고,
+    커밋은 호출부 몫(감사 로그와 원자 커밋). 반환: (병합 행, 이동 검사 수).
+    """
+    master_study = db.get(Study, master_study_id)
+    slave_study = db.get(Study, slave_study_id)
+    if master_study is None or slave_study is None:
+        raise LookupError("검사를 찾을 수 없습니다")
+    master_p = db.get(Patient, master_study.patient_id)
+    slave_p = db.get(Patient, slave_study.patient_id)
+    if master_p is None or slave_p is None:
+        raise LookupError("환자를 찾을 수 없습니다")
+
+    # ── 가드(§A): 동일 환자 / UNASSIGNED 버킷 / 활성 병합 충돌 ──
+    if master_p.id == slave_p.id:
+        raise ValueError("동일 환자입니다 — 서로 다른 환자의 검사를 선택하세요")
+    if UNASSIGNED_PATIENT_KEY in (master_p.patient_key, slave_p.patient_key):
+        raise ValueError("미배정(UNASSIGNED) 보관함 검사는 병합할 수 없습니다")
+    active = db.execute(
+        select(PatientMerge).where(PatientMerge.undone_at.is_(None))
+    ).scalars().all()
+    for m in active:
+        # Slave 가 이미 활성 병합의 master/slave 면 차단(체인 병합 금지)
+        if slave_p.id in (m.master_patient_id, m.slave_patient_id):
+            raise ValueError(
+                "대상(Slave) 환자가 이미 활성 병합에 포함되어 있습니다 — 먼저 Unmerge 하세요")
+        # Master 가 다른 활성 병합의 slave 면 차단(master 가 여러 병합의 master 인 것은 허용)
+        if master_p.id == m.slave_patient_id:
+            raise ValueError(
+                "Master 환자가 이미 다른 병합의 Slave 입니다 — 먼저 Unmerge 하세요")
+
+    merge = PatientMerge(
+        hospital_id=master_study.hospital_id,
+        master_patient_id=master_p.id,
+        slave_patient_id=slave_p.id,
+        master_info=_patient_snapshot(master_p),
+        slave_info=_patient_snapshot(slave_p),
+        created_by=username,
+    )
+    db.add(merge)
+    db.flush()  # merge.id 확보 — 이동 검사의 merged_from 에 필요
+    # 병원 필터(테넌시): patient_key 는 전역 UNIQUE 라 두 병원이 같은 PatientID 로
+    # 한 Patient 행을 공유할 수 있다 — API 병원 가드(선택 두 검사만 검사)를 우회해
+    # 타 병원 검사가 함께 이동하지 않도록 병합 병원(master 검사 병원) 검사만 이동한다.
+    hospital_cond = (
+        Study.hospital_id == master_study.hospital_id
+        if master_study.hospital_id is not None
+        else Study.hospital_id.is_(None)
+    )
+    moved_ids: list[int] = []
+    for st in db.execute(
+        select(Study).where(Study.patient_id == slave_p.id, hospital_cond)
+    ).scalars():
+        st.patient_id = master_p.id
+        st.merged_from = merge.id
+        moved_ids.append(st.id)
+    merge.moved_study_ids = moved_ids
+    return merge, len(moved_ids)
+
+
+def find_active_merge(
+    db: Session, study_id: int | None = None, merge_id: int | None = None
+) -> PatientMerge | None:
+    """활성(undone_at IS NULL) 병합 해석 — merge_id 직접 또는 study_id 역해석.
+
+    study_id 는 ① 이동된 검사(merged_from) ② master 환자의 검사(여러 병합이면
+    최신 병합 우선) 순으로 찾는다. 못 찾으면 None(호출부가 404 처리).
+    """
+    if merge_id is not None:
+        m = db.get(PatientMerge, merge_id)
+        return m if m is not None and m.undone_at is None else None
+    if study_id is None:
+        return None
+    st = db.get(Study, study_id)
+    if st is None:
+        return None
+    if st.merged_from is not None:
+        m = db.get(PatientMerge, st.merged_from)
+        if m is not None and m.undone_at is None:
+            return m
+    return db.execute(
+        select(PatientMerge)
+        .where(
+            PatientMerge.undone_at.is_(None),
+            PatientMerge.master_patient_id == st.patient_id,
+        )
+        .order_by(PatientMerge.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def unmerge_patients(
+    db: Session, study_id: int | None = None, merge_id: int | None = None
+) -> tuple[PatientMerge, int]:
+    """병합 원복(Unmerge) — moved_study_ids 를 slave 환자로 되돌리고 병합을 종료.
+
+    활성 병합을 못 찾으면 LookupError(→404). 커밋은 호출부 몫.
+    반환: (종료된 병합 행, 원복 검사 수).
+    """
+    merge = find_active_merge(db, study_id=study_id, merge_id=merge_id)
+    if merge is None:
+        raise LookupError("활성 병합을 찾을 수 없습니다")
+    restored = 0
+    for sid in merge.moved_study_ids or []:
+        st = db.get(Study, sid)
+        # merged_from 이 이 병합을 가리키는 검사만 원복(방어적 — 상태 불일치 시 건너뜀)
+        if st is not None and st.merged_from == merge.id:
+            st.patient_id = merge.slave_patient_id
+            st.merged_from = None
+            restored += 1
+    merge.undone_at = _utcnow()
+    return merge, restored
+
+
+def list_merges(db: Session, hospital_id: int | None = None) -> list[dict]:
+    """활성 병합 목록 — master/slave 환자 스냅샷 + 이동 검사 id(최신 우선)."""
+    q = select(PatientMerge).where(PatientMerge.undone_at.is_(None))
+    if hospital_id is not None:
+        q = q.where(PatientMerge.hospital_id == hospital_id)
+    items: list[dict] = []
+    for m in db.execute(q.order_by(PatientMerge.id.desc())).scalars():
+        items.append({
+            "id": m.id,
+            "hospital_id": m.hospital_id,
+            "master": dict(m.master_info or {}),
+            "slave": dict(m.slave_info or {}),
+            "moved_study_ids": list(m.moved_study_ids or []),
+            "created_by": m.created_by,
+            "created_at": m.created_at.isoformat() if m.created_at else "",
+        })
+    return items
 
 
 # ════════════════════════════════ 뷰어/일반 조회 오버레이 ════════════════════════════════

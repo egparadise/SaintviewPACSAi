@@ -137,6 +137,31 @@ def test_remote_report_creates_draft(client, db):
         assert len(hist) == 1
 
 
+def test_remote_report_locked_409(client, db):
+    """확정 잠금(Fixed) 검사 — 외부 원격판독 입력도 내부 경로와 동일하게 409 차단 (SPEC §C)."""
+    h = _mk_hospital(db, "RMT5")
+    set_hospital_setting(db, h.id, "remote.reading", {"enabled": True, "api_key": "secret-key-5"})
+    study = _mk_study(db, h, "ACC-RMT-LOCK")
+    study.report_locked = True
+    db.commit()
+    r = client.post("/api/hl7/remote-report", json={
+        "hospital_key": "secret-key-5", "accession": "ACC-RMT-LOCK", "reading": "잠금 중 입력",
+    })
+    assert r.status_code == 409, r.text
+    assert "잠금" in r.json()["detail"]
+    # 잠금 중 리포트 미생성
+    with SessionLocal() as db2:
+        reps = db2.execute(select(Report).where(Report.study_id == study.id)).scalars().all()
+        assert reps == []
+    # 잠금 해제 후 정상 입력
+    study.report_locked = False
+    db.commit()
+    r = client.post("/api/hl7/remote-report", json={
+        "hospital_key": "secret-key-5", "accession": "ACC-RMT-LOCK", "reading": "해제 후 판독",
+    })
+    assert r.status_code == 200, r.text
+
+
 def test_remote_report_disabled_403(client, db):
     h = _mk_hospital(db, "RMT3")
     set_hospital_setting(db, h.id, "remote.reading", {"enabled": False, "api_key": "secret-key-3"})

@@ -344,6 +344,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   const tilesOf = (p?: Pane) => (p ? p.il.r * p.il.c : 1);
 
+  // 뷰어 열림 하트비트(read_state) — 열려 있는 검사 전체를 45s 주기로 서버에 알림(서버 TTL 120s).
+  // 최신 id 목록은 ref 로 읽어 인터벌 재생성 없이 exams/detail 변경을 반영. 실패는 조용히 무시.
+  const hbIdsRef = useRef<number[]>([]);
+  hbIdsRef.current = [...new Set([detail.id, ...exams.map((e) => e.d.id)])];
+  useEffect(() => {
+    const beat = () => { api.activityHeartbeat(hbIdsRef.current, "viewer").catch(() => {}); };
+    beat();  // 마운트 즉시 1회
+    const timer = window.setInterval(beat, 45_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const EXAMS_KEY = "sv_infi_exams";
   useEffect(() => {
     let ids: number[] = [];

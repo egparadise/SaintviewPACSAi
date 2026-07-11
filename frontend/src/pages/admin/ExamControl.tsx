@@ -9,8 +9,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api, localRendered,
-  type ExamCtlImage, type ExamCtlSeries, type ExamCtlTrashItem, type ExamCtlUids, type StudyRow,
+  type ExamCtlImage, type ExamCtlSeries, type ExamCtlTrashItem, type ExamCtlUids,
+  type MergeItem, type MergeResp, type StudyRow,
 } from "../../api";
+import { MergeIcon } from "../../components/readState";
 import { clampSz } from "../../lib/Splitter";
 
 // HospitalAdmin 과 동일한 다크 테마 카드/입력 스타일 (해당 상수는 미export — 로컬 유지)
@@ -116,6 +118,10 @@ interface ExamDataSource {
   trash: () => Promise<{ items: ExamCtlTrashItem[] }>;
   unassign: (body: ExamCtlUids) => Promise<{ moved: number; bucket_study_id: number }>;
   assign: (body: ExamCtlUids & { target_study_id: number }) => Promise<{ moved: number }>;
+  // 환자 병합 — Slave 환자의 전 검사를 Master 환자로 귀속 (앱 DB/local.db 계층만, DICOM 불변)
+  merge: (body: { master_study_id: number; slave_study_id: number }) => Promise<MergeResp>;
+  unmerge: (body: { study_id?: number; merge_id?: number }) => Promise<{ restored: number }>;
+  merges: () => Promise<{ items: MergeItem[] }>;
 }
 
 function makeDataSource(source: "server" | "local", hid?: number): ExamDataSource {
@@ -131,6 +137,9 @@ function makeDataSource(source: "server" | "local", hid?: number): ExamDataSourc
       trash: () => api.localExamctlTrash(),
       unassign: (b) => api.localExamctlUnassign(b),
       assign: (b) => api.localExamctlAssign(b),
+      merge: (b) => api.localExamctlMerge(b),
+      unmerge: (b) => api.localExamctlUnmerge(b),
+      merges: () => api.localExamctlMerges(),
     };
   }
   return {
@@ -141,6 +150,9 @@ function makeDataSource(source: "server" | "local", hid?: number): ExamDataSourc
     trash: () => api.examctlTrash(hid),
     unassign: (b) => api.examctlUnassign(b),
     assign: (b) => api.examctlAssign(b),
+    merge: (b) => api.examctlMerge(b),
+    unmerge: (b) => api.examctlUnmerge(b),
+    merges: () => api.examctlMerges(hid),
   };
 }
 
@@ -235,6 +247,10 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
   const [targetErr, setTargetErr] = useState("");
   const [target, setTarget] = useState<StudyRow | null>(null);
 
+  // ── 환자 병합(Merge) 다이얼로그 — A=선택한 환자, B=대상 환자, Master 라디오(기본 A) ──
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeMaster, setMergeMaster] = useState<"A" | "B">("A");
+
   // ── 휴지통(Recovery) 패널 ──
   const [trashOpen, setTrashOpen] = useState(false);
   const [trash, setTrash] = useState<ExamCtlTrashItem[]>([]);
@@ -257,17 +273,18 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
     window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), 5000);
   }, []);
 
-  const loadStudies = useCallback((query?: string) => {
+  const loadStudies = useCallback((query?: string) =>
     ds.studies((query ?? q).trim() || undefined)
-      .then((r) => { setStudies(r.items); setListErr(""); })
-      .catch((e) => { setStudies([]); setListErr(prepMsg(e, isLocal)); });
-  }, [ds, isLocal, q]);
+      .then((r) => { setStudies(r.items); setListErr(""); return r.items; })
+      .catch((e) => { setStudies([]); setListErr(prepMsg(e, isLocal)); return [] as StudyRow[]; }),
+  [ds, isLocal, q]);
   // 소스(server↔local)·병원 전환 시 선택 상태 전체 초기화 + 즉시 재조회 (모드 전환 즉시 데이터 소스 전환)
   useEffect(() => {
     setSel(null); setTree(null); setTreeErr("");
     setSelSeries(new Set()); setSelImages(new Set());
     setCurSeriesUid(null); setPreview(null);
     setTarget(null); setTargetList([]); setTargetErr("");
+    setMergeOpen(false); setMergeMaster("A");
     setTrashOpen(false); setTrash([]); setTrashSel(new Set()); setTrashErr("");
     loadStudies("");
   }, [ds]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -318,12 +335,16 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
   const anySel = selSeries.size + selImages.size > 0;
   const uidsBody = { series_uids: [...selSeries], sop_uids: [...selImages] };
 
-  // 작업 후 공통 갱신 — 트리·목록·(열려 있으면)휴지통 재조회 + 선택 해제
+  // 작업 후 공통 갱신 — 트리·목록·(열려 있으면)휴지통 재조회 + 선택 해제.
+  // 병합/해제 등으로 행 데이터(merged·환자 필드)가 바뀌므로 선택 검사(sel)도
+  // 최신 행으로 재동기화한다(Unmerge 활성 조건·'선택한 환자' 카드 stale 방지).
   const refreshAfter = () => {
     setSelSeries(new Set());
     setSelImages(new Set());
     loadTree(sel);
-    loadStudies();
+    void loadStudies().then((items) => {
+      setSel((cur) => (cur ? items.find((x) => x.id === cur.id) ?? cur : cur));
+    });
     if (trashOpen) loadTrash();
   };
 
@@ -367,6 +388,38 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
       say(`Assign 완료 — ${r.moved}건을 검사 #${target.id}로 이동`);
       refreshAfter();
     } catch (e) { say(prepMsg(e, isLocal), true); }
+    finally { setBusy(false); }
+  };
+
+  // 병합 실행 — 라디오(Master=A/B)에 따라 master/slave study id 배치.
+  // Slave 환자의 전 검사가 Master 환자로 귀속(앱 DB/local.db 계층만 — DICOM 원본·태그 불변).
+  const doMerge = async () => {
+    if (!sel || !target) return;
+    const master = mergeMaster === "A" ? sel : target;
+    const slave = mergeMaster === "A" ? target : sel;
+    setBusy(true);
+    try {
+      const r = await ds.merge({ master_study_id: master.id, slave_study_id: slave.id });
+      say(`병합 완료 — ${slave.patient_name || slave.patient_key}의 검사 ${r.moved}건이 ` +
+        `${master.patient_name || master.patient_key} 환자로 귀속 (병합 #${r.merge_id})`);
+      setMergeOpen(false);
+      setTarget(null);   // 성공 시 대상 해제
+      refreshAfter();
+    } catch (e) { say(prepMsg(e, isLocal), true); }
+    finally { setBusy(false); }
+  };
+
+  // 병합 해제 — 선택 검사(merged=true)의 study_id 로 활성 병합을 역추적해 원복
+  const doUnmerge = async () => {
+    if (!sel?.merged) return;
+    if (!window.confirm(`선택한 검사의 환자 병합을 해제할까요?\n` +
+      `Slave 환자의 검사들이 병합 이전의 원래 환자로 원복됩니다.`)) return;
+    setBusy(true);
+    try {
+      const r = await ds.unmerge({ study_id: sel.id });
+      say(`병합 해제 완료 — 검사 ${r.restored}건이 원래 환자로 원복`);
+      refreshAfter();
+    } catch (e) { say(prepMsg(e, isLocal), true); }   // 병합 미발견 시 서버 404 메시지 그대로 표시
     finally { setBusy(false); }
   };
 
@@ -423,6 +476,12 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
         {btn("Unassign", () => void doUnassign(), anySel, "선택 항목을 현재 검사에서 분리 → 미배정(UNASSIGNED) 버킷")}
         {btn("Assign", () => void doAssign(), anySel && !!target,
              target ? "선택 항목을 대상 검사로 이동(재귀속)" : "대상 검사를 먼저 선택하세요 (우측 '옮겨 갈 환자')")}
+        {btn("Merge", () => { setMergeMaster("A"); setMergeOpen(true); }, !!sel && !!target,
+             sel && target ? "선택한 환자와 대상 환자를 병합 — Master 지정 후 실행"
+                           : "검사(선택 환자)와 우측 '옮겨 갈 환자'(대상)를 모두 선택하세요")}
+        {btn("Unmerge", () => void doUnmerge(), sel?.merged === true,
+             sel?.merged ? "선택 검사의 환자 병합을 해제(원복)"
+                         : "병합(Merge)된 검사를 선택하면 해제할 수 있습니다")}
       </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         {isLocal
@@ -498,7 +557,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
                         style={{ cursor: "pointer",
                                  background: sel?.id === s.id ? "var(--accent-subtle)" : undefined,
                                  color: s.patient_key === "UNASSIGNED" ? "var(--ai,#a78bfa)" : undefined }}>
-                      <td>{s.patient_name || "—"}</td><td>{s.patient_key}</td><td>{s.sex || "—"}</td>
+                      <td>{s.merged && <MergeIcon />}{s.patient_name || "—"}</td><td>{s.patient_key}</td><td>{s.sex || "—"}</td>
                       <td>{s.study_date}</td><td>{s.modality}</td><td>{s.study_desc || "—"}</td>
                       <td>{s.series_count}/{s.instance_count}</td>
                     </tr>
@@ -682,6 +741,51 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
           </div>
         </div>
       </div>
+
+      {/* ── 환자 병합(Merge) 오버레이 다이얼로그 ── */}
+      {mergeOpen && sel && target && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.55)",
+                      display: "grid", placeItems: "center" }}
+             onClick={() => { if (!busy) setMergeOpen(false); }}>
+          <div style={{ ...card, width: 580, maxWidth: "92vw", maxHeight: "88vh", overflow: "auto",
+                        background: "var(--bg-elevated)", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" }}
+               onClick={(e) => e.stopPropagation()}>
+            <div style={{ ...secTitle, fontSize: 13.5, display: "flex", alignItems: "center", gap: 4 }}>
+              <MergeIcon size={15} title="환자 병합" /> 환자 병합 (Merge)
+            </div>
+            {/* 두 환자 요약 카드 — Master 로 지정된 쪽을 강조 */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <PatientCard title={mergeMaster === "A" ? "A — 선택한 환자 (Master)" : "A — 선택한 환자 (Slave)"}
+                           s={sel} accent={mergeMaster === "A" ? "var(--accent,#7dd3fc)" : undefined} empty="" />
+              <PatientCard title={mergeMaster === "B" ? "B — 대상 환자 (Master)" : "B — 대상 환자 (Slave)"}
+                           s={target} accent={mergeMaster === "B" ? "var(--accent,#7dd3fc)" : undefined} empty="" />
+            </div>
+            {/* Master 선택 라디오 — 기본 A(선택한 환자) */}
+            <div style={{ display: "flex", gap: 18, marginBottom: 8, fontSize: 12.5 }}>
+              <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                <input type="radio" name="sv-merge-master" checked={mergeMaster === "A"}
+                       onChange={() => setMergeMaster("A")} />
+                Master = A (선택한 환자)
+              </label>
+              <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                <input type="radio" name="sv-merge-master" checked={mergeMaster === "B"}
+                       onChange={() => setMergeMaster("B")} />
+                Master = B (대상 환자)
+              </label>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+              Slave 환자의 모든 검사가 Master 환자 이름으로 표시됩니다.{" "}
+              {isLocal ? "로컬 PACS(local.db) 계층만 변경되며 원본 DICOM 파일·태그는 바뀌지 않습니다."
+                       : "앱 DB 계층만 변경되며 Orthanc 원본·DICOM 태그는 바뀌지 않습니다."}{" "}
+              [Unmerge]로 원상 복구할 수 있습니다.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setMergeOpen(false)} disabled={busy}>취소</button>
+              <button className="primary" onClick={() => void doMerge()} disabled={busy}>병합 실행</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 토스트 ── */}
       {toast && (

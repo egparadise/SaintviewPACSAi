@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import AiJob, Patient, Report, Series, Study
+from app.models import AiJob, Patient, PatientMerge, Report, Series, Study
+from app.services.activity_service import qc_meta
 
 
 @dataclass
@@ -111,6 +112,22 @@ def register_study(
     )
     db.add(study)
     db.flush()
+    # 활성 병합의 slave 환자 앞으로 수신된 신규 검사 — master 로 자동 귀속(침묵 분열 방지).
+    # 병합은 병원 스코프로 동작하므로 검사 병원이 병합 병원과 같을 때만 따라가고,
+    # merged_from·moved_study_ids 에 기록해 Unmerge 시 함께 원복되게 한다.
+    merge = db.execute(
+        select(PatientMerge)
+        .where(
+            PatientMerge.undone_at.is_(None),
+            PatientMerge.slave_patient_id == patient.id,
+        )
+        .order_by(PatientMerge.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if merge is not None and merge.hospital_id == study.hospital_id:
+        study.patient_id = merge.master_patient_id
+        study.merged_from = merge.id
+        merge.moved_study_ids = list(merge.moved_study_ids or []) + [study.id]
     for s in series or []:
         db.add(
             Series(
@@ -177,11 +194,15 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
     rows = db.execute(q.limit(f.limit).offset(f.offset)).all()
 
     order_names = _order_names(db, [s.accession_no for s, _ in rows if s.accession_no])
+    # QC 메타(read_state/merged/report_locked …) — 페이지 단위 배치 계산(N+1 금지)
+    meta = qc_meta(db, [s for s, _ in rows])
+    # 최신 리포트도 페이지 단위 배치 1회 조회 — 행당 1쿼리(N+1) 제거
+    latest_map = _latest_reports(db, [s.id for s, _ in rows])
     items = []
     for study, patient in rows:
-        latest = _latest_report(db, study.id)
-        items.append(_study_row(study, patient, latest,
-                                order_name=order_names.get(study.accession_no, "")))
+        items.append(_study_row(study, patient, latest_map.get(study.id),
+                                order_name=order_names.get(study.accession_no, ""),
+                                qc=meta.get(study.id)))
     return items, total
 
 
@@ -203,7 +224,20 @@ def _latest_report(db: Session, study_id: int) -> Report | None:
     ).scalar_one_or_none()
 
 
-def _study_row(study: Study, patient: Patient, latest: Report | None, *, order_name: str = "") -> dict:
+def _latest_reports(db: Session, study_ids: list[int]) -> dict[int, Report]:
+    """페이지 검사들의 최신(최대 version) 리포트 — IN 배치 1회 조회 후 파이썬 선별."""
+    if not study_ids:
+        return {}
+    out: dict[int, Report] = {}
+    for r in db.execute(select(Report).where(Report.study_id.in_(study_ids))).scalars():
+        cur = out.get(r.study_id)
+        if cur is None or r.version > cur.version:
+            out[r.study_id] = r
+    return out
+
+
+def _study_row(study: Study, patient: Patient, latest: Report | None, *,
+               order_name: str = "", qc: dict | None = None) -> dict:
     impression_preview = ""
     has_critical_flag = False
     if latest:
@@ -213,7 +247,7 @@ def _study_row(study: Study, patient: Patient, latest: Report | None, *, order_n
         if imps:
             impression_preview = imps[0].get("statement", "")[:120]
         has_critical_flag = has_critical(latest.sr_json or {})
-    return {
+    row = {
         "id": study.id,
         "study_uid": study.study_uid,
         "patient_key": patient.patient_key,
@@ -246,6 +280,11 @@ def _study_row(study: Study, patient: Patient, latest: Report | None, *, order_n
         "bookmark": study.bookmark,
         "order_name": order_name,
     }
+    # QC 메타 병합 — read_state/viewer_open/report_typing/has_report_text/
+    # image_changed/merged/report_locked (SPEC §B, qc_meta 배치 계산 결과)
+    if qc:
+        row.update(qc)
+    return row
 
 
 def study_detail(db: Session, study_id: int) -> dict | None:
@@ -255,7 +294,9 @@ def study_detail(db: Session, study_id: int) -> dict | None:
     patient = db.get(Patient, study.patient_id)
     latest = _latest_report(db, study.id)
     names = _order_names(db, [study.accession_no] if study.accession_no else [])
-    row = _study_row(study, patient, latest, order_name=names.get(study.accession_no, ""))
+    meta = qc_meta(db, [study])  # 단건 경로도 동일 헬퍼(단건 리스트) — SPEC §B
+    row = _study_row(study, patient, latest, order_name=names.get(study.accession_no, ""),
+                     qc=meta.get(study.id))
     row["clinical_info"] = study.clinical_info
     row["orthanc_id"] = study.orthanc_id
     row["series"] = [

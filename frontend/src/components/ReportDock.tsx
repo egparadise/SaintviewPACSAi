@@ -30,6 +30,38 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   useEffect(() => { loadPermMe().then(setPermMe).catch(() => {}); }, []);
   const canWrite = hasPerm(permMe, "report.write");
 
+  // ── 판독 확정(Fixed) 잠금 — study.report_locked. 서버 409 가 최종 방어선, UI 는 선반영(UX) ──
+  const [locked, setLocked] = useState(!!detail.report_locked);
+  useEffect(() => { setLocked(!!detail.report_locked); }, [detail.id, detail.report_locked]);
+  const LOCK_TIP = "판독 확정(잠금) 상태 — 변경할 수 없습니다";
+  // 다른 창(ReportWindow 등)에서 잠금이 바뀌면 detail 스냅샷이 stale — 저장/토글 실패 시 재조회로 동기화
+  const syncLock = async () => {
+    try { setLocked(!!(await api.study(detail.id)).report_locked); } catch { /* 조회 실패 → 현 상태 유지 */ }
+  };
+  const toggleLock = async (checked: boolean) => {
+    try {
+      const r = await api.reportLock(detail.id, checked);   // 성공 후에만 반영(실패 시 체크 원복)
+      setLocked(r.locked);
+      onStatus(r.locked ? "판독 확정 잠금 설정됨" : "판독 확정 잠금 해제됨");
+    } catch (e) {
+      onStatus(e instanceof Error ? e.message : "잠금 변경 실패");
+      void syncLock();   // 실패(409/403 등) — 서버 기준 잠금 상태로 재동기화
+    }
+  };
+
+  // ── 판독 하트비트(read_state) — 45s 주기, typing=마지막 에디터 입력 45s 이내. 실패는 조용히 무시 ──
+  const lastTypedRef = useRef(0);
+  useEffect(() => {
+    lastTypedRef.current = 0;   // 검사 전환 시 이전 검사 typing 상태 미전파
+    const beat = () => {
+      api.activityHeartbeat([detail.id], "report", Date.now() - lastTypedRef.current < 45_000)
+        .catch(() => {});
+    };
+    beat();  // 마운트/검사 전환 즉시 1회
+    const timer = window.setInterval(beat, 45_000);
+    return () => window.clearInterval(timer);
+  }, [detail.id]);
+
   const initDockText = (r: Report | null) => {
     setHistView(null);
     setReadingTouched(false);
@@ -75,6 +107,9 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockSave = async () => {
+    if (locked) { onStatus(LOCK_TIP); return; }             // 확정 잠금 — 단축키 경로 포함 차단
+    // 확정본 — Save 버튼 disabled(finalizedDock) 조건과 단축키(Ctrl+S) 경로 일치(서버 400 방지)
+    if (report?.status === "finalized") { onStatus("확정된 판독입니다 — 수정하려면 새 버전(addendum)을 생성하세요"); return; }
     if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 단축키(Ctrl+S) 경로도 게이트
     const sr = buildDockSr();
     if (!report || !sr) return;
@@ -85,27 +120,35 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
       setReadingTouched(false);
       if (rdOpts.save_alert) alert("리포트가 저장되었습니다");
       else onStatus("리포트 저장됨");
-    } catch (e) { alert(e instanceof Error ? e.message : "저장 실패"); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 실패");
+      void syncLock();   // 다른 창에서 잠금 변경(409) 등 — 서버 기준 잠금 상태 재동기화
+    }
   };
 
   const dockApprove = async () => {
+    if (locked) { onStatus(LOCK_TIP); return; }             // 확정 잠금 — 단축키 경로 포함 차단
+    // 확정본 — Approve 버튼 disabled(finalizedDock) 조건과 단축키(Ctrl+Shift+A) 경로 일치
+    if (report?.status === "finalized") { onStatus("이미 확정된 판독입니다"); return; }
     if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 단축키(Ctrl+Shift+A) 경로도 게이트
     const sr = buildDockSr();
     if (!report || !sr) return;
     if (!window.confirm("판독을 확정(승인·서명)합니다. 확정 후 수정할 수 없습니다.")) return;
     try {
-      if (report.status !== "finalized") {
-        await api.updateReport(report.id, sr);
-        await api.finalizeReport(report.id);
-      }
+      await api.updateReport(report.id, sr);
+      await api.finalizeReport(report.id);
       const r = await api.reports(detail.id);
       setVreports(r.items);
       initDockText(r.items[0] ?? null);
       onStatus("판독 확정(서명) 완료");
-    } catch (e) { alert(e instanceof Error ? e.message : "승인 실패"); }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "승인 실패");
+      void syncLock();   // 다른 창에서 잠금 변경(409) 등 — 서버 기준 잠금 상태 재동기화
+    }
   };
 
   const dockInsert = (p: PhraseRow) => {
+    if (locked) { onStatus(LOCK_TIP); return; }             // 확정 잠금 — 상용구 삽입 차단
     if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 상용구 삽입도 판독 변경
     const pos = rdOpts.insert_pos ?? "end";
     const join = (cur: string, add: string) => !add ? cur : (cur ? `${cur}\n${add}` : add);
@@ -125,6 +168,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   };
 
   const dockApplyTemplate = (p: PhraseRow) => {
+    if (locked) { onStatus(LOCK_TIP); return; }             // 확정 잠금 — 템플릿 교체 차단
     if (!canWrite) { onStatus(PERM_DENIED_TIP); return; }   // 템플릿 교체도 판독 변경
     if (!window.confirm(`템플릿 '${p.name}'으로 판독/결론을 교체할까요?`)) return;
     setReading(p.reading_text);
@@ -203,15 +247,29 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
                 onClick={() => onLoadPrior(relExams[1].id)}>▶</button>
         <button title="서버 저장본으로 되돌리기" style={{ padding: "1px 7px" }}
                 onClick={() => initDockText(report)}>Reset</button>
-        {/* report.write 게이트(레인 W) — 서버 403 이 최종 방어선, UI 는 비활성+안내 툴팁(UX) */}
-        <button className="primary" title={canWrite ? `저장 (${rdOpts.key_save ?? "Ctrl+S"})` : PERM_DENIED_TIP}
+        {/* report.write 게이트(레인 W) + 확정 잠금 — 서버 403/409 가 최종 방어선, UI 는 비활성+안내 툴팁(UX) */}
+        <button className="primary" title={locked ? LOCK_TIP : canWrite ? `저장 (${rdOpts.key_save ?? "Ctrl+S"})` : PERM_DENIED_TIP}
                 style={{ padding: "1px 9px" }}
-                disabled={!report || finalizedDock || !canWrite} onClick={() => void dockSave()}>Save</button>
-        <button title={canWrite ? `승인 — 확정·서명 (${rdOpts.key_approve ?? "Ctrl+Shift+A"})` : PERM_DENIED_TIP}
+                disabled={!report || finalizedDock || !canWrite || locked} onClick={() => void dockSave()}>Save</button>
+        <button title={locked ? LOCK_TIP : canWrite ? `승인 — 확정·서명 (${rdOpts.key_approve ?? "Ctrl+Shift+A"})` : PERM_DENIED_TIP}
                 style={{ padding: "1px 9px", background: "var(--stat-final)", color: "#fff", border: "none",
-                         borderRadius: 4, opacity: !report || finalizedDock || !canWrite ? 0.5 : 1 }}
-                disabled={!report || finalizedDock || !canWrite} onClick={() => void dockApprove()}>Approve</button>
+                         borderRadius: 4, opacity: !report || finalizedDock || !canWrite || locked ? 0.5 : 1 }}
+                disabled={!report || finalizedDock || !canWrite || locked} onClick={() => void dockApprove()}>Approve</button>
       </div>
+      {/* 확정(Fixed) 잠금 — finalized 리포트가 있을 때만 노출. 잠금 중 판독 변경 전면 차단(§C) */}
+      {finalizedDock && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 8px",
+                      borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+          <label title="잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다"
+                 style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
+            <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />
+            🔒 판독 확정(잠금) — 변경 금지
+          </label>
+          {locked && (
+            <span style={{ color: "var(--text-secondary)" }}>잠금 상태 — 판독을 변경할 수 없습니다</span>
+          )}
+        </div>
+      )}
       {rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
         <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 11, padding: "3px 8px", fontWeight: 700 }}>
           ⚠ CVR Notice — study contains CRITICAL finding
@@ -231,15 +289,15 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
             </div>
           )}
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>Reading</div>
-          {/* report.write 없으면 readOnly — 조회는 가능(레인 W) */}
+          {/* report.write 없으면 readOnly — 조회는 가능(레인 W). 확정 잠금 중에도 readOnly */}
           <textarea value={reading} placeholder="Enter reading findings" disabled={finalizedDock}
-                    readOnly={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
-                    onChange={(e) => { setReading(e.target.value); setReadingTouched(true); }}
+                    readOnly={!canWrite || locked} title={locked ? LOCK_TIP : canWrite ? undefined : PERM_DENIED_TIP}
+                    onChange={(e) => { setReading(e.target.value); setReadingTouched(true); lastTypedRef.current = Date.now(); }}
                     style={{ ...taStyle, flex: 1.4, minHeight: 90 }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>Conclusion</div>
           <textarea id="sv-dock-conclusion" value={conclusion} placeholder="Enter conclusion" disabled={finalizedDock}
-                    readOnly={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
-                    onChange={(e) => setConclusion(e.target.value)}
+                    readOnly={!canWrite || locked} title={locked ? LOCK_TIP : canWrite ? undefined : PERM_DENIED_TIP}
+                    onChange={(e) => { setConclusion(e.target.value); lastTypedRef.current = Date.now(); }}
                     style={{ ...taStyle, flex: 1, minHeight: 70 }} />
           {dockSig && (
             <div style={{ fontSize: 11, color: "var(--stat-final)" }}>

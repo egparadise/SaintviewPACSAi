@@ -207,3 +207,100 @@ def assign_items(
            {"moved": moved, "target_study_id": target.id})
     db.commit()
     return {"moved": moved}
+
+
+# ════════════════════════════════ 환자 병합(Merge) / 원복(Unmerge) ════════════════════════════════
+class MergeBody(BaseModel):
+    master_study_id: int
+    slave_study_id: int
+
+
+class UnmergeBody(BaseModel):
+    study_id: int | None = None
+    merge_id: int | None = None
+
+
+@router.post("/merge")
+def merge_patients(
+    body: MergeBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("study.match")),
+):
+    """환자 병합 — Slave 환자의 전 검사를 Master 환자로 귀속(앱 DB 계층만, DICOM 태그 불변)."""
+    master = db.get(Study, body.master_study_id)
+    slave = db.get(Study, body.slave_study_id)
+    if master is None or slave is None:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    _require_study_access(user, master)
+    _require_study_access(user, slave)
+    # 병합은 동일 병원 내에서만 의미가 있다 — 시스템 관리자도 예외 없음
+    if master.hospital_id != slave.hospital_id:
+        raise HTTPException(status_code=400, detail="서로 다른 병원의 검사는 병합할 수 없습니다")
+    try:
+        merge, moved = svc.merge_patients(
+            db, master.id, slave.id, username=user.get("sub", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    db.add(AuditLog(
+        account_id=user.get("uid"),
+        action="examctl_merge",
+        target_type="study",
+        target_id=str(slave.id),
+        detail={
+            "by": user.get("sub", ""),
+            "merge_id": merge.id,
+            "master_study_id": master.id,
+            "slave_study_id": slave.id,
+            "master": merge.master_info,
+            "slave": merge.slave_info,
+            "moved": moved,
+        },
+    ))
+    db.commit()
+    return {"merge_id": merge.id, "moved": moved}
+
+
+@router.post("/unmerge")
+def unmerge_patients(
+    body: UnmergeBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_effective("study.unmatch")),
+):
+    """환자 병합 원복(Unmerge) — 이동했던 검사를 Slave 환자로 되돌린다."""
+    if body.study_id is None and body.merge_id is None:
+        raise HTTPException(status_code=400, detail="study_id 또는 merge_id 를 지정하세요")
+    merge = svc.find_active_merge(db, study_id=body.study_id, merge_id=body.merge_id)
+    if merge is None:
+        raise HTTPException(status_code=404, detail="활성 병합을 찾을 수 없습니다")
+    # 병원 가드 — 시스템 관리자=전체, 병원 소속=자기 병원 병합만
+    if not _is_system_admin(user) and merge.hospital_id != user.get("hid"):
+        raise HTTPException(status_code=403, detail="이 병원의 병합에 접근할 권한이 없습니다")
+    try:
+        merge, restored = svc.unmerge_patients(db, merge_id=merge.id)
+    except LookupError as e:  # 방어적 — 위에서 활성 확인했으나 경합 시 404 로 정직하게
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    db.add(AuditLog(
+        account_id=user.get("uid"),
+        action="examctl_unmerge",
+        target_type="study",
+        target_id=str(body.study_id or ""),
+        detail={
+            "by": user.get("sub", ""),
+            "merge_id": merge.id,
+            "master": merge.master_info,
+            "slave": merge.slave_info,
+            "restored": restored,
+        },
+    ))
+    db.commit()
+    return {"restored": restored}
+
+
+@router.get("/merges")
+def list_merges(
+    hid: int = Query(0, description="병원 스코프(시스템 관리자용, 0=전체)"),
+    db: Session = Depends(get_db),
+    user: dict = Depends(current_user),
+):
+    """활성 병합 목록 — master/slave 환자 스냅샷 + 이동 검사 id."""
+    return {"items": svc.list_merges(db, _scoped_hid(db, user, hid))}

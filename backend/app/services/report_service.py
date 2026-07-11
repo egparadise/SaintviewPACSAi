@@ -28,7 +28,19 @@ def latest_report(db: Session, study_id: int) -> Report | None:
     return rows[0] if rows else None
 
 
+LOCKED_MSG = "판독 확정 잠금(Fixed) 상태입니다. 잠금 해제 후 다시 시도하세요."
+
+
+def _ensure_not_locked(study: Study) -> None:
+    """확정 잠금(study.report_locked) 중이면 모든 판독 변이를 차단한다 (SPEC §C)."""
+    if bool(study.report_locked):
+        raise WorkflowError(LOCKED_MSG)
+
+
 def save_draft_from_ai(db: Session, study: Study, sr_json: dict, *, model: str, sources: dict) -> Report:
+    # 실행 시점 잠금 검사 — analyze 큐잉 가드만으로는 TOCTOU(큐잉→잠금→워커 실행)에서
+    # 잠금 중 새 리포트가 생기고 study.status 가 finalized→draft_ready 로 오염된다(SPEC §C).
+    _ensure_not_locked(study)
     version = (latest_report(db, study.id).version + 1) if latest_report(db, study.id) else 1
     report = Report(
         study_id=study.id,
@@ -50,6 +62,7 @@ def save_draft_from_ai(db: Session, study: Study, sr_json: dict, *, model: str, 
 
 def update_report(db: Session, report: Report, sr_json: dict, *, username: str) -> Report:
     """판독의 수정 — 확정본은 수정 불가, 새 버전을 만든다."""
+    _ensure_not_locked(report.study)
     if report.status == "finalized":
         raise WorkflowError("확정된 판독은 수정할 수 없습니다. 새 버전(addendum)을 생성하세요.")
     report.sr_json = sr_json
@@ -71,6 +84,7 @@ def update_report(db: Session, report: Report, sr_json: dict, *, username: str) 
 
 def finalize_report(db: Session, report: Report, *, username: str) -> Report:
     """확정: 버전 보존 + 환류 인제스트(설계 §4.1) + 불일치 지표(F-20)."""
+    _ensure_not_locked(report.study)
     if report.status == "finalized":
         raise WorkflowError("이미 확정된 판독입니다.")
     report.status = "finalized"
@@ -116,6 +130,8 @@ def merge_reports(db: Session, study_ids: list[int], *, username: str) -> Report
         raise WorkflowError("존재하지 않는 검사가 포함되어 있습니다.")
     if len({s.patient_id for s in studies}) != 1:
         raise WorkflowError("동일 환자의 검사만 묶음판독할 수 있습니다.")
+    for s in studies:
+        _ensure_not_locked(s)  # 확정 잠금 검사 포함 시 병합 차단 (SPEC §C)
 
     primary, secondaries = studies[0], studies[1:]
     base_report = latest_report(db, primary.id)
