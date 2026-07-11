@@ -228,7 +228,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [nodeMsg, setNodeMsg] = useState("");
   // 서버 네트워크 — 로컬 공유 디렉토리 + 웹서버(IP/Port/Name/AET) + 연결 테스트
   const [snDir, setSnDir] = useState("");
-  const [snWeb, setSnWeb] = useState({ ip: "", port: "", name: "", ae_title: "" });
+  const [snWeb, setSnWeb] = useState({ ip: "", port: "", dicom_port: "", name: "", ae_title: "" });
   const [snMsg, setSnMsg] = useState("");
   // 공유 디렉토리 존재 여부 뱃지(초록 '존재함'/주황 '경로 없음') + 폴더 찾기 모달
   const [snDirExists, setSnDirExists] = useState<boolean | null>(null);
@@ -353,10 +353,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       setNodes(((r.value as { items?: DicomNode[] }).items) ?? []);
     }).catch(() => {});
     api.getSetting("server.network").then((r) => {
-      const v = r.value as { local_share_dir?: string; web?: { ip?: string; port?: number | string; name?: string; ae_title?: string } };
+      const v = r.value as { local_share_dir?: string; web?: { ip?: string; port?: number | string; dicom_port?: number | string; name?: string; ae_title?: string } };
       setSnDir(v.local_share_dir ?? "");
       setSnWeb({
         ip: v.web?.ip ?? "", port: String(v.web?.port ?? ""),
+        dicom_port: String(v.web?.dicom_port ?? ""),
         name: v.web?.name ?? "", ae_title: v.web?.ae_title ?? "",
       });
       // 설정을 열 때 '지금 현재 공유된 폴더'가 처음에 보이게 — 값이 비면 /api/share/config 로 보충
@@ -447,7 +448,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         await api.putSetting("server.network", {
           ...curN,
           local_share_dir: snDir,
-          web: { ...snWeb, port: Number(snWeb.port) || snWeb.port },
+          web: { ...snWeb, port: Number(snWeb.port) || snWeb.port, dicom_port: Number(snWeb.dicom_port) || undefined },
         }, "global");
       }
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
@@ -781,9 +782,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       <input value={snWeb.ip} disabled={!isAdmin} placeholder="192.168.0.10"
                              onChange={(e) => setSnWeb((p) => ({ ...p, ip: e.target.value }))} style={{ flex: 1, minWidth: 0 }} />
                     </Row>
-                    <Row label="Port">
+                    <Row label="Port (Web)">
                       <input value={snWeb.port} disabled={!isAdmin} placeholder="8000"
                              onChange={(e) => setSnWeb((p) => ({ ...p, port: e.target.value }))} style={{ width: 90 }} />
+                    </Row>
+                    <Row label="DICOM Port">
+                      {/* DIMSE(C-ECHO/C-STORE) 통신 포트 — 웹(HTTP) 포트와 다르다. Echo 테스트는 이 포트로 나간다(미입력 시 Port 폴백) */}
+                      <input value={snWeb.dicom_port} disabled={!isAdmin} placeholder="4242"
+                             title="DICOM C-ECHO/C-STORE 등 DIMSE 통신 포트 — 웹(HTTP) 포트와 다릅니다 (병원 컨테이너는 4301 등)"
+                             onChange={(e) => setSnWeb((p) => ({ ...p, dicom_port: e.target.value }))} style={{ width: 90 }} />
                     </Row>
                     <Row label="Name">
                       <input value={snWeb.name} disabled={!isAdmin} placeholder="Saintview Main"
@@ -800,7 +807,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         try {
                           await api.putSetting("server.network", {
                             local_share_dir: snDir,
-                            web: { ...snWeb, port: Number(snWeb.port) || snWeb.port },
+                            web: { ...snWeb, port: Number(snWeb.port) || snWeb.port, dicom_port: Number(snWeb.dicom_port) || undefined },
                           }, "global");
                           setSnMsg("서버 네트워크 설정 저장됨 (전역)");
                         } catch (e) { setSnMsg(e instanceof Error ? e.message : "저장 실패"); }
@@ -819,11 +826,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       } catch (e) { setSnMsg(e instanceof Error ? e.message : "Ping 실패"); }
                     }}>Ping 테스트</button>
                     <button onClick={async () => {
-                      if (!snWeb.ip || !snWeb.port) { setSnMsg("IP/Port를 먼저 입력하세요"); return; }
-                      setSnMsg("DICOM C-ECHO 테스트 중…");
+                      // Echo 는 DICOM Port 로 — 웹(HTTP) 포트에 시도하면 연관 수립이 항상 실패한다
+                      const dport = Number(snWeb.dicom_port) || Number(snWeb.port);
+                      if (!snWeb.ip || !dport) { setSnMsg("IP/DICOM Port를 먼저 입력하세요"); return; }
+                      setSnMsg(`DICOM C-ECHO 테스트 중… (:${dport})`);
                       try {
-                        const r = await api.netEcho(snWeb.ip, Number(snWeb.port), snWeb.ae_title);
-                        setSnMsg(`DICOM Echo: ${r.ok ? "✅ " : "❌ "}${r.detail}`);
+                        const r = await api.netEcho(snWeb.ip, dport, snWeb.ae_title);
+                        setSnMsg(`DICOM Echo(:${dport}): ${r.ok ? "✅ " : "❌ "}${r.detail}${!r.ok && !snWeb.dicom_port ? " — 웹 포트로 시도했다면 DICOM Port 를 입력하세요" : ""}`);
                       } catch (e) { setSnMsg(e instanceof Error ? e.message : "Echo 실패"); }
                     }}>DICOM Echo Test</button>
                     <button onClick={async () => {
