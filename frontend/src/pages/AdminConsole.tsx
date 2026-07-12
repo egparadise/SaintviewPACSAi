@@ -19,7 +19,7 @@ import {
   BackupMirrorPanel, DataWipePanel, MaintStoragePanel, RestorePanel, ServerConfigPanel,
 } from "./admin/ServerMaintenance";
 import {
-  AdminAccountsPanel, AiProvidersPanel, DbSchemaPanel, LogsPanel, SignupFieldsPanel, StatsPanel,
+  AdminAccountsPanel, AiProvidersPanel, DbSchemaPanel, LogsPanel, SignupFieldsPanel, StatsPanel, SttServerPanel,
 } from "./admin/ServerInsights";
 // 병렬 레인 패널 (통합 배선) — H: HL7/원격판독/MWL/가상환자 · O: 인프라 · S: 보안
 import { Hl7Panel } from "./admin/Hl7Panel";
@@ -223,7 +223,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
   else if (sel === "srv-admins") content = <AdminAccountsPanel />;
   else if (sel === "srv-logs") content = <>{scopeNote("병원별 로그는 각 병원의 [⑧ 로그] 탭에서 확인하세요.")}<LogsPanel /></>;
   else if (sel === "srv-stats") content = <>{scopeNote("병원별 통계는 각 병원의 [⑨ 통계] 탭에서 확인하세요.")}<StatsPanel /></>;
-  else if (sel === "srv-ai") content = <AiProvidersPanel />;
+  else if (sel === "srv-ai") content = <><AiProvidersPanel /><SttServerPanel /></>;
   // 병렬 레인 패널 — 인프라(O) · 보안(S)
   else if (sel === "srv-infra") content = <InfraPanel />;
   else if (sel === "srv-security") content = <SecurityPanel />;

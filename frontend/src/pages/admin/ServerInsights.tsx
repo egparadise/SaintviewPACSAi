@@ -1,12 +1,14 @@
 // 서버 인사이트 패널(레인 F) — ⑥DB 구조 ⑦가입 환경 설정 ⑧관리자 계정 ⑨시스템 로그 ⑩사용량 통계 ⑪AI 등록
 // 백엔드 계약(/api/insights/*, settings 키)은 레인 B가 병렬 구현 — 미구현 응답은 '⚠ 준비 중' 우아 처리.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  api, downloadLogsCsv, downloadStatsXlsx, type AiProvider, type DbSchemaResp, type LogItem,
-  type SignupFieldDef, type SignupFieldsCfg, type StatsResp, type StatsRow,
+  api, downloadLogsCsv, downloadStatsXlsx, sttStatus, sttTranscribe,
+  type AiProvider, type DbSchemaResp, type LogItem,
+  type SignupFieldDef, type SignupFieldsCfg, type SttStatus, type StatsResp, type StatsRow,
 } from "../../api";
 import { UsersPanel } from "./ServerAdmin";
 import { pendMsg } from "./ServerMaintenance";
+import { MicIcon } from "../../components/MicIcon";
 
 // ── 공통 소형 UI (기존 관리 콘솔 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -625,6 +627,126 @@ export function AiProvidersPanel() {
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         ⚠ API 키 원문은 저장하지 않습니다 — [키 참조]에는 서버 보안 저장소의 키 이름만 입력하세요.
         등록 항목은 RAG 판독초안 분석 연동(개발 예정) 시 선택지로 사용됩니다.
+      </div>
+      <Msg text={msg} />
+    </div>
+  );
+}
+
+// ════════════════════════════ AI 음성 판독(STT) — 서버 엔진 설정 + 설치 상태 + 마이크 테스트 ════════════════════════════
+/** Server AI 등록 하단 — OpenAI Whisper(로컬/API)·브라우저 엔진 선택. 전역 ai.policy 로 저장 → 모든 병원·Client 공통 구동. */
+export function SttServerPanel() {
+  const [engine, setEngine] = useState("browser");
+  const [model, setModel] = useState("");
+  const [policy, setPolicy] = useState<Record<string, unknown>>({});   // 기존 ai.policy 보존(auto_generate/vision)
+  const [stat, setStat] = useState<SttStatus | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [testText, setTestText] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const recRef = useRef<MediaRecorder | null>(null);
+
+  const loadStatus = () => sttStatus().then(setStat).catch(() => {});
+  useEffect(() => {
+    api.getSetting("ai.policy").then((r) => {
+      const v = (r.value ?? {}) as Record<string, unknown>;
+      setPolicy(v);
+      setEngine((v.stt_engine as string) ?? "browser");
+      setModel((v.stt_model as string) ?? "");
+    }).catch(() => {});
+    loadStatus();
+  }, []);
+
+  const save = async () => {
+    try {
+      // 기존 ai.policy 필드 보존 + STT 필드만 갱신 → 전역 저장(stt.py 가 읽는 스코프)
+      await api.putSetting("ai.policy", { ...policy, stt_engine: engine, stt_model: model }, "global");
+      setPolicy((p) => ({ ...p, stt_engine: engine, stt_model: model }));
+      setDirty(false); setMsg("저장됨 — 모든 병원·Client 에 즉시 적용");
+      loadStatus();
+    } catch (e) { setMsg(pendMsg(e)); }
+  };
+
+  // 마이크 테스트 — 서버 설정 엔진으로 실제 전사(browser 엔진은 서버 미경유라 테스트 제외 안내)
+  const testMic = () => {
+    if (recording) { recRef.current?.stop(); setRecording(false); return; }
+    if (engine === "browser") { setMsg("브라우저 엔진은 각 Client 내장 Web Speech 사용 — 서버 전사 테스트 대상이 아닙니다"); return; }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setBusy(true);
+        try {
+          const r = await sttTranscribe(new Blob(chunks, { type: "audio/webm" }));
+          setTestText(r.text || "(빈 결과)"); setMsg(`전사 완료 (엔진: ${r.engine})`);
+        } catch (e) { setMsg(e instanceof Error ? e.message : "전사 실패"); }
+        finally { setBusy(false); }
+      };
+      recRef.current = rec; rec.start(); setRecording(true);
+    }).catch(() => setMsg("마이크 권한이 필요합니다"));
+  };
+  useEffect(() => () => recRef.current?.stop(), []);
+
+  const badge = (ok: boolean, label: string) => (
+    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, border: "1px solid var(--border)",
+                   color: ok ? "var(--stat-final)" : "var(--text-secondary)",
+                   background: ok ? "var(--accent-subtle)" : "transparent" }}>
+      {ok ? "●" : "○"} {label}
+    </span>
+  );
+
+  return (
+    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700 }}>🎙 AI 음성 판독 (STT) — 서버 엔진</div>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>OpenAI Whisper(로컬/API)·브라우저 — 전역 설정, 모든 병원·Client 공통</span>
+        <div style={{ flex: 1 }} />
+        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+      </div>
+
+      {stat && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <b style={{ fontSize: 12, color: stat.ready ? "var(--stat-final)" : "var(--stat-emergency)" }}>
+            {stat.ready ? "구동 가능" : "구동 불가(설치/키 확인)"}
+          </b>
+          {badge(stat.available.faster_whisper, "faster-whisper")}
+          {badge(stat.available.openai_whisper, "openai-whisper")}
+          {badge(stat.available.openai_api_key, "OPENAI_API_KEY")}
+          <button onClick={loadStatus} style={{ padding: "1px 8px", fontSize: 11 }}>새로고침</button>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", maxWidth: 560 }}>
+        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>엔진</span>
+        <select style={{ ...inp, padding: "5px 8px" }} value={engine}
+                onChange={(e) => { setEngine(e.target.value); setDirty(true); }}>
+          <option value="browser">브라우저 내장 (Web Speech — Client 로컬, 서버 미전송)</option>
+          <option value="whisper_local">Whisper 로컬 (오픈소스 · 온프레미스 · PHI 안전)</option>
+          <option value="openai_api">OpenAI API (whisper-1 · 음성 외부 전송)</option>
+        </select>
+        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>모델</span>
+        <input style={inp} value={model} onChange={(e) => { setModel(e.target.value); setDirty(true); }}
+               placeholder={engine === "openai_api" ? "whisper-1" : "base / small / medium / large-v3"} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button onClick={testMic} disabled={busy}
+                style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 12px",
+                         border: `1px solid ${recording ? "var(--stat-emergency)" : "var(--border)"}`, borderRadius: 6,
+                         background: recording ? "var(--stat-emergency)" : "var(--bg-canvas)",
+                         color: recording ? "#fff" : "var(--text-primary)", cursor: "pointer" }}>
+          <MicIcon on={recording} /> {busy ? "전사 중…" : recording ? "● 녹음 중 (클릭 종료)" : "마이크 테스트"}
+        </button>
+        {testText && <span style={{ fontSize: 12, color: "var(--text-primary)" }}>전사 결과: “{testText}”</span>}
+      </div>
+
+      <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+        · <b>Whisper 로컬 설치</b>: 서버에서 <code>pip install faster-whisper</code>(권장) 또는 <code>pip install openai-whisper</code>(+ffmpeg) 후 [새로고침].<br />
+        · <b>OpenAI API</b>: 서버 환경변수 <code>OPENAI_API_KEY</code> 설정(코드/DB 저장 금지 — 절대 규칙 4). <span style={{ color: "var(--stat-emergency)" }}>음성이 외부로 전송됩니다.</span><br />
+        · Client 판독창의 마이크 버튼은 이 서버 설정을 그대로 사용합니다(연동).
       </div>
       <Msg text={msg} />
     </div>

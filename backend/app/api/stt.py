@@ -83,6 +83,49 @@ def _openai_api(data: bytes, filename: str, content_type: str, model_name: str) 
     return str(r.json().get("text", "")).strip()
 
 
+def _engine_available() -> dict:
+    """설치·설정 상태 프로브 — 관리자 패널이 어떤 STT 엔진을 쓸 수 있는지 표시."""
+    fw = ow = False
+    try:
+        import faster_whisper  # type: ignore  # noqa: F401
+
+        fw = True
+    except ImportError:
+        pass
+    try:
+        import whisper  # type: ignore  # noqa: F401
+
+        ow = True
+    except ImportError:
+        pass
+    return {
+        "faster_whisper": fw,          # 권장 로컬 엔진
+        "openai_whisper": ow,          # 폴백 로컬 엔진(ffmpeg 필요)
+        "whisper_local": fw or ow,     # 로컬 Whisper 사용 가능 여부
+        "openai_api_key": bool(os.getenv("OPENAI_API_KEY")),
+    }
+
+
+@router.get("/status")
+def stt_status(db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """현재 STT 엔진 설정 + 서버 설치/키 상태. 관리자 설정·Client 마이크 UI 가 소비."""
+    policy = get_setting(db, "ai.policy", default={}) or {}
+    engine = str(policy.get("stt_engine", "browser") or "browser")
+    avail = _engine_available()
+    # 선택 엔진이 실제 구동 가능한지
+    ready = (
+        engine == "browser"
+        or (engine == "whisper_local" and avail["whisper_local"])
+        or (engine == "openai_api" and avail["openai_api_key"])
+    )
+    return {
+        "engine": engine,
+        "model": str(policy.get("stt_model", "") or ""),
+        "ready": ready,
+        "available": avail,
+    }
+
+
 @router.post("")
 async def transcribe(
     audio: UploadFile = File(...),

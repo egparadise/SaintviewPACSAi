@@ -1183,6 +1183,15 @@ export async function sttTranscribe(blob: Blob): Promise<{ text: string; engine:
   return res.json();
 }
 
+/** STT 엔진 설치·설정 상태 (관리자 설정·Client 마이크 UI 소비) */
+export interface SttStatus {
+  engine: "browser" | "whisper_local" | "openai_api";
+  model: string;
+  ready: boolean;
+  available: { faster_whisper: boolean; openai_whisper: boolean; whisper_local: boolean; openai_api_key: boolean };
+}
+export const sttStatus = () => req<SttStatus>("/api/stt/status");
+
 // ── 서버 유지보수·인사이트 타입 (레인 F/B 공통 계약) ──
 export interface MaintStorage {
   db: { size_mb: number; detail?: string };

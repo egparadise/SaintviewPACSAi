@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ensureToken, type PhraseRow, type Report, type StudyDetail } from "../api";
 import { onStudySync, postStudySync } from "../lib/sync";
+import { dictationLabel, useDictation } from "../lib/useDictation";
+import { MicIcon } from "../components/MicIcon";
 
 type Tab = "read" | "hist" | "std" | "tpl";
 
@@ -23,6 +25,16 @@ export function ReportWindow() {
   const [reading, setReading] = useState("");
   const [conclusion, setConclusion] = useState("");
   const [touched, setTouched] = useState(false);
+  // 음성 판독(STT) — 마지막 포커스 필드(기본 Reading)에 전사 텍스트 삽입
+  const dictField = useRef<"reading" | "conclusion">("reading");
+  const insertDictation = (text: string) => {
+    const add = (prev: string) => (prev ? `${prev} ${text}` : text);
+    if (dictField.current === "conclusion") setConclusion(add);
+    else setReading(add);
+    setTouched(true);
+    lastTypedRef.current = Date.now();
+  };
+  const dictation = useDictation(insertDictation);
   const [histView, setHistView] = useState<Report | null>(null);
   const [phrases, setPhrases] = useState<PhraseRow[]>([]);
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({});
@@ -369,12 +381,27 @@ export function ReportWindow() {
       {/* 최상단: Font size 바 (레퍼런스) */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 14px",
                     background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
-        <span style={{ marginLeft: "auto", color: "var(--text-secondary)" }}>Font size</span>
+        {/* 음성 판독(STT) 마이크 — Font size 왼쪽. 서버 설정 엔진(브라우저/Whisper/OpenAI)으로 구동 */}
+        <button onClick={dictation.toggle} disabled={finalized || locked || dictation.busy}
+                title={dictationLabel(dictation.engine, dictation.recording, dictation.busy)}
+                style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5, padding: "3px 10px",
+                         border: `1px solid ${dictation.recording ? "var(--stat-emergency)" : "var(--border)"}`,
+                         borderRadius: 6, background: dictation.recording ? "var(--stat-emergency)" : "var(--bg-canvas)",
+                         color: dictation.recording ? "#fff" : "var(--text-primary)", fontSize: 12.5, cursor: "pointer" }}>
+          <MicIcon on={dictation.recording} />
+          {dictation.busy ? "전사 중…" : dictation.recording ? "녹음 중" : "음성 판독"}
+        </button>
+        <span style={{ color: "var(--text-secondary)" }}>Font size</span>
         <button style={{ padding: "0 8px" }} onClick={() => setFontPx((f) => Math.max(10, f - 1))}>−</button>
         <input type="range" min={10} max={24} value={fontPx} onChange={(e) => setFontPx(Number(e.target.value))} />
         <b>{fontPx}px</b>
         <button style={{ padding: "0 8px" }} onClick={() => setFontPx((f) => Math.min(24, f + 1))}>＋</button>
       </div>
+      {dictation.err && (
+        <div style={{ padding: "3px 14px", fontSize: 11.5, color: "var(--stat-emergency)", background: "var(--bg-panel)" }}>
+          ⚠ {dictation.err}
+        </div>
+      )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* 좌측 사이드바: 판독 기록 | 기록지 */}
@@ -535,14 +562,16 @@ export function ReportWindow() {
             <input readOnly value={detail.clinical_info ?? ""} style={inStyle} />
             <div style={labelStyle}>Refer Comment</div>
             <input readOnly value={detail.referring_physician ?? ""} style={inStyle} />
-            <div style={labelStyle}>Reading</div>
-            <textarea value={reading} placeholder="판독 소견을 입력하세요" disabled={finalized || locked}
+            <div style={labelStyle}>Reading {dictField.current === "reading" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>● 음성 입력 중</span>}</div>
+            <textarea value={reading} placeholder="판독 소견을 입력하세요 (마이크로 음성 입력 가능)" disabled={finalized || locked}
                       title={locked ? LOCK_TIP : undefined}
+                      onFocus={() => { dictField.current = "reading"; }}
                       onChange={(e) => { setReading(e.target.value); setTouched(true); lastTypedRef.current = Date.now(); }}
                       style={{ ...taStyle, minHeight: 140, flex: 1.2 }} />
-            <div style={labelStyle}>Conclusion</div>
-            <textarea value={conclusion} placeholder="결론을 입력하세요" disabled={finalized || locked}
+            <div style={labelStyle}>Conclusion {dictField.current === "conclusion" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>● 음성 입력 중</span>}</div>
+            <textarea value={conclusion} placeholder="결론을 입력하세요 (마이크로 음성 입력 가능)" disabled={finalized || locked}
                       title={locked ? LOCK_TIP : undefined}
+                      onFocus={() => { dictField.current = "conclusion"; }}
                       onChange={(e) => { setConclusion(e.target.value); lastTypedRef.current = Date.now(); }}
                       style={{ ...taStyle, minHeight: 110, flex: 1 }} />
             {sig && (

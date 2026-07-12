@@ -1,6 +1,6 @@
 // 설정 — INFINITT Setting options 패턴(좌측 트리 + 우측 페이지, 화면분석 §5)
 import { useEffect, useRef, useState } from "react";
-import { VIEWER_BASE, api, type AiQuality, type OrthancStatus, type PhraseRow } from "../api";
+import { VIEWER_BASE, api, sttStatus, type AiQuality, type OrthancStatus, type PhraseRow, type SttStatus } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
@@ -56,7 +56,7 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   { key: "modality", label: "장비·수신 (Modality)", admin: true, scope: "hospital" },
   { key: "network", label: "네트워크 (DICOM)", scope: "hospital" },
   { key: "pdf", label: "판독서 PDF", admin: true, scope: "hospital" },
-  { key: "ai", label: "AI 정책", admin: true, scope: "hospital" },
+  { key: "ai", label: "AI 기능", admin: true, scope: "hospital" },
   // 뷰어 — 사용자/판독 환경
   { key: "env", label: "환경 (Environment)", scope: "viewer" },
   { key: "worklist", label: "워크리스트", scope: "viewer" },
@@ -185,6 +185,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // STT 엔진 (음성판독 — 브라우저/Whisper 오픈소스/상용 API)
   const [sttEngine, setSttEngine] = useState("browser");
   const [sttModel, setSttModel] = useState("");
+  const [sttStat, setSttStat] = useState<SttStatus | null>(null);   // 서버 STT 설치/키 상태
+  useEffect(() => { sttStatus().then(setSttStat).catch(() => {}); }, []);
   // 리포트 구성 (Report Composition)
   const [rptAiPanel, setRptAiPanel] = useState(true);
   const [rptAutoApply, setRptAutoApply] = useState(true);
@@ -1792,10 +1794,24 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                            placeholder={sttEngine === "openai_api" ? "whisper-1" : "base / small / medium…"}
                            style={{ width: 220 }} />
                   </Row>
+                  {sttStat && (
+                    <div style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 3,
+                                  background: "var(--bg-canvas)", border: "1px solid var(--border)", borderRadius: 6, padding: 8 }}>
+                      <div style={{ fontWeight: 700, color: sttStat.ready ? "var(--stat-final)" : "var(--stat-emergency)" }}>
+                        {sttStat.ready ? "● 현재 엔진 구동 가능" : "○ 현재 엔진 구동 불가 — 설치/키 확인 필요"}
+                      </div>
+                      <div style={{ color: "var(--text-secondary)" }}>
+                        서버 설치 상태 — faster-whisper: <b>{sttStat.available.faster_whisper ? "설치됨" : "미설치"}</b> ·
+                        openai-whisper: <b>{sttStat.available.openai_whisper ? "설치됨" : "미설치"}</b> ·
+                        OPENAI_API_KEY: <b>{sttStat.available.openai_api_key ? "설정됨" : "없음"}</b>
+                      </div>
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Whisper 로컬: <code>pip install faster-whisper</code> 필요(미설치 시 안내 응답).
                     <b style={{ color: "var(--stat-emergency)" }}> OpenAI API는 음성이 외부로 전송됩니다</b> —
                     API 키는 서버 환경변수 <code>OPENAI_API_KEY</code>로만 설정(코드/설정 저장 금지).
+                    이 설정은 <b>전역(모든 병원·Client 공통)</b>으로 적용됩니다.
                   </div>
                 </Group>
                 {quality && quality.with_ai_draft > 0 && (

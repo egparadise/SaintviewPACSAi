@@ -3,6 +3,8 @@
 // 동작은 Viewer2D 내장 시절과 완전 동일(이사만) — 리포트 로드/저장/승인/상용구/단축키 포함.
 import { useEffect, useRef, useState } from "react";
 import { PERM_DENIED_TIP, api, hasPerm, loadPermMe, type PermMe, type PhraseRow, type Report, type StudyDetail } from "../api";
+import { dictationLabel, useDictation } from "../lib/useDictation";
+import { MicIcon } from "./MicIcon";
 
 export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   detail: StudyDetail;
@@ -17,6 +19,14 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   const [reading, setReading] = useState("");
   const [conclusion, setConclusion] = useState("");
   const [readingTouched, setReadingTouched] = useState(false);
+  // 음성 판독(STT) — 마지막 포커스 필드(기본 Reading)에 전사 삽입
+  const dictField = useRef<"reading" | "conclusion">("reading");
+  const dictation = useDictation((text) => {
+    const add = (prev: string) => (prev ? `${prev} ${text}` : text);
+    if (dictField.current === "conclusion") setConclusion(add);
+    else { setReading(add); setReadingTouched(true); }
+    lastTypedRef.current = Date.now();
+  });
   const [histView, setHistView] = useState<Report | null>(null);
   const [dockPhrases, setDockPhrases] = useState<PhraseRow[]>([]);
   // Setting>판독(Reading) 옵션 — report.prefs
@@ -229,6 +239,16 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
       {/* 상단 바: Font size · CVR · ◀▶ · Reset/Save/Approve */}
       <div style={{ display: "flex", gap: 4, alignItems: "center", padding: "4px 6px",
                     borderBottom: "1px solid var(--border)", fontSize: 11, flexWrap: "wrap" }}>
+        {/* 음성 판독(STT) 마이크 — Font 왼쪽. 서버 설정 엔진으로 구동, 마지막 포커스 필드에 삽입 */}
+        <button onClick={dictation.toggle} disabled={finalizedDock || locked || !canWrite || dictation.busy}
+                title={dictationLabel(dictation.engine, dictation.recording, dictation.busy)}
+                style={{ display: "flex", alignItems: "center", gap: 4, padding: "1px 7px",
+                         border: `1px solid ${dictation.recording ? "var(--stat-emergency)" : "var(--border)"}`,
+                         borderRadius: 5, background: dictation.recording ? "var(--stat-emergency)" : "var(--bg-canvas)",
+                         color: dictation.recording ? "#fff" : "var(--text-primary)", cursor: "pointer" }}>
+          <MicIcon on={dictation.recording} size={13} />
+          {dictation.busy ? "전사…" : dictation.recording ? "녹음" : "음성"}
+        </button>
         <span style={{ color: "var(--text-secondary)" }}>Font</span>
         <button style={{ padding: "0 6px" }} onClick={() => setFontPx((f) => Math.max(10, f - 1))}>−</button>
         <span>{fontPx}px</span>
@@ -292,11 +312,13 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
           {/* report.write 없으면 readOnly — 조회는 가능(레인 W). 확정 잠금 중에도 readOnly */}
           <textarea value={reading} placeholder="Enter reading findings" disabled={finalizedDock}
                     readOnly={!canWrite || locked} title={locked ? LOCK_TIP : canWrite ? undefined : PERM_DENIED_TIP}
+                    onFocus={() => { dictField.current = "reading"; }}
                     onChange={(e) => { setReading(e.target.value); setReadingTouched(true); lastTypedRef.current = Date.now(); }}
                     style={{ ...taStyle, flex: 1.4, minHeight: 90 }} />
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>Conclusion</div>
           <textarea id="sv-dock-conclusion" value={conclusion} placeholder="Enter conclusion" disabled={finalizedDock}
                     readOnly={!canWrite || locked} title={locked ? LOCK_TIP : canWrite ? undefined : PERM_DENIED_TIP}
+                    onFocus={() => { dictField.current = "conclusion"; }}
                     onChange={(e) => { setConclusion(e.target.value); lastTypedRef.current = Date.now(); }}
                     style={{ ...taStyle, flex: 1, minHeight: 70 }} />
           {dockSig && (
