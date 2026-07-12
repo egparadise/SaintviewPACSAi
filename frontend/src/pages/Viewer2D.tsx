@@ -352,6 +352,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [thumbOpen, setThumbOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [overlayOn, setOverlayOn] = useState(true);
+  // 키이미지 마크 — 열린 검사의 key_images SOP 집합(반응형). 페인에 🔑 마크 표시, 토글 시 즉시 갱신
+  const [keyMarks, setKeyMarks] = useState<Set<string>>(new Set());
   const [cine, setCine] = useState(false);
   const cineRef = useRef<number | null>(null);
   const [status, setStatus] = useState("");
@@ -701,6 +703,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, detail.study_uid, addDetail?.id, stackDetail?.id, keySops?.length]);
+
+  // 키이미지 마크 로드 — 열린 검사(openTabs) 전체의 key_images SOP 집합(합집합). 열림 변화 시 갱신
+  useEffect(() => {
+    const ids = [...new Set(openTabs.map((t) => t.id))];
+    if (!ids.length) return;
+    let alive = true;
+    Promise.all(ids.map((id) => api.instances(id).then((r) => (r.key_images ?? []).map((k) => k.sop_uid)).catch(() => [])))
+      .then((lists) => { if (alive) setKeyMarks(new Set(lists.flat())); });
+    return () => { alive = false; };
+  }, [openTabs]);
 
   /* 시리즈 트리 캐시 — 비교/탭 전환 공용 */
   const getTree = async (examId: number) => {
@@ -1383,9 +1395,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         ? cur.filter((k) => k.sop_uid !== inst.sop_uid)
         : [...cur, { sop_uid: inst.sop_uid, orthanc_id: inst.orthanc_id,
                      instance_number: inst.instance_number }];
-      return api.setKeyImages(id, next).then(() =>
+      return api.setKeyImages(id, next).then(() => {
+        // 페인 마크 즉시 갱신 (재조회 없이 반응형 반영)
+        setKeyMarks((prev) => {
+          const n = new Set(prev);
+          if (exists) n.delete(inst.sop_uid); else n.add(inst.sop_uid);
+          return n;
+        });
         setStatus(exists ? `🔑 키이미지 해제 — 남은 ${next.length}장`
-                         : `🔑 키이미지 등록 (${next.length}장) — 워크리스트 🔑 표시`));
+                         : `🔑 키이미지 등록 (${next.length}장) — 워크리스트 🔑 표시`);
+      });
     }).catch(() => setStatus("키이미지 저장 실패"));
   };
 
@@ -1702,6 +1721,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               `${80 - magPos.ny * (inst.rows || 1) * magPos.sc * 3}px`,
             filter: p.invert ? "invert(1)" : undefined,
           }} />
+        )}
+        {/* 키이미지 마크 — 현재 표시 이미지가 키이미지면 상단 중앙에 🔑 배지 (overlay 토글과 무관) */}
+        {p.series?.instances[p.index] && keyMarks.has(p.series.instances[p.index].sop_uid) && (
+          <div style={{ position: "absolute", top: 5, left: "50%", transform: "translateX(-50%)", zIndex: 5,
+                        display: "flex", alignItems: "center", gap: 3, padding: "1px 9px", borderRadius: 10,
+                        background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 11, fontWeight: 800,
+                        letterSpacing: 0.4, pointerEvents: "none", boxShadow: "0 1px 5px rgba(0,0,0,0.5)" }}>
+            🔑 KEY
+          </div>
         )}
         {overlayOn && p.series && (() => {
           const meta = studyMeta[p.studyUid] ?? detail;  // 페인의 검사 기준 — 다른 환자 영상에 주검사 환자명 오표기 방지
