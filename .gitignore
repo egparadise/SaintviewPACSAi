@@ -25,3 +25,6 @@ deploy/scp-policy.env
 
 # Import 로컬 이미지 저장소(런타임)
 backend/storage/
+
+# Orthanc 병원 컨테이너 런타임 DB(자식 생성물)
+deploy/generated/orthanc-*-data/
