@@ -18,6 +18,7 @@ import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { ReportDock } from "../components/ReportDock";
+import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
@@ -348,9 +349,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [magPos, setMagPos] = useState<{ pi: number; t: number; mx: number; my: number;
                                          nx: number; ny: number; sc: number } | null>(null);
   const [tableData, setTableData] = useState<{ title: string; rows: string[][] } | null>(null);
-  const recRef = useRef<MediaRecorder | null>(null);
-  const audioRef = useRef<Record<number, Blob>>({});
-  const [recording, setRecording] = useState(false);
+  // 음성 판독(Rec) — 서버 STT(OpenAI Whisper/로컬/브라우저) 연동. 전사 텍스트를 판독 도크에 삽입
+  const dict = useDictation((text) => {
+    window.dispatchEvent(new CustomEvent("sv-dictation-insert", { detail: { text } }));
+    say(`🎙 음성 판독 → 판독문 삽입: “${text.slice(0, 30)}${text.length > 30 ? "…" : ""}”`);
+  });
+  const calibRef = useRef(false);   // Calibrate 진행 중 플래그(기준선 완료를 가로챔)
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
   // 우클릭 컨텍스트 메뉴 + 우드래그 기본 도구(초기 분석 §7: 우드래그=기본 지정 도구, 기본 W/L)
@@ -490,7 +494,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     api.seriesTree(ex.d.id).then((t) => {
       setSeries(t.series);
       setExams((es) => es.map((e, i) => (i === activeExam ? { ...e, series: t.series } : e)));
-    }).catch(() => {});
+      // 활성 검사를 보이는 페인들의 시리즈 객체를 새 데이터로 교체(인덱스 범위 보정) — 미교체 시 화면 미갱신 버그
+      setPanes((ps) => ps.map((q) => {
+        if (q.studyUid !== ex.d.study_uid || !q.series) return q;
+        const ns = t.series.find((s) => s.series_uid === q.series!.series_uid);
+        return ns ? { ...q, series: ns, index: Math.min(q.index, Math.max(0, ns.instances.length - 1)) } : q;
+      }));
+    }).catch(() => say("검사 갱신 실패"));
   };
   // 검사 닫기(실행) — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
   const proceedCloseExam = (i: number) => {
@@ -956,42 +966,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "anno3d":   // 3D 주석은 3D 뷰어(Crosshair)에서 — 뷰어 호출
         setShow3d(true);
         break;
-      case "dictation": {   // 음성 녹음 시작/정지 (세션 보관 — 서버 저장은 차기)
-        if (recording) {
-          recRef.current?.stop();
-          break;
-        }
-        navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
-          const chunks: BlobPart[] = [];
-          const mr = new MediaRecorder(stream);
-          mr.ondataavailable = (ev) => chunks.push(ev.data);
-          mr.onstop = () => {
-            audioRef.current[curD.id] = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
-            stream.getTracks().forEach((t) => t.stop());
-            setRecording(false);
-            say("🎙 녹음 저장됨 — 🔊 로 재생 (세션 보관)");
-          };
-          mr.start();
-          recRef.current = mr;
-          setRecording(true);
-          say("🎙 녹음 중… 다시 누르면 정지");
-        }).catch(() => say("마이크 권한이 필요합니다"));
+      case "dictation":   // 음성 판독(Rec) — 서버 STT 엔진으로 녹음/전사 → 판독문 삽입
+        dict.toggle();
+        say(dict.recording ? "🎙 녹음 정지 — 전사 중…"
+          : dict.engine === "browser" ? "🎙 음성 인식 중(브라우저)… Rec 를 다시 누르면 정지"
+          : `🎙 녹음 중(${dict.engine === "openai_api" ? "OpenAI" : "Whisper 로컬"})… Rec 를 다시 누르면 전사`);
         break;
-      }
-      case "playdict": {
-        const blob = audioRef.current[curD.id];
-        if (!blob) { say("이 검사의 녹음이 없습니다"); break; }
-        void new Audio(URL.createObjectURL(blob)).play();
+      case "playdict":
+        if (!dict.playLast()) say("재생할 녹음이 없습니다 (서버 STT 엔진에서 녹음 후 재생 가능)");
         break;
-      }
-      case "calibrate": {
-        const inst = p.series?.instances[p.index];
-        const sp = inst?.pixel_spacing;
-        say(sp?.length === 2
-          ? `Pixel Spacing: ${sp[0].toFixed(3)} × ${sp[1].toFixed(3)} mm (${inst!.rows}×${inst!.cols}px)`
-          : "Pixel Spacing 정보 없음 — 측정은 px 단위로 표시");
+      case "calibrate":   // 기준선(길이 측정) 2점 → 실측 mm → pixel_spacing 재설정
+        calibRef.current = true;
+        setTool("mline");
+        say("Calibrate — 실제 길이를 아는 기준선을 그으세요 (완료 후 mm 입력)");
         break;
-      }
       case "capture": {
         const inst = p.series?.instances[p.index];
         if (p.series && inst) {
@@ -1041,8 +1029,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     schedHist();   // 글자 새기기/측정 등 주석 추가 — 히스토리 기록
   };
 
+  const applyCalibrationInfi = (pi: number, pts: { x: number; y: number }[]) => {
+    // pts 는 이미지 픽셀 좌표 → 픽셀 길이 직접 계산
+    const pixLen = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    if (pixLen < 1) { say("Calibrate 취소 — 기준선이 너무 짧습니다"); return; }
+    const mmStr = window.prompt(`기준선의 실제 길이(mm)를 입력하세요\n(화면상 ${pixLen.toFixed(1)}px)`, "10");
+    const mm = Number(mmStr);
+    if (!mmStr || !Number.isFinite(mm) || mm <= 0) { say("Calibrate 취소"); return; }
+    const mmPerPx = mm / pixLen;
+    setPanes((ps) => ps.map((q, k) => (k === pi && q.series
+      ? { ...q, series: { ...q.series, instances: q.series.instances.map((i) => ({ ...i, pixel_spacing: [mmPerPx, mmPerPx] })) } }
+      : q)));
+    say(`✅ Calibrate 완료 — 1px = ${mmPerPx.toFixed(4)}mm (기준 ${mm}mm / ${pixLen.toFixed(1)}px). 이후 측정은 mm 로 표시`);
+  };
   const finishTool = (pi: number, p: Pane, inst: InstanceNode, pts: { x: number; y: number }[]) => {
     const sop = inst.sop_uid;
+    // Calibrate 진행 중이면 기준선(2점) 완료를 가로채 보정(측정 미생성)
+    if (calibRef.current && pts.length >= 2) {
+      calibRef.current = false;
+      applyCalibrationInfi(pi, pts);
+      setTool("select");
+      return;
+    }
     const url = p.series ? instUrl(p.studyUid || curD.study_uid, p.series, inst, p.wl) : "";
     const sp = inst.pixel_spacing?.length === 2 ? inst.pixel_spacing : null;
     switch (tool) {
@@ -2115,7 +2123,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               const toolBtn = (t: (typeof PALETTE)[number]) => {
                 const activeBtn = (t.mode && tool === t.id) || (t.id === "cine" && !!panes[active]?.playing)
                   || (["sharpen", "smooth", "pseudo"].includes(t.id) && panes[active]?.fx === t.id)
-                  || (t.id === "dictation" && recording);
+                  || (t.id === "dictation" && (dict.recording || dict.busy));
                 const name = t.label.split("—")[0].trim();
                 return (
                   <button key={t.id} title={t.label} onClick={() => t.impl && fire(t.id)}

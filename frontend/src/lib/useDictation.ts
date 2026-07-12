@@ -20,6 +20,7 @@ export function useDictation(onText: (text: string) => void) {
   const [busy, setBusy] = useState(false);   // 서버 전사 대기(녹음 종료 후)
   const [err, setErr] = useState("");
   const recRef = useRef<{ stop: () => void } | null>(null);
+  const lastBlobRef = useRef<Blob | null>(null);   // 마지막 녹음 오디오(Play 재생용 — 서버 엔진만)
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
@@ -43,9 +44,11 @@ export function useDictation(onText: (text: string) => void) {
         rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
         rec.onstop = async () => {
           stream.getTracks().forEach((t) => t.stop());
+          const blob = new Blob(chunks, { type: "audio/webm" });
+          lastBlobRef.current = blob;   // Play 재생용 보관
           setBusy(true);
           try {
-            const r = await sttTranscribe(new Blob(chunks, { type: "audio/webm" }));
+            const r = await sttTranscribe(blob);
             if (r.text) onTextRef.current(r.text);
           } catch (e) { setErr(e instanceof Error ? e.message : "STT 전사 실패"); }
           finally { setBusy(false); }
@@ -81,7 +84,18 @@ export function useDictation(onText: (text: string) => void) {
     setRecording(true);
   }, [engine, recording]);
 
-  return { engine, recording, busy, err, toggle };
+  // 마지막 녹음 재생(Play) — 서버 엔진(whisper/openai)만 blob 보관. browser 엔진은 blob 없음.
+  const playLast = useCallback((): boolean => {
+    const b = lastBlobRef.current;
+    if (!b) return false;
+    const url = URL.createObjectURL(b);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    void audio.play();
+    return true;
+  }, []);
+
+  return { engine, recording, busy, err, toggle, playLast };
 }
 
 /** 마이크 버튼 라벨/툴팁 — 엔진·상태별 (공용) */

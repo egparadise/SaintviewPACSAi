@@ -21,12 +21,15 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   const [readingTouched, setReadingTouched] = useState(false);
   // 음성 판독(STT) — 마지막 포커스 필드(기본 Reading)에 전사 삽입
   const dictField = useRef<"reading" | "conclusion">("reading");
-  const dictation = useDictation((text) => {
+  const appendDictation = (text: string) => {
     const add = (prev: string) => (prev ? `${prev} ${text}` : text);
     if (dictField.current === "conclusion") setConclusion(add);
     else { setReading(add); setReadingTouched(true); }
     lastTypedRef.current = Date.now();
-  });
+  };
+  const dictation = useDictation(appendDictation);
+  // 뷰어 팔레트 Rec(딕테이션) → STT 전사 텍스트 삽입 가드는 ref로 최신값 참조(선언 순서 무관)
+  const dictGateRef = useRef(false);
   const [histView, setHistView] = useState<Report | null>(null);
   const [dockPhrases, setDockPhrases] = useState<PhraseRow[]>([]);
   // Setting>판독(Reading) 옵션 — report.prefs
@@ -212,6 +215,17 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   }, []);
 
   const finalizedDock = report?.status === "finalized";
+  dictGateRef.current = !finalizedDock && canWrite && !locked;   // 삽입 가드 최신화
+  // 뷰어 팔레트 Rec(딕테이션) → STT 전사 텍스트를 이 판독 도크의 포커스 필드에 삽입
+  useEffect(() => {
+    const onDict = (e: Event) => {
+      const t = (e as CustomEvent<{ text?: string }>).detail?.text;
+      if (t && dictGateRef.current) appendDictation(t);
+    };
+    window.addEventListener("sv-dictation-insert", onDict);
+    return () => window.removeEventListener("sv-dictation-insert", onDict);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // In Viewer 는 related_exams 를 옵셔널로 다룬다(런타임에 없을 수 있음) — 방어적 기본값
   const relExams = detail.related_exams ?? [];
   const dockSig = (report?.diff_metrics as { signature?: { name: string; license_no: string; signed_at: string } })?.signature;

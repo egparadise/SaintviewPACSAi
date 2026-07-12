@@ -11,6 +11,7 @@ import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
+import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { IN_MOUSE_OPS } from "../lib/infiConfig";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
@@ -337,10 +338,6 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [hoverPane, setHoverPane] = useState<string | null>(null);
   // TY-3(7): 로컬 미디어(jpg/png/bmp/avi/mp4) 파일 선택
   const mediaInputRef = useRef<HTMLInputElement>(null);
-  // TY-3(8): 딕테이션 — MediaRecorder 녹음(검사 id별 세션 보관, In dictation 이식)
-  const recRef = useRef<MediaRecorder | null>(null);
-  const audioBlobs = useRef<Record<number, Blob>>({});
-  const [recording, setRecording] = useState(false);
   // TY-3(9): Compare 모달 — 같은 환자 과거검사 다중 선택 비교
   const [cmpOpen, setCmpOpen] = useState(false);
   const [cmpSel, setCmpSel] = useState<Set<number>>(new Set());
@@ -1050,6 +1047,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     d: { sop_uid: string; series_uid: string }, points: number[][], inst: InstanceNode,
   ) => {
     setDraft(null);
+    // Calibrate 진행 중이면 length 완료를 가로채 보정 처리(주석 미생성)
+    if (calibRef.current && points.length >= 2) {
+      calibRef.current = false;
+      applyCalibration(pid, points, inst);
+      return;
+    }
     const p = panes[pid];
     switch (tk) {
       // ── 셔터 3종 — 페인 시각 상태(주석 아님), Clr/Reset 으로 해제 ──
@@ -1354,15 +1357,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       case "print": window.print(); break;
       case "rfsh": void refreshExam(); break;
       case "comb": combineSeries(); break;
-      case "calib": {
-        // Calibrate — 픽셀 간격(PixelSpacing) 정보 안내 (In Viewer calibrate 이식)
-        const inst = p.series?.instances[p.index];
-        const sp = inst?.pixel_spacing;
-        setStatus(sp?.length === 2
-          ? `Calibrate — Pixel Spacing ${sp[0].toFixed(3)} × ${sp[1].toFixed(3)} mm (${inst!.rows}×${inst!.cols}px)`
-          : "Calibrate — Pixel Spacing 정보 없음, 측정은 px 단위로 표시됩니다");
-        break;
-      }
+      case "calib": startCalibrate(); break;   // 기준선 그리기 → mm 입력 → pixel_spacing 재설정
       case "capture": {
         const url = renderedUrl(p);
         if (url) { const el = document.createElement("a"); el.href = url; el.download = `saintview_${Date.now()}.png`; el.click(); }
@@ -1408,33 +1403,48 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     }).catch(() => setStatus("키이미지 저장 실패"));
   };
 
-  /* ── TY-3(8): 딕테이션 — MediaRecorder 녹음/재생 (검사별 세션 보관, In dictation 이식. 서버 저장은 차기) ── */
+  /* ── Calibrate — 기준선(length) 2점 + 실제 길이(mm) 입력 → 활성 페인 시리즈 pixel_spacing 재설정 ── */
+  const calibRef = useRef(false);
+  const startCalibrate = () => {
+    calibRef.current = true;
+    setTool("length");
+    setDraft(null);
+    setStatus("Calibrate — 실제 길이를 아는 기준선을 그으세요 (예: 자·마커). 완료 후 mm 입력");
+  };
+  const applyCalibration = (pid: string, points: number[][], inst: InstanceNode) => {
+    const dx = (points[1][0] - points[0][0]) * (inst.cols || 1);
+    const dy = (points[1][1] - points[0][1]) * (inst.rows || 1);
+    const pixLen = Math.hypot(dx, dy);
+    if (pixLen < 1) { setStatus("Calibrate 취소 — 기준선이 너무 짧습니다"); return; }
+    const mmStr = window.prompt(`기준선의 실제 길이(mm)를 입력하세요\n(화면상 ${pixLen.toFixed(1)}px)`, "10");
+    const mm = Number(mmStr);
+    if (!mmStr || !Number.isFinite(mm) || mm <= 0) { setStatus("Calibrate 취소"); return; }
+    const mmPerPx = mm / pixLen;
+    // 활성 페인 시리즈의 모든 인스턴스 pixel_spacing 을 보정값으로 교체 → 이후 측정이 mm 로 계산
+    setPanes((prev) => {
+      const pane = prev[pid];
+      if (!pane.series) return prev;
+      const series = { ...pane.series, instances: pane.series.instances.map((i) => ({ ...i, pixel_spacing: [mmPerPx, mmPerPx] })) };
+      return { ...prev, [pid]: { ...pane, series } };
+    });
+    setTool(null);
+    setStatus(`✅ Calibrate 완료 — 1px = ${mmPerPx.toFixed(4)}mm (기준 ${mm}mm / ${pixLen.toFixed(1)}px). 이후 측정은 mm 로 표시`);
+  };
+
+  /* ── TY-3(8): 딕테이션(Rec) — 서버 STT(OpenAI Whisper/로컬/브라우저) 연동. 전사 텍스트를 판독 도크에 삽입 ── */
+  const dict = useDictation((text) => {
+    // 판독 도크(ReportDock)가 창 이벤트를 받아 포커스 필드에 삽입
+    window.dispatchEvent(new CustomEvent("sv-dictation-insert", { detail: { text } }));
+    setStatus(`🎙 음성 판독 → 판독문 삽입: “${text.slice(0, 30)}${text.length > 30 ? "…" : ""}”`);
+  });
   const toggleDictation = () => {
-    if (recording) { recRef.current?.stop(); return; }
-    const examId = currentNavId();
-    navigator.mediaDevices?.getUserMedia({ audio: true }).then((stream) => {
-      const chunks: BlobPart[] = [];
-      const mr = new MediaRecorder(stream);
-      mr.ondataavailable = (ev) => chunks.push(ev.data);
-      mr.onstop = () => {
-        audioBlobs.current[examId] = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
-        stream.getTracks().forEach((t) => t.stop());
-        setRecording(false);
-        setStatus("🎙 녹음 저장됨 — Play 로 재생 (세션 보관)");
-      };
-      mr.start();
-      recRef.current = mr;
-      setRecording(true);
-      setStatus("🎙 녹음 중… Dict 를 다시 누르면 정지");
-    }).catch(() => setStatus("마이크 권한이 필요합니다"));
+    dict.toggle();
+    setStatus(dict.recording ? "🎙 녹음 정지 — 전사 중…"
+      : dict.engine === "browser" ? "🎙 음성 인식 중(브라우저)… Rec 를 다시 누르면 정지"
+      : `🎙 녹음 중(${dict.engine === "openai_api" ? "OpenAI" : "Whisper 로컬"})… Rec 를 다시 누르면 전사`);
   };
   const playDictation = () => {
-    const blob = audioBlobs.current[currentNavId()];
-    if (!blob) { setStatus("이 검사의 녹음이 없습니다"); return; }
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);   // 재생 종료 시 오브젝트 URL 해제(누수 방지)
-    void audio.play();
+    if (!dict.playLast()) setStatus("재생할 녹음이 없습니다 (서버 STT 엔진에서 녹음 후 재생 가능)");
   };
 
   /* ── TY-3(9): Compare — 같은 환자 과거검사 다중 선택 비교 오픈 (In Compare 이식, 페이지 리로드 없이).
@@ -2116,11 +2126,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   </button>
                 )}
                 {tbOn("dict") && (
-                  <button title="Dictation — 음성 녹음 시작/정지 (검사별 세션 보관, 서버 저장은 차기)"
+                  <button title={`음성 판독(STT) — 녹음/정지. 엔진: ${dict.engine === "browser" ? "브라우저" : dict.engine === "openai_api" ? "OpenAI" : "Whisper 로컬"} (설정>AI 기능). 전사 텍스트는 판독문에 삽입`}
                           onClick={() => { recordUse("dict"); toggleDictation(); }}
+                          disabled={dict.busy}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
-                                   background: recording ? "var(--accent)" : undefined }}>
-                    <TyInner id="dict" label={recording ? "Rec●" : "Dict"} />
+                                   background: dict.recording ? "var(--stat-emergency)" : dict.busy ? "var(--accent)" : undefined,
+                                   color: dict.recording ? "#fff" : undefined }}>
+                    <TyInner id="dict" label={dict.busy ? "전사…" : dict.recording ? "Rec●" : "Rec"} />
                   </button>
                 )}
                 {tbOn("dict") && (
