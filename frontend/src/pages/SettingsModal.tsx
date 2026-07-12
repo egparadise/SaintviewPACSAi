@@ -1189,6 +1189,28 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </Group>
             )}
             {page === "viewer" && (
+              <Group title="Tools 아이콘 크기 (TY · In 뷰어)">
+                <Row label="TY Viewer">
+                  <input type="range" min={13} max={64} step={1} value={tyToolSize}
+                         onChange={(e) => setTyToolSize(Number(e.target.value))} />
+                  <input type="number" min={13} max={64} value={tyToolSize} style={{ width: 52, marginLeft: 6 }}
+                         onChange={(e) => setTyToolSize(Math.min(64, Math.max(13, Number(e.target.value) || 51)))} />
+                  <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
+                </Row>
+                <Row label="In Viewer">
+                  <input type="range" min={13} max={64} step={1} value={infToolSize}
+                         onChange={(e) => setInfToolSize(Number(e.target.value))} />
+                  <input type="number" min={13} max={64} value={infToolSize} style={{ width: 52, marginLeft: 6 }}
+                         onChange={(e) => setInfToolSize(Math.min(64, Math.max(13, Number(e.target.value) || 34)))} />
+                  <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
+                </Row>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  두 뷰어의 도구 팔레트 아이콘 크기를 한 곳에서 조정합니다 (각 뷰어 전용 탭에서도 동일하게 조정 가능).
+                  <b> OK(저장)</b> 후 열려 있는 뷰어를 새로고침하면 반영됩니다.
+                </div>
+              </Group>
+            )}
+            {page === "viewer" && (
               <Group title="선택 뷰어 (Client Viewer)">
                 <Row label="사용할 뷰어">
                   <select value={clientViewer} onChange={(e) => setClientViewer(e.target.value)}>
@@ -1296,8 +1318,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </label>
                 </Row>
                 <Row label="아이콘 크기">
-                  <input type="range" min={24} max={52} step={2} value={infToolSize}
-                         onChange={(e) => setInfToolSize(Number(e.target.value))} /> {infToolSize}px
+                  <input type="range" min={13} max={64} step={1} value={infToolSize}
+                         onChange={(e) => setInfToolSize(Number(e.target.value))} />
+                  <input type="number" min={13} max={64} value={infToolSize} style={{ width: 52, marginLeft: 6 }}
+                         onChange={(e) => setInfToolSize(Math.min(64, Math.max(13, Number(e.target.value) || 34)))} />
+                  <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
                 </Row>
                 <Row label="시네 기본 간격">
                   <input type="number" min={0.1} max={10} step={0.1} value={infCineSec}
