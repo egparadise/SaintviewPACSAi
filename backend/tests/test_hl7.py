@@ -299,6 +299,36 @@ def test_testgen_explicit_orders(client, db, auth_headers):
     assert str(ds.InstitutionalDepartmentName) == "영상의학과"
 
 
+def test_testgen_explicit_extended_fields(client, db, auth_headers):
+    """명시 모드 확장 필드 — 생년월일·예약일/시각·장비 AET·Study ID 가 Order 에 저장된다."""
+    h = _mk_hospital(db, "TGX")
+    r = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id,
+        "patient": {"last_name": "CHOI", "modality": "CT",
+                    "birth_date": "19700101", "scheduled_date": "20260812",
+                    "scheduled_time": "0930", "station_aet": "CT01", "dicom_study_id": "SID9"},
+        "exams": [
+            {"region": "Brain", "body_part": "BRAIN", "projection": "Contrast (Post)"},
+            {"region": "Chest", "body_part": "CHEST", "projection": "Non-Contrast (Pre)"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    orders = [db.get(Order, o["order_id"]) for o in r.json()["orders"]]
+    assert all(o.birth_date == "19700101" for o in orders)
+    assert all(o.scheduled_date == "20260812" and o.scheduled_time == "0930" for o in orders)
+    assert all(o.station_aet == "CT01" for o in orders)
+    # Study ID: 다건이면 -1/-2 접미
+    assert [o.dicom_study_id for o in orders] == ["SID9-1", "SID9-2"]
+    # 미입력 시 폴백 — 예약일/시각은 오늘/현재, Study ID 는 T{id} 자동 채번
+    r2 = client.post("/api/hl7/testgen", headers=auth_headers, json={
+        "hospital_id": h.id, "patient": {"last_name": "SEO", "modality": "CR"},
+        "exams": [{"region": "Chest", "body_part": "CHEST", "projection": "PA"}],
+    })
+    o2 = db.get(Order, r2.json()["orders"][0]["order_id"])
+    assert o2.scheduled_date and len(o2.scheduled_date) == 8       # 오늘로 채움
+    assert o2.dicom_study_id.startswith("T")                       # 자동 채번
+
+
 def test_testgen_explicit_autogen_ids(client, db, auth_headers):
     """명시 모드 — patient_id/accession 미입력 시 생성 규칙(프리픽스/자릿수)으로 채움."""
     h = _mk_hospital(db, "TGF")

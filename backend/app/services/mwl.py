@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import Order
@@ -63,6 +64,23 @@ def _allowed_aets(db: Session, hospital_id: int) -> set[str]:
             for i in stored.get("items", []) if i.get("ae_title")}
 
 
+def mark_taken(db: Session, order_ids: list[int], calling: str) -> None:
+    """장비가 MWL 로 가져간 오더 기록 — 호출 AET·시각 관찰만, status 는 불변.
+
+    DICOM 관례상 장비는 같은 워크리스트를 재질의하므로 MWL 응답은 계속 제공하고,
+    재질의 시 최신 AET/시각으로 갱신한다. calling 이 비면 "(unknown)" 으로 기록.
+    """
+    if not order_ids:
+        return
+    db.execute(
+        update(Order)
+        .where(Order.id.in_(order_ids))
+        .values(taken_aet=(calling or "(unknown)")[:32],
+                taken_at=datetime.now(timezone.utc))
+    )
+    db.commit()
+
+
 def _pending_orders(db: Session, hospital_id: int) -> list[Order]:
     """미완료(scheduled) 오더 — 해당 병원 귀속 + 전역(NULL) 오더."""
     q = select(Order).where(
@@ -91,13 +109,20 @@ def _make_handler(hospital_id: int, registered_only: bool):
                     yield 0xA700, None  # Refused: Out of Resources(등록 장비 아님)
                     return
             query = event.identifier
-            for order in _pending_orders(db, hospital_id):
-                if event.is_cancelled:
-                    yield 0xFE00, None
-                    return
-                if order_matches(order, query):
-                    ds = build_mwl_dataset(order)
-                    yield 0xFF00, ds
+            yielded_ids: list[int] = []  # 장비에 응답(yield)한 오더 — 가져감 기록 대상
+            try:
+                for order in _pending_orders(db, hospital_id):
+                    if event.is_cancelled:
+                        yield 0xFE00, None
+                        return
+                    if order_matches(order, query):
+                        ds = build_mwl_dataset(order)
+                        yielded_ids.append(order.id)
+                        yield 0xFF00, ds
+            finally:
+                # 취소·연결 끊김(GeneratorExit) 경로 포함 — 이미 응답한 오더만 기록.
+                # registered_only 거부 경로는 try 진입 전이라 기록되지 않는다.
+                mark_taken(db, yielded_ids, calling)
         # 매칭 순회 종료 — pynetdicom 이 Success(0x0000)로 마감
 
     return handle_find

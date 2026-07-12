@@ -30,12 +30,16 @@ def _order_out(o: Order) -> dict:
         "scheduled_time": o.scheduled_time, "procedure_desc": o.procedure_desc,
         "station_aet": o.station_aet, "status": o.status,
         "body_part": o.body_part, "projection": o.projection, "dicom_study_id": o.dicom_study_id,
+        "physician": o.physician, "department": o.department, "hospital_id": o.hospital_id,
+        # 장비 가져감 관찰 — MWL C-FIND 응답 시 기록(상태 불변)
+        "taken_aet": o.taken_aet,
+        "taken_at": o.taken_at.isoformat() if o.taken_at else "",
     }
 
 
 @router.get("")
 def list_orders(
-    status: str = "", date: str = "", limit: int = 100,
+    status: str = "", date: str = "", hospital_id: int = 0, taken: str = "", limit: int = 100,
     db: Session = Depends(get_db), user: dict = Depends(current_user),
 ):
     q = select(Order)
@@ -43,6 +47,12 @@ def list_orders(
         q = q.where(Order.status == status)
     if date:
         q = q.where(Order.scheduled_date == date)
+    if hospital_id > 0:  # 병원 스코프 — MWL 응답 범위와 동일(병원 귀속 + 전역 NULL)
+        q = q.where((Order.hospital_id == hospital_id) | (Order.hospital_id.is_(None)))
+    if taken == "yes":   # 장비가 가져간 오더만
+        q = q.where(Order.taken_aet != "")
+    elif taken == "no":  # 아직 안 가져간 오더만
+        q = q.where(Order.taken_aet == "")
     q = q.order_by(Order.scheduled_date.desc(), Order.scheduled_time.desc(), Order.id.desc())
     rows = db.execute(q.limit(min(limit, 500))).scalars().all()
     return {"items": [_order_out(o) for o in rows]}
@@ -95,6 +105,77 @@ def create_order(body: OrderBody, db: Session = Depends(get_db), user: dict = De
                     detail={"by": user["sub"], "patient": order.patient_key}))
     db.commit()
     return _order_out(order)
+
+
+class OrderUpdateBody(BaseModel):
+    """오더 수정 — 전 필드 옵션(전달된 필드만 반영). scheduled 상태만 허용."""
+    patient_name: str | None = None
+    birth_date: str | None = None
+    sex: str | None = None
+    modality: str | None = None
+    scheduled_date: str | None = None
+    scheduled_time: str | None = None
+    procedure_desc: str | None = None
+    station_aet: str | None = None
+    body_part: str | None = None
+    projection: str | None = None
+    physician: str | None = None
+    department: str | None = None
+
+
+# 필드별 길이 제한 — create_order 와 동일
+_UPDATE_LIMITS = {
+    "patient_name": 128, "birth_date": 8, "sex": 8, "modality": 16,
+    "scheduled_date": 8, "scheduled_time": 6, "procedure_desc": 256,
+    "station_aet": 32, "body_part": 64, "projection": 32,
+    "physician": 64, "department": 64,
+}
+
+
+@router.put("/{order_id}")
+def update_order(
+    order_id: int, body: OrderUpdateBody,
+    db: Session = Depends(get_db), user: dict = Depends(current_user),
+):
+    """오더 수정 — scheduled 상태만 허용(그 외 409). 장비가 이미 진행/완료한 오더 보호."""
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+    if order.status != "scheduled":
+        raise HTTPException(
+            status_code=409, detail=f"'{order.status}' 상태 오더는 수정할 수 없습니다(scheduled만 허용)"
+        )
+    fields = body.model_dump(exclude_unset=True)
+    sd = fields.get("scheduled_date")
+    if sd and len(sd) != 8:
+        raise HTTPException(status_code=400, detail="scheduled_date는 YYYYMMDD")
+    for key, value in fields.items():
+        if value is None:
+            continue
+        value = str(value)
+        if key in ("body_part", "projection"):  # create_order 와 동일 정규화
+            value = value.strip().upper()
+        setattr(order, key, value[:_UPDATE_LIMITS[key]])
+    db.add(AuditLog(action="order_update", target_type="order", target_id=str(order_id),
+                    detail={"by": user["sub"], "fields": sorted(fields)}))
+    db.commit()
+    return _order_out(order)
+
+
+@router.delete("/{order_id}")
+def delete_order(
+    order_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user),
+):
+    """오더 삭제 — 상태 무관 허용(MWL 테스트 뷰 정리 용도). 감사 로그에 원본 요약 보존."""
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+    db.add(AuditLog(action="order_delete", target_type="order", target_id=str(order_id),
+                    detail={"by": user["sub"], "accession": order.accession_no,
+                            "patient": order.patient_key, "status": order.status}))
+    db.delete(order)
+    db.commit()
+    return {"ok": True}
 
 
 class StatusBody(BaseModel):

@@ -333,6 +333,12 @@ export const api = {
     req<OrderRow>("/api/orders", { method: "POST", body: JSON.stringify(body) }),
   setOrderStatus: (id: number, status: string) =>
     req<OrderRow>(`/api/orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+  /** 오더 수정 — scheduled 상태만 허용(그 외 409) */
+  updateOrder: (id: number, body: Partial<OrderRow>) =>
+    req<OrderRow>(`/api/orders/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  /** 오더 삭제 */
+  deleteOrder: (id: number) =>
+    req<{ ok: boolean }>(`/api/orders/${id}`, { method: "DELETE" }),
   exportMwl: () =>
     req<{ ok: boolean; count: number; dir: string }>("/api/orders/export-mwl", { method: "POST" }),
   setBookmark: (studyId: number, bookmark: boolean) =>
@@ -1071,6 +1077,11 @@ export interface OrderRow {
   body_part: string;
   projection: string;        // PA/AP/LAT…
   dicom_study_id: string;    // DICOM StudyID (0020,0010)
+  physician?: string;        // 의뢰의 (MWL ReferringPhysicianName)
+  department?: string;
+  hospital_id?: number | null;
+  taken_aet?: string;        // 장비가 MWL 로 가져간 경우 호출 AET (관찰 기록)
+  taken_at?: string | null;  // 가져간 시각 (ISO)
 }
 
 /** 상용구/템플릿 — DB 테이블(phrases). kind=phrase(단축키)|template, text=결론, reading_text=판독 */

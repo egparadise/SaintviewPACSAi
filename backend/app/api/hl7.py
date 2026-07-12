@@ -370,6 +370,12 @@ class TestgenPatient(BaseModel):
     physician: str = ""
     department: str = ""
     modality: str = ""
+    # 오더 입력 확장 필드 — 미입력 시 서버가 기본값(오늘/현재시각/자동 채번)으로 채움
+    birth_date: str = ""
+    scheduled_date: str = ""
+    scheduled_time: str = ""
+    station_aet: str = ""
+    dicom_study_id: str = ""
 
 
 class TestgenBody(BaseModel):

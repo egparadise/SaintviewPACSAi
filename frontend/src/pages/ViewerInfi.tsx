@@ -16,8 +16,9 @@ const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewe
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
-import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { ReportDock } from "../components/ReportDock";
+import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
 import type { HpRule } from "../lib/viewerConfig";
@@ -192,6 +193,15 @@ const TEXT_KINDS = new Set(["text", "marking", "box", "spine"]);
 type CloseReq = { kind: "one"; i: number } | { kind: "all" };
 type CloseMode = "ask" | "save_current" | "save_all" | "none";
 
+/** 우드래그 기본 도구(§7 rdrag) — 기본 W/L(초기 분석 준수), 메뉴에서 Zoom/Pan 선택 가능 */
+type RdragTool = "wl" | "zoom" | "pan";
+const RDRAG_KEY = "sv_infi_rdrag";
+/** 마우스 조작 안내(IN_MOUSE_OPS) key → 한국어 표기 */
+const MOUSE_KEY_LABELS: Record<string, string> = {
+  lclick: "좌클릭", ctrl_lclick: "Ctrl+좌클릭", shift_lclick: "Shift+좌클릭",
+  ldrag: "좌드래그", dblclick: "더블클릭", rclick: "우클릭", rdrag: "우드래그", ctrl_wheel: "Ctrl+휠",
+};
+
 /** ② AI 자동 최적 W/L (TY autoWL 이식) — 모달리티×부위 결정적 규칙 v1, 추후 AI 추론 교체 지점 */
 function autoWL(modality: string, bodyPart: string): { q: string; label: string } | null {
   const bp = (bodyPart || "").toUpperCase();
@@ -340,7 +350,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const audioRef = useRef<Record<number, Blob>>({});
   const [recording, setRecording] = useState(false);
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
-  const drag = useRef<{ x: number; y: number; btn: number; pane: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
+  // 우클릭 컨텍스트 메뉴 + 우드래그 기본 도구(초기 분석 §7: 우드래그=기본 지정 도구, 기본 W/L)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; pane: number } | null>(null);
+  const [rdragTool, setRdragTool] = useState<RdragTool>(
+    () => ((localStorage.getItem(RDRAG_KEY) as RdragTool) || "wl"));
+  const rdragRef = useRef(rdragTool);
+  rdragRef.current = rdragTool;
+  const setRdrag = (t: RdragTool) => { setRdragTool(t); try { localStorage.setItem(RDRAG_KEY, t); } catch { /* 저장 불가 무시 */ } };
 
   const tilesOf = (p?: Pane) => (p ? p.il.r * p.il.c : 1);
 
@@ -1212,19 +1229,24 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setSelPanes(new Set());   // 일반 클릭 — 선택 집합 밖이면 해제
     }
     setActive(i);
+    if (ctxMenu) setCtxMenu(null);   // 메뉴 열려 있으면 먼저 닫음
     const measuring = isPointTool(tool) && e.button === 0;
     if (!measuring && (e.button === 0 || e.button === 2)) {
-      drag.current = { x: e.clientX, y: e.clientY, btn: e.button, pane: i };
+      drag.current = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, pane: i, moved: false, shift: e.shiftKey };
     }
   };
   const onMouseMove = (e: React.MouseEvent) => {
     const d = drag.current;
     if (!d) return;
+    // 이동 임계값(5px) 초과부터 드래그로 간주 — 우클릭 메뉴/우드래그 도구 구분
+    if (Math.abs(e.clientX - d.sx) > 5 || Math.abs(e.clientY - d.sy) > 5) d.moved = true;
+    if (!d.moved) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     d.x = e.clientX; d.y = e.clientY;
     const p = panes[d.pane];
     if (!p) return;
-    const mode: Tool = d.btn === 2 ? "wl" : tool;
+    // 우=기본 지정 도구(rdragTool, 기본 W/L), 좌=선택 도구
+    const mode: Tool = d.btn === 2 ? rdragRef.current : tool;
     const tg = targetsOf(d.pane);   // Crosslink 선택 집합이면 함께 조작
     if (mode === "pan") updMany(tg, (q) => ({ tx: q.tx + dx, ty: q.ty + dy }));
     else if (mode === "zoom") updMany(tg, (q) => ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (1 - dy / 200))) }));
@@ -1235,11 +1257,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       });
     }
   };
-  const endDrag = () => {
+  const endDrag = (e?: React.MouseEvent) => {
     const d = drag.current;
     drag.current = null;
     // W/L·Zoom·Pan 드래그 종료 시점에 히스토리 기록(드래그 중엔 미기록)
     if (d && (d.btn === 2 || ["pan", "zoom", "wl"].includes(tool))) schedHist();
+    // 우클릭(이동 없음): Shift+우클릭=Zoom Out / 그 외=컨텍스트 메뉴 (mouseleave 제외 — mouseup 만)
+    if (e && e.type === "mouseup" && d && d.btn === 2 && !d.moved) {
+      if (d.shift) updMany(targetsOf(d.pane), (q) => ({ zoom: Math.max(0.05, q.zoom * 0.8) }));
+      else setCtxMenu({ x: e.clientX, y: e.clientY, pane: d.pane });
+    }
   };
   const onWheel = (e: React.WheelEvent, i: number) => {
     if (tHeld.current) {   // T+스크롤 — 오버레이 글자 크기 (계정 저장)
@@ -1777,9 +1804,50 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     return out;
   };
 
+  // 우클릭 컨텍스트 메뉴 항목 — 전부 기존 함수(act/applyWl/key2d/saveAnnos)에 배선(초기 분석 §7)
+  const applyWlInfi = (q: string) => { updMany(targetsOf(active), () => ({ wl: q })); schedHist(); };
+  const buildCtxItems = (): CtxItem[] => [
+    { label: "좌드래그 도구", disabled: true },
+    { label: "  Select/W-L", checked: tool === "wl" || tool === "select", onClick: () => setTool("wl") },
+    { label: "  Zoom", checked: tool === "zoom", onClick: () => setTool("zoom") },
+    { label: "  Pan", checked: tool === "pan", onClick: () => setTool("pan") },
+    { label: "우드래그 도구", icon: "▸", children: [
+      { label: "W/L", checked: rdragTool === "wl", onClick: () => setRdrag("wl") },
+      { label: "Zoom", checked: rdragTool === "zoom", onClick: () => setRdrag("zoom") },
+      { label: "Pan", checked: rdragTool === "pan", onClick: () => setRdrag("pan") },
+    ] },
+    { kind: "sep" },
+    { label: `W/L 프리셋 (${curD.modality})`, icon: "▸", children: wlPresets.map((p) => ({
+      label: p.label, onClick: () => applyWlInfi(p.q),
+    })).concat([{ label: "반전(Invert)", onClick: () => fire("invert") }]) },
+    { label: "방향", icon: "▸", children: [
+      { label: "좌 90°", onClick: () => fire("rotL") },
+      { label: "우 90°", onClick: () => fire("rotR") },
+      { label: "180°", onClick: () => fire("rot180") },
+      { label: "좌우 반전", onClick: () => fire("flipH") },
+      { label: "상하 반전", onClick: () => fire("flipV") },
+    ] },
+    { label: "보기", icon: "▸", children: [
+      { label: "Fit", onClick: () => fire("fit") },
+      { label: "1:1 (Reset Zoom)", onClick: () => updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })) },
+      { label: maximized === active ? "최대화 해제" : "최대화", onClick: () => setMaximized((m) => (m === active ? null : active)) },
+    ] },
+    { kind: "sep" },
+    { label: "Key Image 지정/해제", onClick: () => fire("key2d") },
+    { label: "주석 저장", onClick: () => void saveAnnos() },
+    { kind: "sep" },
+    { label: "마우스 조작", icon: "▸", children: IN_MOUSE_OPS.map((m) => ({
+      label: `${MOUSE_KEY_LABELS[m.key] ?? m.key} · ${m.action}`, disabled: true,
+    })) },
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#000", color: "var(--text-secondary)" }}
          onContextMenu={(e) => e.preventDefault()} onMouseUp={endDrag} onMouseLeave={endDrag}>
+      {ctxMenu && (
+        <ViewerContextMenu x={ctxMenu.x} y={ctxMenu.y} items={buildCtxItems()}
+                           onClose={() => setCtxMenu(null)} />
+      )}
       {/* CSS 선예화 필터 정의 (Sharpens Filter — feConvolveMatrix) */}
       <svg width="0" height="0" style={{ position: "absolute" }}>
         <filter id="in-sharpen">

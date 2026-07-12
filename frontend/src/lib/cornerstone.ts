@@ -23,7 +23,8 @@ let initialized = false;
 export async function ensureCornerstone() {
   if (initialized) return;
   // useNorm16Texture: 16비트 픽셀 정밀 텍스처 — 계조 뭉개짐 방지 (Viewer3D ensureInit 과 동일)
-  await csInit({ rendering: { useNorm16Texture: true } });
+  // 설치된 @cornerstonejs 타입 정의엔 없으나 런타임 옵션은 유효 — 인자 캐스팅으로 타입만 통과
+  await csInit({ rendering: { useNorm16Texture: true } } as unknown as Parameters<typeof csInit>[0]);
   // vite dev에서 디코드 워커 무음 정지 이슈 → 메인스레드 디코드(소량 스택엔 충분)
   dicomImageLoaderInit({ maxWebWorkers: 0 });
   toolsInit();

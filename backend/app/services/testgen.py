@@ -151,7 +151,13 @@ def generate_explicit(db: Session, hospital_id: int | None, stored_cfg: dict | N
     modality = str(patient.get("modality") or "").strip().upper()[:16]
     physician = str(patient.get("physician") or "").strip()[:64]
     department = str(patient.get("department") or "").strip()[:64]
+    # 오더 입력 확장 필드 — 미입력 시 오늘/현재시각/빈값(자동 채번)으로 폴백
+    birth_date = str(patient.get("birth_date") or "").strip()[:8]
+    station_aet = str(patient.get("station_aet") or "").strip()[:32]
+    base_sid = str(patient.get("dicom_study_id") or "").strip()[:16]
     now = datetime.now(timezone.utc)
+    sched_date = str(patient.get("scheduled_date") or "").strip() or now.strftime("%Y%m%d")
+    sched_time = str(patient.get("scheduled_time") or "").strip() or now.strftime("%H%M%S")
     orders_out: list[dict] = []
     for idx, exam in enumerate(exams, 1):
         body_part = str(exam.get("body_part") or "").strip().upper()[:64]
@@ -159,11 +165,10 @@ def generate_explicit(db: Session, hospital_id: int | None, stored_cfg: dict | N
         desc = " ".join(p for p in (body_part, projection) if p) or "가상 검사(오더 입력)"
         order = Order(
             patient_key=pid[:128], patient_name=name[:128],
-            birth_date="", sex=sex, modality=modality,
+            birth_date=birth_date, sex=sex, modality=modality,
             body_part=body_part, projection=projection,
-            scheduled_date=now.strftime("%Y%m%d"),
-            scheduled_time=now.strftime("%H%M%S"),
-            procedure_desc=desc, station_aet="", hospital_id=hospital_id,
+            scheduled_date=sched_date[:8], scheduled_time=sched_time[:6],
+            procedure_desc=desc, station_aet=station_aet, hospital_id=hospital_id,
             physician=physician, department=department,
         )
         db.add(order)
@@ -172,7 +177,8 @@ def generate_explicit(db: Session, hospital_id: int | None, stored_cfg: dict | N
             order.accession_no = _uniquify_accession(db, f"{base_acc}-{idx}"[:60], order.id)
         else:
             order.accession_no = _unique_accession(db, cfg, order.id)
-        order.dicom_study_id = f"T{order.id:06d}"
+        # StudyID: 입력 시 다건이면 -1/-2 접미, 미입력 시 T{id} 자동 채번
+        order.dicom_study_id = (f"{base_sid}-{idx}" if len(exams) > 1 else base_sid)[:16] if base_sid else f"T{order.id:06d}"
         orders_out.append({"order_id": order.id, "accession_no": order.accession_no,
                            "body_part": order.body_part, "projection": order.projection})
     db.add(AuditLog(action="testgen_order_entry", target_type="order", target_id="*",

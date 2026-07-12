@@ -51,6 +51,7 @@ import {
   type WorklistTab,
 } from "./WorklistTree";
 
+import { OrderEntryRis } from "../components/OrderEntryRis";
 import { MergeIcon, ReadStateIcon } from "../components/readState";
 import { GridPicker } from "../lib/GridPicker";
 import { IN_EXAM_STATUSES, IN_STATUS_MAP } from "../lib/infiConfig";
@@ -1674,91 +1675,54 @@ ${rows}
   );
 }
 
-/* ── 오더 등록 모달 (UBPACS 오더 폼 — Study ID/Accession 자동 생성) ─────── */
-function OrderEditModal({ onSave, onClose }: {
-  onSave: (body: Partial<OrderRow>) => Promise<void>;
+/* ── 오더 등록 모달 — RIS 오더 입력형(OrderEntryRis 공용 컴포넌트)으로 통일 (레인 F-B) ──
+   내용물은 OrderEntryRis 가 전담하고, 이 함수는 모달 셸(오버레이·패널·닫기)만 유지한다.
+   저장 = 검사 항목(exams)마다 api.createOrder 순차 호출, 성공 메시지는 컴포넌트가 표시. */
+function OrderEditModal({ onSaved, onClose }: {
+  onSaved: () => void;   // 저장 성공 직후 호출 — 오더 목록 새로고침용
   onClose: () => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  const [f, setF] = useState({
-    patient_key: "", last_name: "", first_name: "", birth_date: "", sex: "",
-    dicom_study_id: "", accession_no: "", modality: "CR", body_part: "",
-    projection: "", procedure_desc: "", scheduled_date: today, scheduled_time: "",
-    station_aet: "",
-  });
-  const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const [err, setErr] = useState("");
-  const gen = (kind: "sid" | "acc") => {
-    const seq = Date.now().toString().slice(-8);
-    if (kind === "sid") set("dicom_study_id", `S${seq.slice(-6)}`);
-    else set("accession_no", `SV${seq}`);
-  };
-  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-      <span style={{ width: 92, color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
-      {children}
-    </label>
-  );
+  // 기존 gen 로직 재사용 — epoch 하위 8자리 시퀀스 기반 자동 채번 (SV 프리픽스)
+  const genSeq = () => Date.now().toString().slice(-8);
+  const genPid = () => `SV${genSeq()}`;
+  const genAcc = () => `SV${genSeq()}`;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
          onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-                    width: 520, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-        <b style={{ fontSize: 13 }}>새 오더 등록 — MWL로 장비에 전달됩니다</b>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <Row label="환자 ID *"><input autoFocus value={f.patient_key} onChange={(e) => set("patient_key", e.target.value)} style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="성별">
-            <select value={f.sex} onChange={(e) => set("sex", e.target.value)} style={{ flex: 1 }}>
-              <option value="">-</option><option value="M">M</option><option value="F">F</option><option value="O">O</option>
-            </select>
-          </Row>
-          <Row label="Last name"><input value={f.last_name} onChange={(e) => set("last_name", e.target.value)} placeholder="HONG" style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="First name"><input value={f.first_name} onChange={(e) => set("first_name", e.target.value)} placeholder="GILDONG" style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="생년월일"><input value={f.birth_date} onChange={(e) => set("birth_date", e.target.value)} placeholder="YYYYMMDD" maxLength={8} style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="Modality">
-            <select value={f.modality} onChange={(e) => set("modality", e.target.value)} style={{ flex: 1 }}>
-              {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM", "ES", "RF", "OT"].map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </Row>
-          <Row label="Study ID">
-            <input value={f.dicom_study_id} onChange={(e) => set("dicom_study_id", e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-            <button title="번호 자동 생성" onClick={() => gen("sid")} style={{ padding: "1px 7px" }}>자동</button>
-          </Row>
-          <Row label="Accession">
-            <input value={f.accession_no} onChange={(e) => set("accession_no", e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-            <button title="번호 자동 생성" onClick={() => gen("acc")} style={{ padding: "1px 7px" }}>자동</button>
-          </Row>
-          <Row label="Body part"><input value={f.body_part} onChange={(e) => set("body_part", e.target.value)} placeholder="CHEST" style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="Projection">
-            <select value={f.projection} onChange={(e) => set("projection", e.target.value)} style={{ flex: 1 }}>
-              <option value="">-</option>
-              {["PA", "AP", "LAT", "OBL", "AXIAL", "BOTH"].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </Row>
-          <Row label="예약일"><input value={f.scheduled_date} onChange={(e) => set("scheduled_date", e.target.value)} placeholder="YYYYMMDD" maxLength={8} style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="예약시각"><input value={f.scheduled_time} onChange={(e) => set("scheduled_time", e.target.value)} placeholder="HHMM" maxLength={6} style={{ flex: 1, minWidth: 0 }} /></Row>
-          <Row label="장비 AET"><input value={f.station_aet} onChange={(e) => set("station_aet", e.target.value)} placeholder="CR01 (빈칸=ANY)" style={{ flex: 1, minWidth: 0 }} /></Row>
+                    width: 1050, maxWidth: "95vw", maxHeight: "92vh", overflow: "auto",
+                    padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <b style={{ fontSize: 13 }}>새 오더 등록 — MWL로 장비에 전달됩니다</b>
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} title="닫기" style={{ padding: "1px 8px" }}>✕</button>
         </div>
-        <Row label="Description"><input value={f.procedure_desc} onChange={(e) => set("procedure_desc", e.target.value)} placeholder="Chest PA" style={{ flex: 1 }} /></Row>
-        {err && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{err}</div>}
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button className="primary" disabled={!f.patient_key.trim()}
-                  onClick={async () => {
-                    try {
-                      const patient_name = [f.last_name.trim().toUpperCase(), f.first_name.trim().toUpperCase()]
-                        .filter(Boolean).join("^");  // DICOM PN
-                      await onSave({
-                        patient_key: f.patient_key, patient_name, birth_date: f.birth_date, sex: f.sex,
-                        accession_no: f.accession_no, modality: f.modality,
-                        scheduled_date: f.scheduled_date, scheduled_time: f.scheduled_time,
-                        procedure_desc: f.procedure_desc, station_aet: f.station_aet,
-                        body_part: f.body_part, projection: f.projection, dicom_study_id: f.dicom_study_id,
-                      });
-                      onClose();
-                    } catch (e) { setErr(e instanceof Error ? e.message : "등록 실패"); }
-                  }}>등록</button>
-          <button onClick={onClose}>취소</button>
-        </div>
+        <OrderEntryRis
+          genPid={genPid}
+          genAcc={genAcc}
+          onSave={async (p, exams) => {
+            // 검사 항목 1건 = 오더 1건. Patient ID 빈값이면 400 → 자동 채번으로 방어.
+            const pid = p.patient_id.trim() || genPid();
+            const patient_name = [p.last_name.trim().toUpperCase(), p.first_name.trim().toUpperCase()]
+              .filter(Boolean).join("^");  // DICOM PN: LAST^FIRST
+            const acc = p.accession.trim();  // 빈값 = 서버 자동 채번(SV{id:08d}) 위임 — 접미 미적용
+            for (let i = 0; i < exams.length; i++) {
+              const ex = exams[i];
+              await api.createOrder({
+                patient_key: pid, patient_name, birth_date: p.birth_date, sex: p.sex,
+                // 다건이면 -1/-2 접미로 Accession 중복 방지 (SPEC 매핑)
+                accession_no: acc ? (exams.length > 1 ? `${acc}-${i + 1}` : acc) : "",
+                modality: p.modality,
+                scheduled_date: p.scheduled_date, scheduled_time: p.scheduled_time,
+                procedure_desc: `${ex.body_part} ${ex.projection}`.trim(),
+                station_aet: p.station_aet,
+                body_part: ex.body_part, projection: ex.projection,
+                dicom_study_id: p.dicom_study_id,
+              });
+            }
+            onSaved();  // 목록 즉시 갱신 (모달은 열어둠 — 연속 등록 가능)
+            return `오더 ${exams.length}건 등록`;
+          }} />
       </div>
     </div>
   );
@@ -1787,6 +1751,12 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
       setMsg(`MWL ${r.count}건 내보냄 → 장비 C-FIND 응답`);
     } catch (e) { setMsg(e instanceof Error ? e.message : "MWL 실패"); }
   };
+  // 오더 삭제 — confirm 후 DELETE, 실패 사유는 사용자에게 그대로 노출 (삼킴 금지)
+  const del = async (o: OrderRow) => {
+    if (!confirm(`오더 삭제 — ${o.patient_name || o.patient_key} / ${o.accession_no || "(Accession 없음)"}\n삭제하면 되돌릴 수 없습니다.`)) return;
+    try { await api.deleteOrder(o.id); load(); }
+    catch (e) { alert(e instanceof Error ? e.message : "오더 삭제 실패"); }
+  };
 
   return (
     <PanelBox title="오더/예약 (RIS·MWL)" right={
@@ -1796,7 +1766,7 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
       </span>
     }>
       <table className="grid-table">
-        <thead><tr><th>환자</th><th>오더명</th><th>MOD</th><th>예약일</th><th>상태</th><th></th></tr></thead>
+        <thead><tr><th>환자</th><th>오더명</th><th>MOD</th><th>예약일</th><th>상태</th><th>가져감</th><th></th></tr></thead>
         <tbody>
           {items.map((o) => (
             <tr key={o.id}>
@@ -1805,6 +1775,10 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
               <td>{o.modality}</td>
               <td>{o.scheduled_date}</td>
               <td>{ORDER_STATUS[o.status] ?? o.status}</td>
+              {/* 장비가 MWL C-FIND 로 가져간 관찰 기록 — AET 표시, 시각은 title 툴팁 */}
+              <td>{o.taken_aet
+                ? <span title={o.taken_at ? `가져간 시각: ${o.taken_at.slice(0, 19).replace("T", " ")}` : undefined}>🏷 {o.taken_aet}</span>
+                : "—"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
                 {o.status === "scheduled" && (
                   <MiniBtn title="검사 시작 (MPPS IN PROGRESS)" onClick={() => setSt(o.id, "in_progress")}>시작</MiniBtn>
@@ -1815,18 +1789,19 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
                 {(o.status === "scheduled" || o.status === "in_progress") && (
                   <MiniBtn title="취소 (MPPS DISCONTINUED)" onClick={() => setSt(o.id, "cancelled")}>✕</MiniBtn>
                 )}
+                <MiniBtn title="오더 삭제 (DB에서 제거 — 되돌릴 수 없음)" onClick={() => del(o)}
+                         style={{ color: "var(--stat-emergency)" }}>✕</MiniBtn>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>오더 없음 — New로 등록, MWL로 장비 전달</td></tr>
+            <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>오더 없음 — New로 등록, MWL로 장비 전달</td></tr>
           )}
         </tbody>
       </table>
       {msg && <div style={{ padding: "3px 8px", fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</div>}
       {modalOpen && (
-        <OrderEditModal onClose={() => setModalOpen(false)}
-                        onSave={async (body) => { await api.createOrder(body); load(); }} />
+        <OrderEditModal onClose={() => setModalOpen(false)} onSaved={load} />
       )}
     </PanelBox>
   );

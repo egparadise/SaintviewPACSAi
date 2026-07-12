@@ -301,6 +301,9 @@ class Order(Base):
     department: Mapped[str] = mapped_column(String(64), default="")
     # MPPS 매핑: scheduled(예약) → in_progress(IN PROGRESS) → completed(COMPLETED) | cancelled(DISCONTINUED)
     status: Mapped[str] = mapped_column(String(16), default="scheduled", index=True)
+    # 장비 가져감 관찰 — MWL C-FIND 응답 시 호출 AET/시각 기록(상태 불변, 재질의 시 갱신)
+    taken_aet: Mapped[str] = mapped_column(String(32), default="")
+    taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 경량 테넌시 — HL7 ORM/가상환자 생성기 오더의 병원 귀속(MWL 병원 필터). NULL=전역
     hospital_id: Mapped[int | None] = mapped_column(
         ForeignKey("hospitals.id"), nullable=True, index=True

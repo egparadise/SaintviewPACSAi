@@ -47,7 +47,8 @@ let initialized = false;
 async function ensureInit() {
   if (initialized) return;
   // useNorm16Texture: CT/MR 16비트 픽셀을 저정밀 텍스처로 양자화하지 않도록 — 계조 뭉개짐(banding) 방지
-  await csInit({ rendering: { useNorm16Texture: true } });
+  // 설치된 @cornerstonejs 타입 정의엔 없으나 런타임 옵션은 유효 — 인자 캐스팅으로 타입만 통과
+  await csInit({ rendering: { useNorm16Texture: true } } as unknown as Parameters<typeof csInit>[0]);
   dicomImageLoaderInit();
   toolsInit();
   addTool(WindowLevelTool);
