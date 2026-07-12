@@ -186,7 +186,7 @@ interface ViewerPrefs {
 const DEFAULT_PREFS: ViewerPrefs = {
   paletteSide: "left", thumbSide: "left", thumbSize: 128,
   thumbMode: "series", hanging2d: {}, reportDock: true,
-  paletteW: 138, dockW: 340, toolbar: {}, wl_presets: WL_PRESETS,
+  paletteW: 200, dockW: 340, toolbar: {}, wl_presets: WL_PRESETS,
   close_mode: "ask",
 };
 
@@ -357,7 +357,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [status, setStatus] = useState("");
   // 판독 도크 — 공유 컴포넌트 ReportDock 로 추출(상태·로직 포함 이사, components/ReportDock.tsx)
   // TY 팔레트 개인화 (viewer.prefs — 계정 로밍): 아이콘 크기/라벨/퀵로우/사용패턴/오버레이 폰트
-  const [tySize, setTySize] = useState(17);          // ty_tool_size
+  const [tySize, setTySize] = useState(51);          // ty_tool_size (기본 3배 확대 — 구 기본 17 저장분은 아래서 승격)
   const [tyLabels, setTyLabels] = useState(true);    // ty_tool_labels
   const [tyIcon3d, setTyIcon3d] = useState(true);    // ty_icon_3d — false 면 플랫(평면) 아이콘
   const [tyQuickRow, setTyQuickRow] = useState(true);  // ty_quick_row — ★ Quick 행 표시
@@ -597,7 +597,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (!merged.wl_presets?.length) merged.wl_presets = WL_PRESETS;
       // 구 기본값 업그레이드(23차: 팔레트·썸네일 확대) — 직접 조절한 값은 유지
       if (merged.thumbSize === 84) merged.thumbSize = 128;
-      if (merged.paletteW === 100) merged.paletteW = 138;
+      // 아이콘 3배 확대(현 차수)에 맞춰 팔레트 폭 승격 — 구 기본 100/138 저장분만
+      if (merged.paletteW === 100 || merged.paletteW === 138) merged.paletteW = 200;
       if (merged.dockW === 250) merged.dockW = 340;  // 판독 도크 에디터화(26차)에 맞춰 확대
       setPrefs(merged);
       const hp = merged.hanging2d?.[detail.modality];
@@ -609,7 +610,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         ty_overlay_font?: number; ty_overlay_visible?: boolean;
         ty_sel_color?: string; ty_cine_sec?: number;
       };
-      if (t.ty_tool_size) setTySize(t.ty_tool_size);
+      // 구 기본값(17) 저장분은 새 3배 기본(51)으로 승격 — 직접 키운 값은 유지
+      if (t.ty_tool_size && t.ty_tool_size !== 17) setTySize(t.ty_tool_size);
       if (t.ty_tool_labels !== undefined) setTyLabels(t.ty_tool_labels);
       if (t.ty_icon_3d !== undefined) setTyIcon3d(t.ty_icon_3d);
       if (t.ty_quick_row !== undefined) setTyQuickRow(t.ty_quick_row);

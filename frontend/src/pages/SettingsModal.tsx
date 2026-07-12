@@ -154,7 +154,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infRptDock, setInfRptDock] = useState(false);
   const [infScrollBar, setInfScrollBar] = useState(false);  // 페인 우측 이미지 위치 인디케이터(초록 바) — 기본 꺼짐
   // TY Viewer 신규 (viewer.prefs ty_* 키 계약) — 아이콘 크기/라벨/3D·★Quick·사용 패턴·오버레이 글자
-  const [tyToolSize, setTyToolSize] = useState(17);
+  const [tyToolSize, setTyToolSize] = useState(51);   // 기본 3배 확대(구 17)
   const [tyToolLabels, setTyToolLabels] = useState(true);
   const [tyIcon3d, setTyIcon3d] = useState(true);
   const [tyQuickRow, setTyQuickRow] = useState(true);
@@ -297,7 +297,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       const ty = v as { ty_tool_size?: number; ty_tool_labels?: boolean; ty_icon_3d?: boolean;
                         ty_quick_row?: boolean; ty_usage_rec?: boolean;
                         ty_usage?: Record<string, number>; ty_overlay_font?: number };
-      if (ty.ty_tool_size) setTyToolSize(ty.ty_tool_size);
+      if (ty.ty_tool_size && ty.ty_tool_size !== 17) setTyToolSize(ty.ty_tool_size);  // 구 기본 17→새 기본 51 승격
       if (ty.ty_tool_labels !== undefined) setTyToolLabels(ty.ty_tool_labels);
       if (ty.ty_icon_3d !== undefined) setTyIcon3d(ty.ty_icon_3d);
       if (ty.ty_quick_row !== undefined) setTyQuickRow(ty.ty_quick_row);
@@ -1368,11 +1368,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </div>
                 <Group title="툴 아이콘·팔레트 (TY Viewer)">
                   <Row label="아이콘 크기">
-                    <input type="range" min={13} max={28} step={1} value={tyToolSize}
+                    <input type="range" min={13} max={64} step={1} value={tyToolSize}
                            onChange={(e) => setTyToolSize(Number(e.target.value))} />
-                    <input type="number" min={13} max={28} value={tyToolSize}
+                    <input type="number" min={13} max={64} value={tyToolSize}
                            style={{ width: 56, marginLeft: 6 }}
-                           onChange={(e) => setTyToolSize(Math.min(28, Math.max(13, Number(e.target.value) || 17)))} />
+                           onChange={(e) => setTyToolSize(Math.min(64, Math.max(13, Number(e.target.value) || 51)))} />
                     <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
                   </Row>
                   <Row label="라벨 표시">
