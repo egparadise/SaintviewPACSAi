@@ -342,7 +342,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
   );
   const [selSeries, setSelSeries] = useState<string | null>(null);
-  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan">("zoom");
+  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan" | "select">("zoom");
   // 팔레트 섹션 — 기본 전체 펼침(헤더 클릭으로 개별 접기)
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(["common", "anno", "anatomy", "px", "shut", "2d", "etc"]));
   const toggleSec = (k: string) => setOpenSecs((p) => {
@@ -487,6 +487,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [draft, setDraft] = useState<{ pid: string; sop_uid: string; series_uid: string; points: number[][] } | null>(null);
   // 편집 선택 주석 — select 모드(도구 없음)에서 히트테스트로 지정. idx=annos 배열 index, sop=검증 태그
   const [selAnno, setSelAnno] = useState<{ sop: string; idx: number } | null>(null);
+  // 마퀴(녹색 점선) 다중 선택 — Select 모드 빈 공간 드래그로 영역 내 주석 일괄 선택 → Del/휴지통/우클릭 삭제
+  const [selAnnos, setSelAnnos] = useState<number[] | null>(null);   // annos 배열 index 목록
+  const selAnnosRef = useRef(selAnnos);
+  useEffect(() => { selAnnosRef.current = selAnnos; }, [selAnnos]);
+  const [marquee, setMarquee] = useState<{ a: [number, number]; b: [number, number] } | null>(null);
+  const marqueeRef = useRef<{ pid: string; rect: DOMRect; aspect: number; a: [number, number]; b: [number, number] } | null>(null);
   const [refOn, setRefOn] = useState(false);
   // TY-2 이식 상태 — Spine Label 연번, Profile 그래프·2D Table 모달 (In Viewer 이식)
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
@@ -564,7 +570,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setPanes((prev) => Object.fromEntries(
       Object.entries(prev).map(([k, p]) => [k, s.vis[k] ? { ...p, ...s.vis[k] } : p])));
     setAnnos(s.annos);
-    setSelAnno(null);   // 스냅샷 복원 — annos 배열이 바뀌어 selAnno.idx 가 다른 주석을 가리키므로 선택 해제
+    setSelAnno(null); setSelAnnos(null); setMarquee(null);   // 스냅샷 복원 — 인덱스 무효화 → 선택 해제
   };
   const histGo = (d: -1 | 1) => {
     const ni = histIdx.current + d;
@@ -952,7 +958,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
 
   const step = useCallback((pid: string, dir: number) => {
-    setSelAnno(null);   // §B: 이미지 전환 시 편집 선택 해제 — 안 보이는 이전 이미지 주석의 무피드백 삭제 방지
+    setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §B: 이미지 전환 시 편집·마퀴 선택 해제
     setPanes((prev) => {
       const next = { ...prev };
       const stride = Math.max(1, imgLay.r * imgLay.c);  // Image Layout 분할 시 페이지 단위 이동
@@ -994,18 +1000,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           // 계층 초기화(§D): 진행중 그리기/이동/리사이즈 → 편집 선택(selAnno) → 도구 → 멀티선택 → 최대화 → 닫기.
           // annoDragRef 는 draft 유무와 무관하게 항상 취소 — move/resize(draft=null) 중 Esc 가 드래그를
           // 멈추지 못해 mouseup 에서 이동이 확정되던 문제 방지(In Esc 정합)
-          annoDragRef.current = null;
+          annoDragRef.current = null; marqueeRef.current = null; setMarquee(null);
           if (menu) setMenu(null);
           else if (draft) setDraft(null);
+          else if (selAnnos) setSelAnnos(null);
           else if (selAnno) setSelAnno(null);
           else if (tool) setTool(null);
           else if (selPanes.size) setSelPanes(new Set());  // 멀티 선택 해제 (In 동일)
           else if (maximized) setMaximized(null);   // 최대화 복원
           else requestCloseRef.current();
           break;
-        case "Delete": case "Backspace":   // 삭제(§C): 선택 주석 우선, 없으면 마지막 주석
+        case "Delete": case "Backspace":   // 삭제(§C): 마퀴 다중 > 단일 선택 > 마지막 주석
           e.preventDefault();
-          if (selAnno) deleteSelAnno();
+          if (selAnnos) deleteSelAnnos();
+          else if (selAnno) deleteSelAnno();
           else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); }
           break;
         case " ": e.preventDefault(); act("cine"); break;
@@ -1036,10 +1044,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       window.removeEventListener("keyup", onKeyUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePane, step, tool, draft, menu, maximized, selPanes, layout, selAnno]);
+  }, [activePane, step, tool, draft, menu, maximized, selPanes, layout, selAnno, selAnnos]);
 
   /* 도구 전환(선택/해제) 시 편집 선택 정리 — 편집은 select 모드(도구 없음)에서만 유효(§D) */
-  useEffect(() => { setSelAnno(null); }, [tool]);
+  useEffect(() => { setSelAnno(null); setSelAnnos(null); setMarquee(null); }, [tool]);
 
   /* 마우스 상호작용 — TY-3(2): Shift=범위 선택/Ctrl=토글, 선택 밖 일반 클릭=해제 (In 이식) */
   const dragRef = useRef<{ pid: string; x: number; y: number; sx: number; sy: number; btn: number; moved: boolean; shift: boolean } | null>(null);
@@ -1075,7 +1083,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     // select 모드(도구 없음) 좌클릭 — 주석 편집(이동/리사이즈) 히트테스트. 잡히면 편집 시작(dragRef 미설정)
     if (!tool && e.button === 0 && !e.shiftKey && !e.ctrlKey) {
       if (startAnnoEdit(pid, e)) return;
-      // 미스 — 선택 해제(startAnnoEdit 내부 처리) 후 기존 pan/zoom/wl 로 진행
+      // 미스 — Select 모드면 마퀴(녹색 점선) 다중 선택 시작(dragRef 미설정), 그 외(zoom/pan/wl)는 기존 mouseMode 드래그
+      if (mouseMode === "select") { startMarquee(pid, e); return; }
     }
     if (ctxMenu) setCtxMenu(null);   // 메뉴 열려 있으면 먼저 닫음
     dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false, shift: e.shiftKey };
@@ -1093,6 +1102,31 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     annoDragRef.current = { type: "draw", pid, tool, sop: inst.sop_uid, series: p.series.series_uid,
                             start, cur: start, rect, aspect, inst };
     setDraft({ pid, sop_uid: inst.sop_uid, series_uid: p.series.series_uid, points: [start, start] });
+  };
+
+  /* 마퀴 시작(Select 모드 빈 공간 드래그) — 시작 이미지좌표 기록, 이후 move/up 에서 영역 내 주석 일괄 선택 */
+  const startMarquee = (pid: string, e: React.MouseEvent) => {
+    const p = panes[pid];
+    const inst = p.series?.instances[p.index];
+    if (!p.series || !inst) return;
+    const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const start = screenToImage(e.clientX, e.clientY, rect, p, aspect);
+    if (!start) return;
+    setSelAnno(null); setSelAnnos(null);
+    marqueeRef.current = { pid, rect, aspect, a: start, b: start };
+    setMarquee({ a: start, b: start });
+  };
+  /* 마퀴 다중 선택 삭제 — selAnnosRef 의 index 를 제거(Set 필터) */
+  const deleteSelAnnos = (): boolean => {
+    const sel = selAnnosRef.current;
+    if (!sel || !sel.length) return false;
+    const drop = new Set(sel);
+    setAnnos((prev) => prev.filter((_, i) => !drop.has(i)));
+    setSelAnnos(null); setSelAnno(null);
+    schedHist();
+    setStatus(`선택한 ${sel.length}개 주석을 지웠습니다`);
+    return true;
   };
 
   /* 편집 히트테스트 — 현재 인스턴스 주석 대상. 점 핸들 근처=resize, 본체 근처=move, 미스=선택 해제.
@@ -1485,6 +1519,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         }
         return;
       }
+      // ── 마퀴(녹색 점선) 다중 선택 드래그 ──
+      const mq = marqueeRef.current;
+      if (mq) {
+        const pp = panesRef.current[mq.pid];
+        if (!pp) return;
+        const c = screenToImage(e.clientX, e.clientY, mq.rect, pp, mq.aspect);
+        if (!c) return;
+        mq.b = c;
+        setMarquee({ a: mq.a, b: c });
+        return;
+      }
       const d = dragRef.current;
       if (!d) return;
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
@@ -1529,6 +1574,26 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         } else if (ad.moved) {
           schedHist();   // 이동/리사이즈 완료 — 히스토리 기록
         }
+        return;
+      }
+      // ── 마퀴 종료 — 현재 인스턴스 주석 중 영역 내(임의 점 포함) 일괄 선택 ──
+      const mq = marqueeRef.current;
+      if (mq) {
+        marqueeRef.current = null;
+        const pp = panesRef.current[mq.pid];
+        const inst = pp?.series?.instances[pp.index];
+        const x0 = Math.min(mq.a[0], mq.b[0]), x1 = Math.max(mq.a[0], mq.b[0]);
+        const y0 = Math.min(mq.a[1], mq.b[1]), y1 = Math.max(mq.a[1], mq.b[1]);
+        const idxs: number[] = [];
+        if (inst && Math.hypot(mq.b[0] - mq.a[0], mq.b[1] - mq.a[1]) >= 0.01) {
+          annosRef.current.forEach((a, i) => {
+            const vis = a.sop_uid === inst.sop_uid || (!a.sop_uid && pp!.studyUid === detail.study_uid);
+            if (vis && a.points?.some(([x, y]) => x >= x0 && x <= x1 && y >= y0 && y <= y1)) idxs.push(i);
+          });
+        }
+        setMarquee(null);
+        if (idxs.length) { setSelAnnos(idxs); setSelAnno(null); setStatus(`${idxs.length}개 주석 선택 — Del/휴지통/우클릭으로 삭제`); }
+        else setSelAnnos(null);
         return;
       }
       const d = dragRef.current;
@@ -1716,7 +1781,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     // 편집 선택 주석 — 이 인스턴스에 표시되는 것이면 강조(밝은 테두리 + 점 핸들). 식별은 객체 동일성
     const selA = selAnno ? annos[selAnno.idx] : null;
     const selHere = !!selA && (selA.sop_uid === inst.sop_uid || (!selA.sop_uid && p.studyUid === detail.study_uid)) && !!selA.points?.length;
-    if (items.length === 0 && !dr && !refSegs.length && !sh && !c3on && !selHere) return null;
+    const mqHere = !!marquee && pid === activePane;   // 마퀴는 활성 페인에만 표시
+    const selSet = selAnnos && selAnnos.length ? new Set(selAnnos) : null;
+    if (items.length === 0 && !dr && !refSegs.length && !sh && !c3on && !selHere && !mqHere && !selSet) return null;
     return (
       <svg viewBox={`0 0 ${cols} ${rows}`} preserveAspectRatio="none"
            style={{ position: "absolute", left: cr.left, top: cr.top, width: cr.width, height: cr.height,
@@ -1804,6 +1871,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             </g>
           );
         })()}
+        {/* 마퀴 다중 선택 강조 — 선택된 주석들의 점에 녹색 마커 */}
+        {selSet && annos.map((a, ai) => (selSet.has(ai)
+          && (a.sop_uid === inst.sop_uid || (!a.sop_uid && p.studyUid === detail.study_uid)) && a.points?.length)
+          ? a.points.map((pt, k) => <circle key={`m${ai}-${k}`} cx={sx(pt[0])} cy={sy(pt[1])} r={fs * 0.3}
+                                             fill="#22c55e" stroke="#052e16" strokeWidth={fs * 0.04} />)
+          : null)}
+        {/* 마퀴(녹색 점선 사각형) — 드래그 중 영역 */}
+        {mqHere && marquee && (
+          <rect x={sx(Math.min(marquee.a[0], marquee.b[0]))} y={sy(Math.min(marquee.a[1], marquee.b[1]))}
+                width={sx(Math.abs(marquee.b[0] - marquee.a[0]))} height={sy(Math.abs(marquee.b[1] - marquee.a[1]))}
+                fill="rgba(34,197,94,0.10)" stroke="#22c55e" strokeWidth={fs * 0.06} strokeDasharray={`${fs * 0.5} ${fs * 0.3}`} />
+        )}
         {refSegs.map((r, i) => (
           <line key={`ref${i}`} x1={sx(r.seg[0][0])} y1={sy(r.seg[0][1])} x2={sx(r.seg[1][0])} y2={sy(r.seg[1][1])}
                 stroke="#4dd0e1" strokeDasharray={`${fs * 0.6} ${fs * 0.4}`}
@@ -2075,7 +2154,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {tyLabels && <span style={{ fontSize: 10 }}>{label}</span>}
     </span>
   );
-  const ModeBtn = ({ k, label, title }: { k: "wl" | "zoom" | "pan"; label: string; title: string }) => (
+  const ModeBtn = ({ k, label, title }: { k: "wl" | "zoom" | "pan" | "select"; label: string; title: string }) => (
     <button onClick={() => { recordUse(k); setMouseMode(k); }} title={title}
             style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                      background: mouseMode === k ? "var(--accent)" : undefined }}>
@@ -2205,6 +2284,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               ...(paletteHoriz ? {} : { gridTemplateColumns: "1fr 1fr", padding: "3px 0" }),
             }}>
               {k === "common" && (<>
+                <ModeBtn k="select" label="⬆ Select" title="선택 모드 — 주석 클릭 편집 / 빈 공간 드래그=녹색 점선 마퀴 다중선택 → Del 삭제" />
                 {tbOn("zoom") && <ModeBtn k="zoom" label="Zoom" title="좌드래그=확대 (우드래그 항상 Zoom)" />}
                 {tbOn("pan") && <ModeBtn k="pan" label="Pan" title="좌드래그=이동 (중드래그 항상 Pan)" />}
                 {tbOn("fit") && <ActBtn a="fit" label="Fit" title="화면 맞춤" />}
@@ -2301,8 +2381,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   </button>
                 )}
                 {tbOn("del") && (
-                  <button title="선택 주석 삭제(없으면 마지막 주석)"
-                          onClick={() => { if (selAnno) deleteSelAnno(); else { setAnnos((p) => p.slice(0, -1)); schedHist(); } }}
+                  <button title="선택 주석 삭제(마퀴 다중선택 우선, 없으면 마지막 주석)"
+                          onClick={() => { if (selAnnos) deleteSelAnnos(); else if (selAnno) deleteSelAnno(); else { setAnnos((p) => p.slice(0, -1)); schedHist(); } }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%" }}>
                     <TyInner id="del" label="Del" />
                   </button>
@@ -2550,11 +2630,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       { label: "Key Image 지정/해제", onClick: () => { setActivePane(pid); toggleKeyImage(); } },
       { label: "주석 저장", onClick: () => void saveAnnos() },
       { kind: "sep" },
-      { label: selAnno ? "선택 주석 지우기" : "마지막 주석 지우기",
-        onClick: () => { if (selAnno) deleteSelAnno(); else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); } } },
+      selAnnos
+        ? { label: `선택 ${selAnnos.length}개 주석 지우기`, onClick: () => deleteSelAnnos() }
+        : { label: selAnno ? "선택 주석 지우기" : "마지막 주석 지우기",
+            onClick: () => { if (selAnno) deleteSelAnno(); else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); } } },
+      { label: "셔터 해제", onClick: () => patch(pid, { shutter: null }) },
       { label: "주석 전체 지우기", onClick: () => {
         if (!window.confirm(`주석 ${annos.length}건과 셔터를 모두 삭제할까요? (저장 전이면 복구 불가)`)) return;
-        setAnnos([]); setDraft(null); setSelAnno(null); setCross3d({});
+        setAnnos([]); setDraft(null); setSelAnno(null); setSelAnnos(null); setMarquee(null); setCross3d({});
         setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, q]) => [k, { ...q, shutter: null }])));
         schedHist();
       } },
