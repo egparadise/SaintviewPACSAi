@@ -576,9 +576,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const histReset = () => {
     if (!histRef.current[0]) return;
     applySnap(histRef.current[0]);
+    // 초기화 시 셔터(가림)도 함께 해제
+    setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, q]) => [k, { ...q, shutter: null }])));
     histIdx.current = 0;
     setHistTick((t) => t + 1);
-    setStatus("초기 상태로 되돌렸습니다");
+    setStatus("초기 상태로 되돌렸습니다 (셔터·주석 해제)");
   };
   // 히스토리에 기록할 원샷 조작(act) — 방향 전환/반전/필터/초기화 등 (In HIST_OPS 동일 취지)
   const HIST_OPS = useMemo(() => new Set(

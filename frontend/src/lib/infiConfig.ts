@@ -207,7 +207,7 @@ export const IN_LIGHT_THEME = {
 // ── User Guide p.11~14 툴 카탈로그 (표 순서 유지) — impl=false 는 반투명(개발 대상) ──
 export const IN_PALETTE: { id: string; icon: string; label: string; impl: boolean; mode?: boolean; group: string }[] = [
   // p.11 §3.4 기본 6종
-  { id: "select", icon: "➤", label: "Select — 이미지 선택/해제", impl: true, mode: true, group: "영상 조정" },
+  { id: "select", icon: "⬆", label: "Select — 이미지 선택/해제(초기 상태)", impl: true, mode: true, group: "영상 조정" },
   { id: "pan", icon: "✥", label: "Pan — 이미지 이동(창보다 클 때 유용)", impl: true, mode: true, group: "영상 조정" },
   { id: "zoom", icon: "🔍", label: "Zoom — 드래그로 확대/축소 (Ctrl+휠)", impl: true, mode: true, group: "영상 조정" },
   { id: "wl", icon: "◐", label: "Windowing — W/L 적용(우드래그 기본)", impl: true, mode: true, group: "영상 조정" },

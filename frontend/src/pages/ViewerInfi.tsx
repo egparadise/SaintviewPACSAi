@@ -352,6 +352,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [selAnno, setSelAnno] = useState<{ sop: string; idx: number } | null>(null);
   const selAnnoRef = useRef(selAnno);
   useEffect(() => { selAnnoRef.current = selAnno; }, [selAnno]);
+  // 마퀴(녹색 점선) 다중 선택 — select 모드 빈 공간 드래그로 영역 내 주석 일괄 선택 → Del/휴지통/우클릭 삭제
+  const [selAnnos, setSelAnnos] = useState<{ sop: string; idxs: number[] } | null>(null);
+  const selAnnosRef = useRef(selAnnos);
+  useEffect(() => { selAnnosRef.current = selAnnos; }, [selAnnos]);
+  const [marquee, setMarquee] = useState<{ sop: string; a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const marqueeRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement; a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   // 3D Cursor 마커(페인별, 일시적) · 돋보기 위치 · 픽셀값 표 모달 · 딕테이션
   const [cross3d, setCross3d] = useState<Record<number, { sop: string; x: number; y: number }>>({});
   const [magPos, setMagPos] = useState<{ pi: number; t: number; mx: number; my: number;
@@ -621,7 +627,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     xlink.crosslink && selPanes.size > 1 && selPanes.has(pi) ? [...selPanes] : [pi];
 
   const scroll = useCallback((i: number, delta: number) => {
-    setSelAnno(null);   // §B: 이미지 전환 시 편집 선택 해제 — 안 보이는 이전 이미지 주석의 무피드백 삭제 방지
+    setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §B: 이미지 전환 시 편집·마퀴 선택 해제
     setPanes((ps) => ps.map((p, k) => {
       // §3.3: crosslink 마스터 ON 일 때 — auto_sync=같은 검사 페인, sync_other=다른 검사(과거) 페인 동기
       const sameExam = p.studyUid === ps[i]?.studyUid;
@@ -701,7 +707,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const applySnap = (s: Snap) => {
     setPanes((ps) => ps.map((p, i) => (s.vis[i] ? { ...p, ...s.vis[i] } : p)));
     setAnnos(s.annos);
-    setSelAnno(null);   // 스냅샷 복원 — annos 가 바뀌어 selAnno.idx 가 다른 주석을 가리키므로 선택 해제
+    setSelAnno(null); setSelAnnos(null); setMarquee(null);   // 스냅샷 복원 — annos 변경으로 인덱스 무효화 → 선택 해제
   };
   const histGo = (d: -1 | 1) => {
     const ni = histIdx.current + d;
@@ -713,9 +719,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const histReset = () => {
     if (!histRef.current[0]) return;
     applySnap(histRef.current[0]);
+    // 초기화 시 셔터(가림)도 함께 해제 — 스냅샷에 남아있어도 확실히 제거
+    setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
     histIdx.current = 0;
     setHistTick((t) => t + 1);
-    say("초기 상태로 되돌렸습니다");
+    say("초기 상태로 되돌렸습니다 (셔터·주석 해제)");
   };
   // 검사 구성이 바뀌면 히스토리 재시작 + 초기 스냅샷
   useEffect(() => {
@@ -971,7 +979,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "print": window.print(); break;
       case "refreshExam": loadSeries(); say("검사 정보를 갱신했습니다"); break;
       case "clrAnno":
-        setAnnos({}); setPend(null); setSelAnno(null); setCross3d({});
+        setAnnos({}); setPend(null); setSelAnno(null); setSelAnnos(null); setMarquee(null); setCross3d({});
         setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
         say("측정·주석·셔터를 모두 지웠습니다");
         break;
@@ -1033,7 +1041,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {
           setTool(id as Tool);
           setPend(null);
-          setSelAnno(null);   // §D: 도구 전환 시 편집 선택 해제(진행중 그리기 pend 도 정리)
+          setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §D: 도구 전환 시 편집·마퀴 선택 해제(진행중 pend 정리)
           const hint = item?.label?.split("—")[1]?.trim();
           if (hint) say(hint);
         }
@@ -1294,6 +1302,21 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     schedHist();
     say("선택 주석을 지웠습니다");
   };
+  // 마퀴 다중 선택 주석 삭제(§C) — selAnnosRef 의 idxs 를 내림차순으로 제거(인덱스 밀림 방지)
+  const deleteSelAnnos = (): boolean => {
+    const sel = selAnnosRef.current;
+    if (!sel || !sel.idxs.length) return false;
+    const drop = new Set(sel.idxs);
+    setAnnos((prev) => {
+      const list = prev[sel.sop];
+      if (!list) return prev;
+      return { ...prev, [sel.sop]: list.filter((_, k) => !drop.has(k)) };
+    });
+    setSelAnnos(null); setSelAnno(null);
+    schedHist();
+    say(`선택한 ${sel.idxs.length}개 주석을 지웠습니다`);
+    return true;
+  };
   // 마지막 주석 삭제(§C) — 지정 페인의 현재 인스턴스 주석 배열에서 pop
   const deleteLastAnno = (pi: number) => {
     const p = panesRef.current[pi];
@@ -1442,6 +1465,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       }
       return;
     }
+    // 마퀴 다중 선택 드래그(§ 다중선택) — 녹색 점선 사각형 실시간 갱신
+    const mq = marqueeRef.current;
+    if (mq) {
+      const p2 = panes[mq.pi];
+      if (p2) { const cur = screenToImg(e.clientX, e.clientY, mq.tileEl, p2, mq.inst); mq.b = cur; setMarquee({ sop: mq.sop, a: mq.a, b: cur }); }
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     // 이동 임계값(5px) 초과부터 드래그로 간주 — 우클릭 메뉴/우드래그 도구 구분
@@ -1482,6 +1512,23 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       drag.current = null;
       recomputeRoiValue(ed.pi, ed.sop, ed.idx, ed.inst);   // pts 변경분을 통계/면적에 반영(mrect/mellipse/lens)
       schedHist();
+      return;
+    }
+    // 마퀴 종료 — 영역 내(임의 점 포함) 주석 일괄 선택
+    const mq = marqueeRef.current;
+    if (mq) {
+      marqueeRef.current = null; drag.current = null;
+      const x0 = Math.min(mq.a.x, mq.b.x), x1 = Math.max(mq.a.x, mq.b.x);
+      const y0 = Math.min(mq.a.y, mq.b.y), y1 = Math.max(mq.a.y, mq.b.y);
+      const idxs: number[] = [];
+      if (Math.hypot(mq.b.x - mq.a.x, mq.b.y - mq.a.y) >= 3) {
+        (annos[mq.sop] ?? []).forEach((a, idx) => {
+          if (a.pts.some((pt) => pt.x >= x0 && pt.x <= x1 && pt.y >= y0 && pt.y <= y1)) idxs.push(idx);
+        });
+      }
+      setMarquee(null);
+      if (idxs.length) { setSelAnnos({ sop: mq.sop, idxs }); setSelAnno(null); say(`${idxs.length}개 주석 선택 — Del/휴지통/우클릭으로 삭제`); }
+      else setSelAnnos(null);
       return;
     }
     const d = drag.current;
@@ -1693,17 +1740,18 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         });
         return;
       }
-      // 삭제(§C) — 선택 주석 있으면 그 주석, 없으면 활성 페인 현재 인스턴스의 마지막 주석
+      // 삭제(§C) — 마퀴 다중선택 우선 → 단일 선택 → 활성 페인 현재 인스턴스의 마지막 주석
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        if (selAnnoRef.current) deleteSelAnno();
+        if (selAnnosRef.current) deleteSelAnnos();
+        else if (selAnnoRef.current) deleteSelAnno();
         else deleteLastAnno(active);
         return;
       }
-      // Esc(§D) — 진행중 그리기/편집 취소 → 선택 주석 해제 → 도구 해제(select) → 페인선택 해제
+      // Esc(§D) — 진행중 그리기/편집/마퀴 취소 → 선택 해제 → 도구 해제(select) → 페인선택 해제
       if (e.key === "Escape") {
-        annoDragRef.current = null; editRef.current = null;
-        setPend(null); setSelAnno(null); setTool("select");
+        annoDragRef.current = null; editRef.current = null; marqueeRef.current = null;
+        setPend(null); setSelAnno(null); setSelAnnos(null); setMarquee(null); setTool("select");
         setSelPanes(new Set());
         return;
       }
@@ -1854,10 +1902,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                        if (annoHit(list[idx], click, 6)) { hit = { idx, mode: "move", ptIdx: -1 }; break; }
                      }
                      if (hit) {
-                       setSelAnno({ sop, idx: hit.idx });
+                       setSelAnno({ sop, idx: hit.idx }); setSelAnnos(null);
                        editRef.current = { pi, sop, idx: hit.idx, mode: hit.mode, ptIdx: hit.ptIdx,
                                            inst, tileEl: e.currentTarget, last: click };
-                     } else setSelAnno(null);
+                     } else {
+                       // 빈 공간 드래그 → 마퀴(녹색 점선) 다중 선택 시작
+                       setSelAnno(null); setSelAnnos(null);
+                       marqueeRef.current = { pi, sop, inst, tileEl: e.currentTarget, a: click, b: click };
+                       setMarquee({ sop, a: click, b: click });
+                     }
                    }
                  }}
                  onMouseMove={(e) => {   // Magnification — 마우스 따라 부분 확대경
@@ -1885,6 +1938,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                             pend={pend?.sop === inst.sop_uid ? pend.pts : []}
                             pendTool={pend?.sop === inst.sop_uid ? tool : ""}
                             selIdx={selAnno?.sop === inst.sop_uid ? selAnno.idx : -1}
+                            selIdxs={selAnnos?.sop === inst.sop_uid ? selAnnos.idxs : undefined}
+                            marquee={marquee?.sop === inst.sop_uid ? [marquee.a, marquee.b] : undefined}
                             scout={scoutFor(inst, p.series.series_uid)}
                             shutter={p.shutter ?? undefined}
                             cross={cross3d[pi]?.sop === inst.sop_uid ? cross3d[pi] : undefined} />
@@ -2135,11 +2190,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       { label: maximized === active ? "최대화 해제" : "최대화", onClick: () => setMaximized((m) => (m === active ? null : active)) },
     ] },
     { kind: "sep" },
-    // 삭제(§C) — 선택 주석 있으면 그 주석, 없으면 마지막 주석 + 전체 지우기(clrAnno)
-    selAnno
-      ? { label: "선택 주석 지우기", onClick: deleteSelAnno }
-      : { label: "마지막 주석 지우기", onClick: () => deleteLastAnno(active) },
+    // 삭제(§C) — 마퀴 다중 > 단일 선택 > 마지막 + 전체 지우기(clrAnno)
+    selAnnos
+      ? { label: `선택 ${selAnnos.idxs.length}개 주석 지우기`, onClick: () => deleteSelAnnos() }
+      : selAnno
+        ? { label: "선택 주석 지우기", onClick: deleteSelAnno }
+        : { label: "마지막 주석 지우기", onClick: () => deleteLastAnno(active) },
     { label: "주석 전체 지우기", onClick: () => fire("clrAnno") },
+    // 셔터(가림) 해제 — 활성 페인 셔터 제거
+    { label: "셔터 해제", onClick: () => upd(active, { shutter: null }) },
     { kind: "sep" },
     { label: "Key Image 지정/해제", onClick: () => fire("key2d") },
     { label: "주석 저장", onClick: () => void saveAnnos() },
@@ -2768,10 +2827,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 }
 
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
-function TileAnno({ inst, pane, annos, pend, pendTool = "", selIdx = -1, scout = [], shutter, cross }: {
+function TileAnno({ inst, pane, annos, pend, pendTool = "", selIdx = -1, selIdxs, marquee, scout = [], shutter, cross }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
   pendTool?: string;   // 진행중 pend 도구 — 2점 드래그면 도구별 러버밴드 미리보기(§A)
   selIdx?: number;     // 선택 주석 index(§B) — 강조 테두리 + 점 핸들 렌더
+  selIdxs?: number[];  // 마퀴 다중 선택 index 목록 — 일괄 강조
+  marquee?: { x: number; y: number }[];   // 마퀴 [a,b] — 녹색 점선 사각형
   scout?: { x1: number; y1: number; x2: number; y2: number;
             current: boolean; cross?: boolean; label?: string }[];
   shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] };
@@ -2786,9 +2847,10 @@ function TileAnno({ inst, pane, annos, pend, pendTool = "", selIdx = -1, scout =
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  if (!annos.length && !pend.length && !scout.length && !shutter && !cross) {
+  if (!annos.length && !pend.length && !scout.length && !shutter && !cross && !marquee) {
     return <svg ref={ref} style={svgStyle} />;
   }
+  const selSet = selIdxs && selIdxs.length ? new Set(selIdxs) : null;
 
   const s0 = Math.min(dim.w / (inst.cols || 1), dim.h / (inst.rows || 1));
   const s = s0 * pane.zoom;
@@ -3113,6 +3175,16 @@ function TileAnno({ inst, pane, annos, pend, pendTool = "", selIdx = -1, scout =
         <rect key={`h${k}`} x={X(pt) - 4} y={Y(pt) - 4} width={8} height={8}
               fill="#e0f2fe" stroke="#38bdf8" strokeWidth={1.4} />
       ))}
+      {/* 마퀴 다중 선택 강조 — 선택된 주석들의 각 점에 녹색 마커 */}
+      {selSet && annos.map((a, ai) => selSet.has(ai)
+        ? a.pts.map((pt, k) => <circle key={`m${ai}-${k}`} cx={X(pt)} cy={Y(pt)} r={3.5} fill="#22c55e" stroke="#052e16" strokeWidth={0.8} />)
+        : null)}
+      {/* 마퀴(녹색 점선 사각형) — 드래그 중 영역 표시 */}
+      {marquee && marquee.length === 2 && (
+        <rect x={Math.min(X(marquee[0]), X(marquee[1]))} y={Math.min(Y(marquee[0]), Y(marquee[1]))}
+              width={Math.abs(X(marquee[1]) - X(marquee[0]))} height={Math.abs(Y(marquee[1]) - Y(marquee[0]))}
+              fill="rgba(34,197,94,0.10)" stroke="#22c55e" strokeWidth={1.3} strokeDasharray="5 3" />
+      )}
       {/* 3D Cursor 마커 */}
       {cross && (
         <g stroke="#f472b6" strokeWidth={1.6} fill="none">
