@@ -190,7 +190,39 @@ function renderedUrlAt(p: PaneState, idx: number): string | null {
   const inst = p.series?.instances[idx];
   if (!p.series || !inst) return null;
   const wl = p.wl ? `?window=${p.wl},linear` : "";
-  return `${DICOMWEB_ROOT}/studies/${p.studyUid}/series/${p.series.series_uid}/instances/${inst.sop_uid}/rendered${wl}`;
+  const su = inst.series_uid ?? p.series.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID
+  const stu = inst.study_uid ?? p.studyUid;
+  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${wl}`;
+}
+// Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙임(서버 병합 아님, 표시 결합).
+// 원본 시리즈(검사+시리즈 UID)별로 그룹화(첫 등장 순서 유지) → 그룹 내 instance_number 정렬·sop 중복 제거 →
+// 그룹 순서대로 연결. 각 인스턴스에 원본 series_uid/study_uid 태깅(정확히 요청·다른 검사 결합 안전). 재결합·재추가 멱등.
+function buildCombined(list: { s: SeriesNode; studyUid: string }[]): SeriesNode {
+  const groups = new Map<string, InstanceNode[]>();
+  for (const { s, studyUid } of list) {
+    for (const i of s.instances) {
+      const su = i.series_uid ?? s.series_uid;
+      const stu = i.study_uid ?? studyUid;
+      const key = `${stu}|${su}`;
+      let arr = groups.get(key);
+      if (!arr) { arr = []; groups.set(key, arr); }
+      arr.push({ ...i, series_uid: su, study_uid: stu });
+    }
+  }
+  const instances = [...groups.values()].flatMap((arr) => {
+    const seen = new Set<string>();
+    return [...arr]
+      .sort((a, b) => (a.instance_number ?? 0) - (b.instance_number ?? 0))
+      .filter((i) => (seen.has(i.sop_uid) ? false : (seen.add(i.sop_uid), true)));
+  });
+  const origin = [...groups.keys()].map((k) => k.split("|")[1]);
+  return {
+    series_uid: `combined:${origin.join("+")}`,
+    modality: list[0]?.s.modality ?? "",
+    series_desc: `Combined · ${origin.length}개 시리즈 · ${instances.length}장`,
+    series_number: list[0]?.s.series_number ?? 0,
+    instances,
+  };
 }
 function renderedUrl(p: PaneState): string | null {
   return renderedUrlAt(p, p.index);
@@ -364,6 +396,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [hoverPane, setHoverPane] = useState<string | null>(null);
   // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
   const [dragOverPane, setDragOverPane] = useState<string | null>(null);
+  // 드롭 Circle Menu(INFINITT Circle Menu 등가) — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택
+  const [circle, setCircle] = useState<{ pid: string; uid: string; x: number; y: number } | null>(null);
   // 드롭된 series_uid 로 시리즈 객체를 찾아 해당 페인에 로드
   const dropSeriesToPane = (pid: string, seriesUid: string) => {
     const s = thumbSeries.find((x) => x.series_uid === seriesUid) ?? series.find((x) => x.series_uid === seriesUid);
@@ -922,22 +956,51 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     } catch { setStatus("Refresh Exam 실패"); }
   };
 
-  /* Combine — 이미지 레이아웃(행×열)을 지정하고 빈 페인을 만든다.
-     각 칸에 좌측 썸네일 시리즈를 끌어다 놓으면(dropSeriesToPane) 임의 시리즈를 함께 볼 수 있다(§E). */
-  const combineSeries = () => {
-    const ans = window.prompt("Combine 레이아웃 — 행×열 입력 (예: 2x3, 최대 10x10)",
-                              `${LAYOUTS[layout].rows}x${LAYOUTS[layout].cols}`);
-    if (ans === null) return;
-    const m = ans.trim().toLowerCase().match(/^(\d+)\s*[x×,\s]\s*(\d+)$/);
-    if (!m) { setStatus("Combine 취소 — 형식은 행x열 (예: 2x3)"); return; }
-    const r = Math.min(10, Math.max(1, Number(m[1]))), c = Math.min(10, Math.max(1, Number(m[2])));
-    const key = `${r}x${c}`;
-    if (!LAYOUTS[key]) { setStatus("Combine 취소 — 레이아웃 범위(1~10)"); return; }
-    const uid = panes[activePane]?.studyUid || detail.study_uid;
-    setLayout(key as keyof typeof LAYOUTS);
-    // 빈 페인으로 초기화 — 드롭 대기(setLayout effect 가 경계 분율/멀티선택도 리셋)
-    setPanes((prev) => Object.fromEntries(PANE_IDS.map((pid) => [pid, initPane(uid)])) as typeof prev);
-    setStatus(`Combine: ${r}×${c} 레이아웃 — 좌측 시리즈를 각 칸에 끌어다 놓으세요`);
+  /* Combine all — 현재 검사의 (영상)시리즈 전체를 하나의 논리적 시리즈로 결합해 활성 페인에 표시(연속 스크롤).
+     INFINITT 'Combine all' 등가: 서버 병합이 아니라 판독 화면 표시 결합. (레이아웃 그리드는 상단 레이아웃 콤보 사용) */
+  // 결합 전 페인 상태 스냅샷 → Combine 재클릭(토글) 시 해제·원복
+  const preCombineRef = useRef<Record<string, { series: SeriesNode | null; index: number; studyUid: string }>>({});
+  const isCombined = (p?: PaneState): boolean => !!p?.series?.series_uid.startsWith("combined:");
+  const snapCombine = (pid: string) => {
+    if (!preCombineRef.current[pid] && panes[pid]) {
+      const p = panes[pid];
+      preCombineRef.current[pid] = { series: p.series, index: p.index, studyUid: p.studyUid };
+    }
+  };
+  const uncombine = (pid: string) => {
+    const snap = preCombineRef.current[pid];
+    delete preCombineRef.current[pid];
+    if (snap) patch(pid, { series: snap.series, index: snap.index, studyUid: snap.studyUid });
+    else patch(pid, { series: series[0] ?? null, index: 0, studyUid: detail.study_uid });
+    setActivePane(pid);
+    setStatus("Combine 해제 — 원래 시리즈로 복원");
+  };
+  // 툴바 Combine — 토글: 활성 페인이 결합 상태면 해제(원복), 아니면 검사 전체 결합
+  const combineSeries = () => { if (isCombined(panes[activePane])) uncombine(activePane); else combineAllInto(activePane); };
+  const combineAllInto = (pid: string) => {
+    const src = series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality) && s.instances.length > 0);
+    if (!src.length) { setStatus("Combine 취소 — 결합할 영상 시리즈가 없습니다"); return; }
+    if (src.length === 1) { setStatus("Combine 취소 — 시리즈가 1개뿐입니다(결합할 대상 없음)"); return; }
+    snapCombine(pid);
+    const merged = buildCombined(
+      [...src].sort((a, b) => a.series_number - b.series_number).map((s) => ({ s, studyUid: detail.study_uid })));
+    patch(pid, { series: merged, index: 0, studyUid: detail.study_uid });
+    setActivePane(pid);
+    setStatus(`Combine all — ${src.length}개 시리즈 ${merged.instances.length}장을 한 시리즈처럼 결합(연속 스크롤 · 다시 누르면 해제)`);
+  };
+  // Combine(추가) — 드롭/선택한 한 시리즈를 대상 페인의 현재 시리즈에 이어붙임(이미 결합본이면 계속 누적).
+  const combineInto = (pid: string, seriesUid: string) => {
+    const dropped = thumbSeries.find((x) => x.series_uid === seriesUid) ?? series.find((x) => x.series_uid === seriesUid);
+    if (!dropped) { setStatus("Combine 실패 — 시리즈를 찾을 수 없습니다"); return; }
+    if (["SR", "KO", "PR", "SEG"].includes(dropped.modality)) { setStatus("Combine 불가 — 비영상 시리즈(SR/KO/PR/SEG)"); return; }
+    snapCombine(pid);
+    const base = panes[pid]?.series ?? null;
+    const merged = buildCombined(
+      base ? [{ s: base, studyUid: panes[pid].studyUid }, { s: dropped, studyUid: uidOfSeries(dropped.series_uid) }]
+           : [{ s: dropped, studyUid: uidOfSeries(dropped.series_uid) }]);
+    patch(pid, { series: merged, index: 0 });
+    setActivePane(pid);
+    setStatus(`Combine — S${dropped.series_number} ${dropped.instances.length}장 추가 · 총 ${merged.instances.length}장(연속 스크롤)`);
   };
 
   /* Study With Open — ADD: Related 최대 3건을 p1~p3 분할 오픈 / STACK: 순차 중첩 */
@@ -1473,7 +1536,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
   const saveAnnos = async () => {
     try {
-      await api.saveAnnotations(detail.id, annos);
+      // Combine 결합본 위에 그린 주석은 series_uid 가 'combined:' 합성값 → sop 로 원본 시리즈 UID 재해석(저장 정합)
+      const sopToSeries = new Map<string, string>();
+      for (const p of Object.values(panes)) {
+        if (!p.series) continue;
+        for (const i of p.series.instances) sopToSeries.set(i.sop_uid, i.series_uid ?? p.series.series_uid);
+      }
+      const fixed = annos.map((a) => {
+        const su = a.sop_uid ? sopToSeries.get(a.sop_uid) : undefined;
+        return su && su !== a.series_uid ? { ...a, series_uid: su } : a;
+      });
+      await api.saveAnnotations(detail.id, fixed);
       // 표시상태 저장 — 페인들의 검사별 시리즈 pstate 를 수집(스터디 uid → openTabs examId 매핑)
       const pstateByExam = new Map<number, Record<string, import("../api").PState>>();
       for (const p of Object.values(panes)) {
@@ -1522,11 +1595,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (f) images.set(a.sop_uid, { sop_uid: a.sop_uid, series_uid: f.s.series_uid, rows: f.i.rows, cols: f.i.cols });
     }
     if (images.size === 0) {
-      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: p.series.series_uid, rows: inst.rows, cols: inst.cols });
+      // Combine 결합본이면 p.series.series_uid 는 'combined:' 합성값 → 현재 인스턴스의 원본 시리즈 UID 사용
+      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: inst.series_uid ?? p.series.series_uid, rows: inst.rows, cols: inst.cols });
     }
     const [wc, ww] = p.wl ? p.wl.split(",").map(Number) : [null, null];
     // sop 미지정 주석(CTR 등 study 단위)은 현재 이미지에 귀속해 내보냄
-    const list = annos.map((a) => a.sop_uid ? a : { ...a, sop_uid: inst.sop_uid, series_uid: p.series!.series_uid });
+    const list = annos.map((a) => a.sop_uid ? a : { ...a, sop_uid: inst.sop_uid, series_uid: inst.series_uid ?? p.series!.series_uid });
     try {
       await api.sendGsps(detail.id, { images: [...images.values()], annotations: list, wc, ww });
       setStatus("GSPS 저장됨 — Orthanc 동일 검사 귀속");
@@ -2067,7 +2141,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
            // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
            onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pid) setDragOverPane(pid); } }}
            onDragLeave={() => setDragOverPane((d) => (d === pid ? null : d))}
-           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) dropSeriesToPane(pid, uid); }}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) setCircle({ pid, uid, x: e.clientX, y: e.clientY }); }}
            style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0, flex: 1,
                     background: "#000", cursor: tool ? "copy" : "crosshair",
                     outline: dragOverPane === pid ? "3px solid var(--accent)" : outline,
@@ -2508,7 +2582,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   </button>
                 )}
                 {tbOn("rfsh") && <ActBtn a="rfsh" label="Rfsh" title="Refresh Exam — 활성 검사 시리즈 재조회" />}
-                {tbOn("comb") && <ActBtn a="comb" label="Comb" title="Combine — 레이아웃(행×열) 지정 후 각 칸에 시리즈를 끌어다 놓기" />}
+                {tbOn("comb") && <ActBtn a="comb" label="Comb" on={isCombined(panes[activePane])} title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택" />}
                 {tbOn("print") && <ActBtn a="print" label="Print" title="인쇄 — 현재 화면을 브라우저 인쇄(window.print)" />}
                 {tbOn("calib") && <ActBtn a="calib" label="Calib" title="Calibrate — 현재 이미지 Pixel Spacing 정보 안내" />}
                 {tbOn("key2d") && (
@@ -2699,6 +2773,35 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <ViewerContextMenu x={ctxMenu.x} y={ctxMenu.y} items={buildCtxItems(ctxMenu.pid)}
                            onClose={() => setCtxMenu(null)} />
       )}
+      {/* 드롭 Circle Menu — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택(INFINITT Circle Menu 등가) */}
+      {circle && (() => {
+        const c = circle;
+        const done = (fn: () => void) => { fn(); setCircle(null); };
+        const btn = (label: string, desc: string, fn: () => void, primary = false) => (
+          <button onClick={() => done(fn)} title={desc}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px",
+                           fontSize: 12, background: primary ? "#1d4ed8" : "transparent",
+                           color: "#e2e8f0", border: "none", borderBottom: "1px solid #1e293b", cursor: "pointer" }}>
+            {label}<span style={{ color: "#64748b", marginLeft: 6, fontSize: 10.5 }}>{desc}</span>
+          </button>
+        );
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
+               onContextMenu={(e) => { e.preventDefault(); setCircle(null); }}>
+            <div onClick={(e) => e.stopPropagation()}
+                 style={{ position: "fixed", left: Math.min(c.x, window.innerWidth - 200), top: Math.min(c.y, window.innerHeight - 130),
+                          width: 190, background: "#0b1220", border: "1px solid #334155", borderRadius: 8,
+                          boxShadow: "0 6px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+              <div style={{ padding: "5px 12px", fontSize: 10.5, color: "#7dd3fc", borderBottom: "1px solid #1e293b" }}>
+                시리즈 드롭 — 동작 선택
+              </div>
+              {btn("Open", "이 페인에 표시(교체)", () => dropSeriesToPane(c.pid, c.uid), true)}
+              {btn("Combine", "현재 시리즈에 이어붙임", () => combineInto(c.pid, c.uid))}
+              {btn("Combine all", "검사 전체 시리즈 결합", () => combineAllInto(c.pid))}
+            </div>
+          </div>
+        );
+      })()}
       {/* Sharpen 필터 정의 (feConvolveMatrix — In Viewer 동일 커널) */}
       <svg width="0" height="0" style={{ position: "absolute" }}>
         <filter id="ty-sharpen">

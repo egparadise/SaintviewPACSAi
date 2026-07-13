@@ -164,7 +164,40 @@ function scoutSegment(src: Geom, tgt: Geom): { x1: number; y1: number; x2: numbe
 
 function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string): string {
   const q = wl ? `?window=${wl},linear` : "";
-  return `${DICOMWEB_ROOT}/studies/${studyUid}/series/${s.series_uid}/instances/${inst.sop_uid}/rendered${q}`;
+  const su = inst.series_uid ?? s.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID 로 요청
+  const stu = inst.study_uid ?? studyUid;
+  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${q}`;
+}
+// Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙인다(서버 병합 아님, 표시 결합).
+// 원본 시리즈(검사+시리즈 UID)별로 그룹화(첫 등장 순서 유지) → 그룹 내 instance_number 정렬·sop 중복 제거 →
+// 그룹 순서대로 연결. 각 인스턴스에 원본 series_uid/study_uid 태깅(렌더 URL 이 정확히 요청, 다른 검사 결합 안전).
+// 이미 결합된 입력을 다시 넣어도 블록 순서 보존·중복 프레임 없음(재결합·재추가 안전·멱등).
+function buildCombined(list: { s: SeriesNode; studyUid: string }[]): SeriesNode {
+  const groups = new Map<string, InstanceNode[]>();
+  for (const { s, studyUid } of list) {
+    for (const i of s.instances) {
+      const su = i.series_uid ?? s.series_uid;
+      const stu = i.study_uid ?? studyUid;
+      const key = `${stu}|${su}`;
+      let arr = groups.get(key);
+      if (!arr) { arr = []; groups.set(key, arr); }
+      arr.push({ ...i, series_uid: su, study_uid: stu });
+    }
+  }
+  const instances = [...groups.values()].flatMap((arr) => {
+    const seen = new Set<string>();
+    return [...arr]
+      .sort((a, b) => (a.instance_number ?? 0) - (b.instance_number ?? 0))
+      .filter((i) => (seen.has(i.sop_uid) ? false : (seen.add(i.sop_uid), true)));
+  });
+  const origin = [...groups.keys()].map((k) => k.split("|")[1]);
+  return {
+    series_uid: `combined:${origin.join("+")}`,
+    modality: list[0]?.s.modality ?? "",
+    series_desc: `Combined · ${origin.length}개 시리즈 · ${instances.length}장`,
+    series_number: list[0]?.s.series_number ?? 0,
+    instances,
+  };
 }
 function paneFilter(p: Pane): string | undefined {
   const parts: string[] = [];
@@ -372,6 +405,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
   // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
   const [dragOverPane, setDragOverPane] = useState<number | null>(null);
+  // 드롭 Circle Menu(INFINITT Circle Menu 등가) — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택
+  const [circle, setCircle] = useState<{ pi: number; uid: string; x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
   // 드래그로 그리기(§A) — 시작 이미지픽셀/현재 이미지픽셀을 추적, 놓을 때 3px 이상이면 finishTool.
   const annoDragRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement;
@@ -876,7 +911,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
     const inst = p?.series?.instances[p.index];
     if (!images.size && p?.series && inst) {
-      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: p.series.series_uid,
+      // Combine 결합본이면 p.series.series_uid 는 'combined:' 합성값 → 현재 인스턴스의 원본 시리즈 UID 사용
+      images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: inst.series_uid ?? p.series.series_uid,
                                  rows: inst.rows, cols: inst.cols });
     }
     if (!images.size) { say("GSPS 저장할 이미지가 없습니다"); return; }
@@ -1612,13 +1648,57 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
   };
 
-  // Combine(§E) — 레이아웃(행×열) 지정 → 빈 셀 그리드 적용 → 좌측 썸네일 Series 를 각 칸에 드롭(환자 무관).
-  // 드롭은 dropSeriesToPaneInfi 가 처리. (기존 '전 시리즈 한 스택 평탄화'는 대체)
-  const combine = () => {
-    const l = askLayout(sLayout);
-    if (!l) return;
-    applySLayout(l);
-    say(`Combine: ${l.r}×${l.c} 레이아웃 — 좌측 시리즈를 각 칸에 끌어다 놓으세요`);
+  // Combine all — 현재 검사의 (영상)시리즈 전체를 하나의 논리적 시리즈로 결합해 활성 페인에 표시(연속 스크롤).
+  // INFINITT 'Combine all' 등가: 서버 병합이 아니라 판독 화면 표시 결합. (레이아웃 그리드는 상단 레이아웃 콤보 사용)
+  // 결합 전 페인 상태(시리즈/인덱스/검사) 스냅샷 → Combine 재클릭(토글) 시 해제·원복
+  const preCombineRef = useRef<Record<number, { series: SeriesNode | null; index: number; studyUid: string }>>({});
+  const isCombined = (p?: Pane): boolean => !!p?.series?.series_uid.startsWith("combined:");
+  const snapCombine = (pi: number) => {
+    if (!preCombineRef.current[pi] && panes[pi]) {
+      const p = panes[pi];
+      preCombineRef.current[pi] = { series: p.series, index: p.index, studyUid: p.studyUid };
+    }
+  };
+  const uncombine = (pi: number) => {
+    const snap = preCombineRef.current[pi];
+    delete preCombineRef.current[pi];
+    if (snap) upd(pi, { series: snap.series, index: snap.index, studyUid: snap.studyUid });
+    else upd(pi, { series: series[0] ?? null, index: 0, studyUid: curD.study_uid });
+    setActive(pi);
+    say("Combine 해제 — 원래 시리즈로 복원");
+  };
+  // 툴바 Combine — 토글: 활성 페인이 결합 상태면 해제(원복), 아니면 검사 전체 결합
+  const combine = () => { if (isCombined(panes[active])) uncombine(active); else combineAllInto(active); };
+  // Combine(추가) — 드롭/선택한 한 시리즈를 대상 페인의 현재 시리즈에 이어붙인다(이미 결합본이면 계속 누적).
+  const findSeriesByUid = (uid: string): { s: SeriesNode; studyUid: string } | null => {
+    const cur = series.find((x) => x.series_uid === uid);
+    if (cur) return { s: cur, studyUid: curD.study_uid };
+    const pr = priorSeries.find((e) => e.s.series_uid === uid);
+    return pr ? { s: pr.s, studyUid: pr.uid } : null;
+  };
+  const combineInto = (pi: number, seriesUid: string) => {
+    const dropped = findSeriesByUid(seriesUid);
+    if (!dropped) { say("Combine 실패 — 시리즈를 찾을 수 없습니다"); return; }
+    if (["SR", "KO", "PR", "SEG"].includes(dropped.s.modality)) { say("Combine 불가 — 비영상 시리즈(SR/KO/PR/SEG)"); return; }
+    snapCombine(pi);
+    const base = panes[pi]?.series ?? null;
+    const merged = buildCombined(
+      base ? [{ s: base, studyUid: panes[pi].studyUid }, dropped] : [dropped]);
+    upd(pi, { series: merged, index: 0 });
+    setActive(pi);
+    say(`Combine — Se${dropped.s.series_number} ${dropped.s.instances.length}장 추가 · 총 ${merged.instances.length}장(연속 스크롤)`);
+  };
+  // Combine all(대상 페인) — 툴바 버튼·Circle Menu 용: 현재 검사 전체 (영상)시리즈를 지정 페인에 결합.
+  const combineAllInto = (pi: number) => {
+    const src = series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality) && s.instances.length > 0);
+    if (!src.length) { say("Combine 취소 — 결합할 영상 시리즈가 없습니다"); return; }
+    if (src.length === 1) { say("Combine 취소 — 시리즈가 1개뿐입니다(결합할 대상 없음)"); return; }
+    snapCombine(pi);
+    const merged = buildCombined(
+      [...src].sort((a, b) => a.series_number - b.series_number).map((s) => ({ s, studyUid: curD.study_uid })));
+    upd(pi, { series: merged, index: 0, studyUid: curD.study_uid });
+    setActive(pi);
+    say(`Combine all — ${src.length}개 시리즈 ${merged.instances.length}장을 한 시리즈처럼 결합(연속 스크롤 · 다시 누르면 해제)`);
   };
 
   // Prev/Next(§3.1) — 워크리스트에서 현재 검사의 위/아래 검사를 이 창에서 열기
@@ -1907,7 +1987,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
            // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
            onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pi) setDragOverPane(pi); } }}
            onDragLeave={() => setDragOverPane((d) => (d === pi ? null : d))}
-           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) dropSeriesToPaneInfi(pi, uid); }}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) setCircle({ pi, uid, x: e.clientX, y: e.clientY }); }}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
                     // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록, 드롭 대상=강조
                     outline: dragOverPane === pi ? "3px solid #38bdf8"
@@ -2080,7 +2160,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const thumbCol = (
     <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-      <button onClick={combine} title="Combine — 레이아웃(행×열) 지정 후 좌측 시리즈를 각 칸에 드래그앤드롭" style={{ fontSize: 10.5 }}>Combine</button>
+      <button onClick={combine} title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
+              style={{ fontSize: 10.5, ...(isCombined(panes[active])
+                ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb", fontWeight: 700 } : {}) }}>
+        Combine{isCombined(panes[active]) ? " ●" : ""}
+      </button>
       {/* IN-2 ⑤: 썸네일 표시 모드 — 시리즈 대표/전체 이미지 나열 (viewer.prefs.infi_thumb_mode 계정 로밍) */}
       <button onClick={() => {
                 const m = thumbMode === "series" ? "all" : "series";
@@ -2270,6 +2354,35 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         <ViewerContextMenu x={ctxMenu.x} y={ctxMenu.y} items={buildCtxItems()}
                            onClose={() => setCtxMenu(null)} />
       )}
+      {/* 드롭 Circle Menu — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택(INFINITT Circle Menu 등가) */}
+      {circle && (() => {
+        const c = circle;
+        const done = (fn: () => void) => { fn(); setCircle(null); };
+        const btn = (label: string, desc: string, fn: () => void, primary = false) => (
+          <button onClick={() => done(fn)} title={desc}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px",
+                           fontSize: 12, background: primary ? "#1d4ed8" : "transparent",
+                           color: "#e2e8f0", border: "none", borderBottom: "1px solid #1e293b", cursor: "pointer" }}>
+            {label}<span style={{ color: "#64748b", marginLeft: 6, fontSize: 10.5 }}>{desc}</span>
+          </button>
+        );
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
+               onContextMenu={(e) => { e.preventDefault(); setCircle(null); }}>
+            <div onClick={(e) => e.stopPropagation()}
+                 style={{ position: "fixed", left: Math.min(c.x, window.innerWidth - 200), top: Math.min(c.y, window.innerHeight - 130),
+                          width: 190, background: "#0b1220", border: "1px solid #334155", borderRadius: 8,
+                          boxShadow: "0 6px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+              <div style={{ padding: "5px 12px", fontSize: 10.5, color: "#7dd3fc", borderBottom: "1px solid #1e293b" }}>
+                시리즈 드롭 — 동작 선택
+              </div>
+              {btn("Open", "이 페인에 표시(교체)", () => dropSeriesToPaneInfi(c.pi, c.uid), true)}
+              {btn("Combine", "현재 시리즈에 이어붙임", () => combineInto(c.pi, c.uid))}
+              {btn("Combine all", "검사 전체 시리즈 결합", () => combineAllInto(c.pi))}
+            </div>
+          </div>
+        );
+      })()}
       {/* CSS 선예화 필터 정의 (Sharpens Filter — feConvolveMatrix) */}
       <svg width="0" height="0" style={{ position: "absolute" }}>
         <filter id="in-sharpen">

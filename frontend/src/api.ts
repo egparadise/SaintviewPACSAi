@@ -1009,6 +1009,8 @@ export interface InstanceNode {
   pixel_spacing: number[];   // [row, col] mm — 없으면 []
   position: number[];        // ImagePositionPatient [x,y,z]
   orientation: number[];     // ImageOrientationPatient 6개
+  series_uid?: string;       // Combine(여러 시리즈를 한 시리즈처럼) 시 인스턴스의 원본 시리즈 UID — 렌더 URL 이 이를 우선 사용
+  study_uid?: string;        // Combine 시 인스턴스의 원본 검사 UID — 다른 검사(과거/비교) 시리즈 결합 시 정확한 스터디로 요청
 }
 
 export interface SeriesNode {
