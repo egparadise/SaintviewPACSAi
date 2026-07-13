@@ -356,6 +356,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   });
   const calibRef = useRef(false);   // Calibrate 진행 중 플래그(기준선 완료를 가로챔)
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
+  // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
+  const [dragOverPane, setDragOverPane] = useState<number | null>(null);
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
   // 우클릭 컨텍스트 메뉴 + 우드래그 기본 도구(초기 분석 §7: 우드래그=기본 지정 도구, 기본 W/L)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; pane: number } | null>(null);
@@ -1542,6 +1544,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       return next;
     });
 
+  // 썸네일 시리즈 드롭 → 해당 페인에 로드 (현재/과거 시리즈 모두 조회)
+  const dropSeriesToPaneInfi = (pi: number, seriesUid: string) => {
+    const cur = series.find((x) => x.series_uid === seriesUid);
+    if (cur) { upd(pi, { series: cur, index: 0, studyUid: curD.study_uid }); setActive(pi); say(`시리즈 Se${cur.series_number} → 페인 로드 (드래그앤드롭)`); return; }
+    const pr = priorSeries.find((e) => e.s.series_uid === seriesUid);
+    if (pr) { upd(pi, { series: pr.s, index: 0, studyUid: pr.uid }); setActive(pi); say(`[과거] Se${pr.s.series_number} → 페인 로드 (드래그앤드롭)`); return; }
+    say("드롭 실패 — 시리즈를 찾을 수 없습니다");
+  };
+
   // Series 페인 렌더 — 뷰포트 중첩 flex(경계 스플리터) 안에서 사용
   const renderPane = (pi: number) => {
     const p = panes[pi];
@@ -1581,13 +1592,26 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
              }
              setMaximized((m) => (m === null ? pi : null));
            }}
+           // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
+           onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pi) setDragOverPane(pi); } }}
+           onDragLeave={() => setDragOverPane((d) => (d === pi ? null : d))}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) dropSeriesToPaneInfi(pi, uid); }}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
-                    // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록
-                    outline: active === pi ? "2px solid #4ade80"
+                    // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록, 드롭 대상=강조
+                    outline: dragOverPane === pi ? "3px solid #38bdf8"
+                      : active === pi ? "2px solid #4ade80"
                       : selPanes.has(pi) ? `2px solid ${selColor}` : "1px solid #1e293b",
+                    outlineOffset: dragOverPane === pi ? "-3px" : undefined,
                     display: "grid", cursor: isPointTool(tool) ? "copy" : "crosshair",
                     gridTemplateColumns: `repeat(${p.il.c}, 1fr)`,
                     gridTemplateRows: `repeat(${p.il.r}, 1fr)`, gap: 1 }}>
+        {dragOverPane === pi && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "grid", placeItems: "center",
+                        background: "rgba(56,189,248,0.18)", pointerEvents: "none",
+                        color: "#38bdf8", fontSize: 14, fontWeight: 800, textShadow: "0 1px 4px #000" }}>
+            ↓ 이 페인에 시리즈 표시
+          </div>
+        )}
         {Array.from({ length: tilesOf(p) }, (_, t) => {
           const idx = p.index + t;
           const inst = insts[idx];
@@ -1728,7 +1752,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                         border: thumbBorder(s.series_uid, "1px solid var(--border)"), background: "#000" }} />
         ))}
       {thumbMode === "series" && series.map((s, sIdx) => (
-        <div key={s.series_uid}
+        <div key={s.series_uid} draggable
+             onDragStart={(e) => { e.dataTransfer.setData("application/x-sv-series", s.series_uid); e.dataTransfer.effectAllowed = "copy"; }}
              onClick={(e) => {
                // 썸네일에서도 다중 선택: Ctrl=해당 시리즈가 표시된 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
                if (e.ctrlKey) {
@@ -1750,7 +1775,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                }
                upd(active, { series: s, index: 0, studyUid: curD.study_uid });
              }}
-             title={`Se${s.series_number} · ${s.series_desc}\n(Ctrl=페인 선택 토글 · Shift=범위 선택)`}
+             title={`Se${s.series_number} · ${s.series_desc}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 클릭: 활성 페인 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
                       border: thumbBorder(s.series_uid, "1px solid var(--border)"),
                       borderRadius: 3, background: "#000" }}>
@@ -1770,9 +1795,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         </button>
       ))}
       {priorSeries.map((e) => (
-        <div key={`${e.uid}-${e.s.series_uid}`}
+        <div key={`${e.uid}-${e.s.series_uid}`} draggable
+             onDragStart={(ev) => { ev.dataTransfer.setData("application/x-sv-series", e.s.series_uid); ev.dataTransfer.effectAllowed = "copy"; }}
              onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
-             title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}`}
+             title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}\n· 드래그 → 원하는 페인에 놓기`}
              style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
                       border: thumbBorder(e.s.series_uid, "1px solid #854d0e"),
                       borderRadius: 3, background: "#000" }}>

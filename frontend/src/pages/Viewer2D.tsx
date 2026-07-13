@@ -336,6 +336,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [cross3d, setCross3d] = useState<Record<string, { sop: string; x: number; y: number }>>({});
   // TY-3(5): 페인별 시네 미니 컨트롤 표시용 호버 페인
   const [hoverPane, setHoverPane] = useState<string | null>(null);
+  // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
+  const [dragOverPane, setDragOverPane] = useState<string | null>(null);
+  // 드롭된 series_uid 로 시리즈 객체를 찾아 해당 페인에 로드
+  const dropSeriesToPane = (pid: string, seriesUid: string) => {
+    const s = thumbSeries.find((x) => x.series_uid === seriesUid) ?? series.find((x) => x.series_uid === seriesUid);
+    if (!s) { setStatus("드롭 실패 — 시리즈를 찾을 수 없습니다"); return; }
+    patch(pid, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) });
+    setActivePane(pid);
+    setStatus(`시리즈 S${s.series_number}(${s.series_desc || s.modality}) → 페인 로드 (드래그앤드롭)`);
+  };
   // TY-3(7): 로컬 미디어(jpg/png/bmp/avi/mp4) 파일 선택
   const mediaInputRef = useRef<HTMLInputElement>(null);
   // TY-3(9): Compare 모달 — 같은 환자 과거검사 다중 선택 비교
@@ -1680,8 +1690,21 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                          nx: ix / cols, ny: iy / rows, sc: s });
            }}
            onMouseLeave={() => { if (magOn) setMagPos(null); setHoverPane((h) => (h === pid ? null : h)); }}
+           // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
+           onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pid) setDragOverPane(pid); } }}
+           onDragLeave={() => setDragOverPane((d) => (d === pid ? null : d))}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) dropSeriesToPane(pid, uid); }}
            style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0, flex: 1,
-                    background: "#000", cursor: tool ? "copy" : "crosshair", outline }}>
+                    background: "#000", cursor: tool ? "copy" : "crosshair",
+                    outline: dragOverPane === pid ? "3px solid var(--accent)" : outline,
+                    outlineOffset: dragOverPane === pid ? "-3px" : undefined }}>
+        {dragOverPane === pid && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "grid", placeItems: "center",
+                        background: "color-mix(in srgb, var(--accent) 18%, transparent)", pointerEvents: "none",
+                        color: "var(--accent)", fontSize: 14, fontWeight: 800, textShadow: "0 1px 4px #000" }}>
+            ↓ 이 페인에 시리즈 표시
+          </div>
+        )}
         {url && (
           <div style={{
             position: "absolute", inset: 0,
@@ -2175,7 +2198,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     }}>
       {prefs.thumbMode === "series" ? thumbSeries.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
-          <div onClick={(e) => {
+          <div draggable
+               onDragStart={(e) => {
+                 // 시리즈를 페인으로 드래그 — 드롭 시 해당 페인에 로드
+                 e.dataTransfer.setData("application/x-sv-series", s.series_uid);
+                 e.dataTransfer.effectAllowed = "copy";
+               }}
+               onClick={(e) => {
                  // In Viewer 정합 — 썸네일에서도 다중 선택: Ctrl=해당 시리즈 표시 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
                  const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
                  if (e.ctrlKey) {
@@ -2199,7 +2228,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                  setSelSeries(selSeries === s.series_uid ? null : s.series_uid);
                }}
                onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
-               title={`${s.series_desc || s.modality} — 더블클릭: 활성 페인 로드\n(Ctrl=페인 선택 토글 · Shift=범위 선택)`}
+               title={`${s.series_desc || s.modality}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 더블클릭: 활성 페인 로드 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
                style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)" : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
             {s.instances[Math.floor(s.instances.length / 2)] && (
