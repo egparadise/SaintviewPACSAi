@@ -223,6 +223,10 @@ const TOOL_PTS: Record<string, number> = {
 };
 const OPEN_ENDED = new Set(["polyline", "shutPoly", "spineCurve"]);
 const isPointTool = (t: string) => t in TOOL_PTS || OPEN_ENDED.has(t);
+// 드래그로 그리는 2점 툴 — 좌클릭 누름=시작점, 놓음=끝점(그 사이 러버밴드 미리보기).
+// 나머지 점 클릭형(mangle/cobb/limb/… open-ended/1점)은 기존 클릭-점찍기(measureClick) 유지.
+const DRAG_TOOLS = new Set(["mline", "arrow2d", "circle", "mellipse", "mrect",
+                            "pelvis", "profile", "table2d", "shutRect", "shutEl", "box2d"]);
 
 // ── 렌더 이미지 픽셀 샘플러 (ROI 통계/Profile/Table/Lens) ──
 // WADO-RS rendered PNG(8bit) 를 canvas 로 읽는다. W/L(c,w)을 알면 근사 원값으로 역변환:
@@ -344,6 +348,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 측정 주석 — sop_uid 별 (Measure 2D Line/Angle)
   const [annos, setAnnos] = useState<Record<string, Anno2[]>>({});
   const [pend, setPend] = useState<{ sop: string; pts: { x: number; y: number }[] } | null>(null);
+  // 편집 대상 주석(선택) — select 모드 히트테스트로 지정, 삭제/이동/크기변경의 기준. sop 배열의 index 식별.
+  const [selAnno, setSelAnno] = useState<{ sop: string; idx: number } | null>(null);
+  const selAnnoRef = useRef(selAnno);
+  useEffect(() => { selAnnoRef.current = selAnno; }, [selAnno]);
   // 3D Cursor 마커(페인별, 일시적) · 돋보기 위치 · 픽셀값 표 모달 · 딕테이션
   const [cross3d, setCross3d] = useState<Record<number, { sop: string; x: number; y: number }>>({});
   const [magPos, setMagPos] = useState<{ pi: number; t: number; mx: number; my: number;
@@ -359,6 +367,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
   const [dragOverPane, setDragOverPane] = useState<number | null>(null);
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
+  // 드래그로 그리기(§A) — 시작 이미지픽셀/현재 이미지픽셀을 추적, 놓을 때 3px 이상이면 finishTool.
+  const annoDragRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement;
+                               start: { x: number; y: number }; cur: { x: number; y: number } } | null>(null);
+  // 편집(§B) — select 모드에서 잡은 주석의 이동(move)/점 크기변경(resize) 진행 상태.
+  const editRef = useRef<{ pi: number; sop: string; idx: number; mode: "move" | "resize"; ptIdx: number;
+                          inst: InstanceNode; tileEl: HTMLElement; last: { x: number; y: number } } | null>(null);
   // 우클릭 컨텍스트 메뉴 + 우드래그 기본 도구(초기 분석 §7: 우드래그=기본 지정 도구, 기본 W/L)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; pane: number } | null>(null);
   const [rdragTool, setRdragTool] = useState<RdragTool>(
@@ -607,6 +621,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     xlink.crosslink && selPanes.size > 1 && selPanes.has(pi) ? [...selPanes] : [pi];
 
   const scroll = useCallback((i: number, delta: number) => {
+    setSelAnno(null);   // §B: 이미지 전환 시 편집 선택 해제 — 안 보이는 이전 이미지 주석의 무피드백 삭제 방지
     setPanes((ps) => ps.map((p, k) => {
       // §3.3: crosslink 마스터 ON 일 때 — auto_sync=같은 검사 페인, sync_other=다른 검사(과거) 페인 동기
       const sameExam = p.studyUid === ps[i]?.studyUid;
@@ -686,6 +701,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const applySnap = (s: Snap) => {
     setPanes((ps) => ps.map((p, i) => (s.vis[i] ? { ...p, ...s.vis[i] } : p)));
     setAnnos(s.annos);
+    setSelAnno(null);   // 스냅샷 복원 — annos 가 바뀌어 selAnno.idx 가 다른 주석을 가리키므로 선택 해제
   };
   const histGo = (d: -1 | 1) => {
     const ni = histIdx.current + d;
@@ -955,7 +971,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "print": window.print(); break;
       case "refreshExam": loadSeries(); say("검사 정보를 갱신했습니다"); break;
       case "clrAnno":
-        setAnnos({}); setPend(null); setCross3d({});
+        setAnnos({}); setPend(null); setSelAnno(null); setCross3d({});
         setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
         say("측정·주석·셔터를 모두 지웠습니다");
         break;
@@ -1017,6 +1033,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {
           setTool(id as Tool);
           setPend(null);
+          setSelAnno(null);   // §D: 도구 전환 시 편집 선택 해제(진행중 그리기 pend 도 정리)
           const hint = item?.label?.split("—")[1]?.trim();
           if (hint) say(hint);
         }
@@ -1219,12 +1236,138 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
   };
 
-  const measureClick = (e: React.MouseEvent, tileEl: HTMLElement, pi: number, p: Pane, inst: InstanceNode) => {
+  // 화면(client) 좌표 → 이미지 픽셀 좌표 (fit 배치 + zoom/pan 역변환, rot/flip 미적용 전제 — measureClick 과 동일 수식)
+  const screenToImg = (clientX: number, clientY: number, tileEl: HTMLElement, p: Pane, inst: InstanceNode):
+      { x: number; y: number } => {
     const r = tileEl.getBoundingClientRect();
     const s0 = Math.min(r.width / (inst.cols || 1), r.height / (inst.rows || 1));
     const s = s0 * p.zoom;
-    const ix = (e.clientX - (r.left + r.width / 2 + p.tx)) / s + inst.cols / 2;
-    const iy = (e.clientY - (r.top + r.height / 2 + p.ty)) / s + inst.rows / 2;
+    return {
+      x: (clientX - (r.left + r.width / 2 + p.tx)) / s + inst.cols / 2,
+      y: (clientY - (r.top + r.height / 2 + p.ty)) / s + inst.rows / 2,
+    };
+  };
+  // 점→선분 최단거리(이미지 픽셀) — 히트테스트 본체 근접 판정용
+  const distToSeg = (c: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number => {
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const l2 = vx * vx + vy * vy;
+    let t = l2 ? ((c.x - a.x) * vx + (c.y - a.y) * vy) / l2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(c.x - (a.x + vx * t), c.y - (a.y + vy * t));
+  };
+  // 주석 본체 근접(이미지 픽셀 임계 t) — 도형별 경계/선분에 대한 근접 판정(§B 이동 대상 히트)
+  const annoHit = (a: Anno2, c: { x: number; y: number }, t: number): boolean => {
+    const pts = a.pts;
+    if (!pts.length) return false;
+    for (const pt of pts) if (Math.hypot(pt.x - c.x, pt.y - c.y) <= t) return true;
+    if (["mrect", "box", "rect", "table2d", "shutRect"].includes(a.kind) && pts.length >= 2) {
+      const x0 = Math.min(pts[0].x, pts[1].x), x1 = Math.max(pts[0].x, pts[1].x);
+      const y0 = Math.min(pts[0].y, pts[1].y), y1 = Math.max(pts[0].y, pts[1].y);
+      const c1 = { x: x0, y: y0 }, c2 = { x: x1, y: y0 }, c3 = { x: x1, y: y1 }, c4 = { x: x0, y: y1 };
+      return distToSeg(c, c1, c2) <= t || distToSeg(c, c2, c3) <= t ||
+             distToSeg(c, c3, c4) <= t || distToSeg(c, c4, c1) <= t;
+    }
+    if (["mellipse", "ellipse"].includes(a.kind) && pts.length >= 2) {
+      const cx = (pts[0].x + pts[1].x) / 2, cy = (pts[0].y + pts[1].y) / 2;
+      const rx = Math.abs(pts[1].x - pts[0].x) / 2, ry = Math.abs(pts[1].y - pts[0].y) / 2;
+      if (rx < 1 || ry < 1) return false;
+      const d = Math.abs(Math.hypot((c.x - cx) / rx, (c.y - cy) / ry) - 1);
+      return d * Math.min(rx, ry) <= t;   // 정규화 거리 → 최소 반경으로 픽셀 환산(근사)
+    }
+    if (a.kind === "circle" && pts.length >= 2) {
+      const rad = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      return Math.abs(Math.hypot(c.x - pts[0].x, c.y - pts[0].y) - rad) <= t;
+    }
+    for (let k = 1; k < pts.length; k++) if (distToSeg(c, pts[k - 1], pts[k]) <= t) return true;
+    return false;
+  };
+  // 선택 주석 삭제(§C) — selAnnoRef 기준. 삭제 후 selAnno=null(index 재계산 회피)
+  const deleteSelAnno = () => {
+    const sel = selAnnoRef.current;
+    if (!sel) return;
+    setAnnos((prev) => {
+      const list = prev[sel.sop];
+      if (!list || !list[sel.idx]) return prev;
+      return { ...prev, [sel.sop]: list.filter((_, k) => k !== sel.idx) };
+    });
+    setSelAnno(null);
+    schedHist();
+    say("선택 주석을 지웠습니다");
+  };
+  // 마지막 주석 삭제(§C) — 지정 페인의 현재 인스턴스 주석 배열에서 pop
+  const deleteLastAnno = (pi: number) => {
+    const p = panesRef.current[pi];
+    const inst = p?.series?.instances[p.index];
+    if (!inst) return;
+    const sop = inst.sop_uid;
+    setAnnos((prev) => {
+      const list = prev[sop];
+      if (!list || !list.length) return prev;
+      return { ...prev, [sop]: list.slice(0, -1) };
+    });
+    schedHist();
+    say("마지막 주석을 지웠습니다");
+  };
+
+  /* 편집(이동/크기변경) 확정 후 ROI/렌즈 통계 라벨 재계산(§B) — pts 만 바뀌고 value(생성 시점 문자열)가
+     남아 이전 영역의 평균/SD/최소~최대/면적을 그대로 표시하던 문제 수정. finishTool 과 동일 산식:
+     서버 roiStats(원본 픽셀) 우선, 실패 시 렌더 8bit 근사('≈') 폴백. 비동기 완료 시 대상 주석의
+     value 만 갱신(kind/존재 재확인). VALUE_KINDS(mrect/mellipse/lens) 외에는 no-op. */
+  const recomputeRoiValue = (pi: number, sop: string, idx: number, inst: InstanceNode) => {
+    const p = panesRef.current[pi];
+    const a = annosSnapRef.current[sop]?.[idx];
+    if (!p?.series || !a || !VALUE_KINDS.has(a.kind)) return;
+    const pts = a.pts;
+    if (pts.length < (a.kind === "lens" ? 1 : 2)) return;
+    const cols = inst.cols || 1, rows = inst.rows || 1;
+    const url = instUrl(p.studyUid || curD.study_uid, p.series, inst, p.wl);
+    const sp = inst.pixel_spacing?.length === 2 ? inst.pixel_spacing : null;
+    const exd = exams.find((e) => e.d.study_uid === p.studyUid)?.d ?? curD;
+    const setVal = (value: string) => setAnnos((prev) => {
+      const list = prev[sop];
+      if (!list || !list[idx] || list[idx].kind !== a.kind) return prev;
+      return { ...prev, [sop]: list.map((x, k) => (k === idx ? { ...x, value } : x)) };
+    });
+    if (a.kind === "lens") {
+      const x = Math.round(pts[0].x), y = Math.round(pts[0].y);
+      const local = () => void samplePixels(url, cols, rows).then((data) => {
+        if (!data) return;
+        const v = rawOf(data.data[(Math.max(0, Math.min(data.height - 1, y)) * data.width +
+                                   Math.max(0, Math.min(data.width - 1, x))) * 4], p.wl);
+        setVal(`≈${v.toFixed(0)}`);
+      });
+      api.roiStats(exd.id, { sop_uid: sop, kind: "rect",
+                             points: [[x / cols, y / rows], [(x + 1) / cols, (y + 1) / rows]] })
+        .then((st) => { if (st.error || st.mean == null) local();
+                        else setVal(`${st.mean.toFixed(0)}${st.unit ? ` ${st.unit}` : ""}`); })
+        .catch(local);
+      return;
+    }
+    const ell = a.kind === "mellipse";
+    const local = () => void samplePixels(url, cols, rows).then((data) => {
+      if (!data) return;
+      const st = roiStats(data, pts[0].x, pts[0].y, pts[1].x, pts[1].y, ell, p.wl);
+      if (!st) return;
+      const areaMm = sp
+        ? Math.abs((pts[1].x - pts[0].x) * sp[1] * (pts[1].y - pts[0].y) * sp[0]) * (ell ? Math.PI / 4 : 1)
+        : 0;
+      const area = areaMm ? ` · ${(areaMm / 100).toFixed(2)}cm²` : "";
+      setVal(`≈${st.mean.toFixed(0)}±${st.sd.toFixed(0)} [${st.mn.toFixed(0)}~${st.mx.toFixed(0)}]${area}`);
+    });
+    api.roiStats(exd.id, { sop_uid: sop, kind: ell ? "ellipse" : "rect",
+                           points: pts.map((q) => [q.x / cols, q.y / rows]) })
+      .then((st) => {
+        if (st.error || st.mean == null) { local(); return; }
+        const area = st.area_mm2 ? ` · ${(st.area_mm2 / 100).toFixed(2)}cm²` : "";
+        setVal(`${st.mean.toFixed(0)}±${(st.std ?? 0).toFixed(0)} ` +
+               `[${(st.min ?? 0).toFixed(0)}~${(st.max ?? 0).toFixed(0)}]` +
+               `${st.unit ? ` ${st.unit}` : ""}${area}`);
+      })
+      .catch(local);
+  };
+
+  const measureClick = (e: React.MouseEvent, tileEl: HTMLElement, pi: number, p: Pane, inst: InstanceNode) => {
+    const { x: ix, y: iy } = screenToImg(e.clientX, e.clientY, tileEl, p, inst);
     const cur = pend?.sop === inst.sop_uid ? pend.pts : [];
     const pts = [...cur, { x: ix, y: iy }];
     if (OPEN_ENDED.has(tool)) { setPend({ sop: inst.sop_uid, pts }); return; }   // 더블클릭 종료
@@ -1265,6 +1408,40 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
   };
   const onMouseMove = (e: React.MouseEvent) => {
+    // 드래그로 그리기(§A) — 두번째 점 실시간 갱신 → pend[start,cur] 러버밴드 미리보기
+    const ad = annoDragRef.current;
+    if (ad) {
+      const p2 = panes[ad.pi];
+      if (p2) {
+        const cur = screenToImg(e.clientX, e.clientY, ad.tileEl, p2, ad.inst);
+        ad.cur = cur;
+        setPend({ sop: ad.sop, pts: [ad.start, cur] });
+      }
+      return;
+    }
+    // 편집(§B) — 이동(move: 전 점 평행이동)/크기변경(resize: 잡은 점만 이동), 좌표 클램프
+    const ed = editRef.current;
+    if (ed) {
+      const p2 = panes[ed.pi];
+      if (p2) {
+        const cur = screenToImg(e.clientX, e.clientY, ed.tileEl, p2, ed.inst);
+        const dx = cur.x - ed.last.x, dy = cur.y - ed.last.y;
+        ed.last = cur;
+        const cols = ed.inst.cols || 1, rows = ed.inst.rows || 1;
+        const cx = (x: number) => Math.max(0, Math.min(cols, x));
+        const cy = (y: number) => Math.max(0, Math.min(rows, y));
+        setAnnos((prev) => {
+          const list = prev[ed.sop];
+          if (!list || !list[ed.idx]) return prev;
+          const a = list[ed.idx];
+          const pts = ed.mode === "resize" && ed.ptIdx >= 0
+            ? a.pts.map((pt, k) => (k === ed.ptIdx ? { x: cx(pt.x + dx), y: cy(pt.y + dy) } : pt))
+            : a.pts.map((pt) => ({ x: cx(pt.x + dx), y: cy(pt.y + dy) }));
+          return { ...prev, [ed.sop]: list.map((x, k) => (k === ed.idx ? { ...a, pts } : x)) };
+        });
+      }
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     // 이동 임계값(5px) 초과부터 드래그로 간주 — 우클릭 메뉴/우드래그 도구 구분
@@ -1287,6 +1464,26 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
   };
   const endDrag = (e?: React.MouseEvent) => {
+    // 드래그로 그리기 종료(§A) — 이동거리 ≥ 3px(이미지px)면 finishTool([start,cur]), 미만이면 취소(클릭 오작동 방지)
+    const ad = annoDragRef.current;
+    if (ad) {
+      annoDragRef.current = null;
+      drag.current = null;
+      const p2 = panes[ad.pi];
+      const dist = Math.hypot(ad.cur.x - ad.start.x, ad.cur.y - ad.start.y);
+      if (p2?.series && dist >= 3) finishTool(ad.pi, p2, ad.inst, [ad.start, ad.cur]);
+      setPend(null);
+      return;
+    }
+    // 편집 종료(§B) — 이동/크기변경 확정 후 ROI/렌즈 통계 라벨 재계산 + 히스토리 기록
+    if (editRef.current) {
+      const ed = editRef.current;
+      editRef.current = null;
+      drag.current = null;
+      recomputeRoiValue(ed.pi, ed.sop, ed.idx, ed.inst);   // pts 변경분을 통계/면적에 반영(mrect/mellipse/lens)
+      schedHist();
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     // W/L·Zoom·Pan 드래그 종료 시점에 히스토리 기록(드래그 중엔 미기록)
@@ -1313,14 +1510,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }
   };
 
+  // Combine(§E) — 레이아웃(행×열) 지정 → 빈 셀 그리드 적용 → 좌측 썸네일 Series 를 각 칸에 드롭(환자 무관).
+  // 드롭은 dropSeriesToPaneInfi 가 처리. (기존 '전 시리즈 한 스택 평탄화'는 대체)
   const combine = () => {
-    const all: InstanceNode[] = series.flatMap((s) => s.instances);
-    if (!all.length) return;
-    upd(active, {
-      series: { series_uid: series[0].series_uid, modality: curD.modality,
-                series_desc: `[Combine] ${series.length} series`, series_number: 0, instances: all },
-      index: 0, studyUid: curD.study_uid,
-    });
+    const l = askLayout(sLayout);
+    if (!l) return;
+    applySLayout(l);
+    say(`Combine: ${l.r}×${l.c} 레이아웃 — 좌측 시리즈를 각 칸에 끌어다 놓으세요`);
   };
 
   // Prev/Next(§3.1) — 워크리스트에서 현재 검사의 위/아래 검사를 이 창에서 열기
@@ -1497,7 +1693,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         });
         return;
       }
-      if (e.key === "Escape") { setSelPanes(new Set()); return; }
+      // 삭제(§C) — 선택 주석 있으면 그 주석, 없으면 활성 페인 현재 인스턴스의 마지막 주석
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        if (selAnnoRef.current) deleteSelAnno();
+        else deleteLastAnno(active);
+        return;
+      }
+      // Esc(§D) — 진행중 그리기/편집 취소 → 선택 주석 해제 → 도구 해제(select) → 페인선택 해제
+      if (e.key === "Escape") {
+        annoDragRef.current = null; editRef.current = null;
+        setPend(null); setSelAnno(null); setTool("select");
+        setSelPanes(new Set());
+        return;
+      }
       if (e.ctrlKey || e.altKey || e.metaKey) return;   // 브라우저/기존 조합키 동작 보존
       switch (e.key) {
         case "ArrowRight": e.preventDefault(); scroll(active, 1); return;
@@ -1618,8 +1827,37 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           return (
             <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
                  onMouseDown={(e) => {
-                   if (isPointTool(tool) && e.button === 0 && p.series && inst) {
-                     measureClick(e, e.currentTarget, pi, p, inst);
+                   if (e.button !== 0 || !p.series || !inst) return;
+                   if (DRAG_TOOLS.has(tool)) {
+                     // 드래그로 그리기(§A) — 시작 이미지픽셀 기록, pend=[start,start]
+                     const start = screenToImg(e.clientX, e.clientY, e.currentTarget, p, inst);
+                     annoDragRef.current = { pi, sop: inst.sop_uid, inst, tileEl: e.currentTarget, start, cur: start };
+                     setPend({ sop: inst.sop_uid, pts: [start, start] });
+                     return;
+                   }
+                   if (isPointTool(tool)) { measureClick(e, e.currentTarget, pi, p, inst); return; }
+                   if (tool === "select") {
+                     // 편집 히트테스트(§B) — 점 핸들(resize)·본체(move)·미스(선택해제, 기존 pan/zoom/wl 진행)
+                     const sop = inst.sop_uid;
+                     const list = annos[sop] ?? [];
+                     const click = screenToImg(e.clientX, e.clientY, e.currentTarget, p, inst);
+                     let hit: { idx: number; mode: "move" | "resize"; ptIdx: number } | null = null;
+                     for (let idx = list.length - 1; idx >= 0 && !hit; idx--) {
+                       const a = list[idx];
+                       for (let k = 0; k < a.pts.length; k++) {
+                         if (Math.hypot(a.pts[k].x - click.x, a.pts[k].y - click.y) <= 8) {
+                           hit = { idx, mode: "resize", ptIdx: k }; break;
+                         }
+                       }
+                     }
+                     if (!hit) for (let idx = list.length - 1; idx >= 0; idx--) {
+                       if (annoHit(list[idx], click, 6)) { hit = { idx, mode: "move", ptIdx: -1 }; break; }
+                     }
+                     if (hit) {
+                       setSelAnno({ sop, idx: hit.idx });
+                       editRef.current = { pi, sop, idx: hit.idx, mode: hit.mode, ptIdx: hit.ptIdx,
+                                           inst, tileEl: e.currentTarget, last: click };
+                     } else setSelAnno(null);
                    }
                  }}
                  onMouseMove={(e) => {   // Magnification — 마우스 따라 부분 확대경
@@ -1645,6 +1883,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                   <TileAnno inst={inst} pane={p}
                             annos={annos[inst.sop_uid] ?? []}
                             pend={pend?.sop === inst.sop_uid ? pend.pts : []}
+                            pendTool={pend?.sop === inst.sop_uid ? tool : ""}
+                            selIdx={selAnno?.sop === inst.sop_uid ? selAnno.idx : -1}
                             scout={scoutFor(inst, p.series.series_uid)}
                             shutter={p.shutter ?? undefined}
                             cross={cross3d[pi]?.sop === inst.sop_uid ? cross3d[pi] : undefined} />
@@ -1730,7 +1970,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const thumbCol = (
     <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-      <button onClick={combine} title="Combine Series — 시리즈 결합" style={{ fontSize: 10.5 }}>Combine</button>
+      <button onClick={combine} title="Combine — 레이아웃(행×열) 지정 후 좌측 시리즈를 각 칸에 드래그앤드롭" style={{ fontSize: 10.5 }}>Combine</button>
       {/* IN-2 ⑤: 썸네일 표시 모드 — 시리즈 대표/전체 이미지 나열 (viewer.prefs.infi_thumb_mode 계정 로밍) */}
       <button onClick={() => {
                 const m = thumbMode === "series" ? "all" : "series";
@@ -1894,6 +2134,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       { label: "1:1 (Reset Zoom)", onClick: () => updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })) },
       { label: maximized === active ? "최대화 해제" : "최대화", onClick: () => setMaximized((m) => (m === active ? null : active)) },
     ] },
+    { kind: "sep" },
+    // 삭제(§C) — 선택 주석 있으면 그 주석, 없으면 마지막 주석 + 전체 지우기(clrAnno)
+    selAnno
+      ? { label: "선택 주석 지우기", onClick: deleteSelAnno }
+      : { label: "마지막 주석 지우기", onClick: () => deleteLastAnno(active) },
+    { label: "주석 전체 지우기", onClick: () => fire("clrAnno") },
     { kind: "sep" },
     { label: "Key Image 지정/해제", onClick: () => fire("key2d") },
     { label: "주석 저장", onClick: () => void saveAnnos() },
@@ -2522,8 +2768,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 }
 
 /* ── 측정 오버레이 — 이미지 픽셀좌표를 타일 화면좌표로 사상(fit+zoom/pan), mm=Pixel Spacing ── */
-function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
+function TileAnno({ inst, pane, annos, pend, pendTool = "", selIdx = -1, scout = [], shutter, cross }: {
   inst: InstanceNode; pane: Pane; annos: Anno2[]; pend: { x: number; y: number }[];
+  pendTool?: string;   // 진행중 pend 도구 — 2점 드래그면 도구별 러버밴드 미리보기(§A)
+  selIdx?: number;     // 선택 주석 index(§B) — 강조 테두리 + 점 핸들 렌더
   scout?: { x1: number; y1: number; x2: number; y2: number;
             current: boolean; cross?: boolean; label?: string }[];
   shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] };
@@ -2829,10 +3077,42 @@ function TileAnno({ inst, pane, annos, pend, scout = [], shutter, cross }: {
       {pend.map((pt, i) => (
         <circle key={`p${i}`} cx={X(pt)} cy={Y(pt)} r={3} fill="#f87171" />
       ))}
-      {pend.length > 1 && (
+      {/* 드래그로 그리기(§A) 러버밴드 — 2점일 때 도구별 미리보기(사각/타원/원/화살표/직선) */}
+      {pendTool && DRAG_TOOLS.has(pendTool) && pend.length === 2 ? (() => {
+        const a = pend[0], b = pend[1];
+        const col = "#f87171";
+        if (["mrect", "box2d", "table2d", "shutRect"].includes(pendTool)) {
+          return <rect x={Math.min(X(a), X(b))} y={Math.min(Y(a), Y(b))}
+                       width={Math.abs(X(b) - X(a))} height={Math.abs(Y(b) - Y(a))}
+                       stroke={col} strokeWidth={1.2} strokeDasharray="4 3" fill="none" />;
+        }
+        if (["mellipse", "shutEl"].includes(pendTool)) {
+          return <ellipse cx={(X(a) + X(b)) / 2} cy={(Y(a) + Y(b)) / 2}
+                          rx={Math.abs(X(b) - X(a)) / 2} ry={Math.abs(Y(b) - Y(a)) / 2}
+                          stroke={col} strokeWidth={1.2} strokeDasharray="4 3" fill="none" />;
+        }
+        if (pendTool === "circle") {
+          return <circle cx={X(a)} cy={Y(a)} r={Math.hypot(X(b) - X(a), Y(b) - Y(a))}
+                         stroke={col} strokeWidth={1.2} strokeDasharray="4 3" fill="none" />;
+        }
+        if (pendTool === "arrow2d") {
+          const ang = Math.atan2(Y(b) - Y(a), X(b) - X(a));
+          return <g stroke={col} strokeWidth={1.2} fill={col}>
+            <line x1={X(a)} y1={Y(a)} x2={X(b)} y2={Y(b)} />
+            <polygon stroke="none" points={`${X(b)},${Y(b)} ${X(b) - 11 * Math.cos(ang - 0.42)},${Y(b) - 11 * Math.sin(ang - 0.42)} ${X(b) - 11 * Math.cos(ang + 0.42)},${Y(b) - 11 * Math.sin(ang + 0.42)}`} />
+          </g>;
+        }
+        // 직선 계열 (mline/pelvis/profile)
+        return <line x1={X(a)} y1={Y(a)} x2={X(b)} y2={Y(b)} stroke={col} strokeWidth={1.2} strokeDasharray="4 3" />;
+      })() : pend.length > 1 && (
         <polyline points={pend.map((pt) => `${X(pt)},${Y(pt)}`).join(" ")}
                   stroke="#f87171" strokeWidth={1} strokeDasharray="3 3" fill="none" />
       )}
+      {/* 선택 주석(§B) 강조 — 각 점에 작은 사각 핸들(resize 잡이) */}
+      {selIdx >= 0 && annos[selIdx] && annos[selIdx].pts.map((pt, k) => (
+        <rect key={`h${k}`} x={X(pt) - 4} y={Y(pt) - 4} width={8} height={8}
+              fill="#e0f2fe" stroke="#38bdf8" strokeWidth={1.4} />
+      ))}
       {/* 3D Cursor 마커 */}
       {cross && (
         <g stroke="#f472b6" strokeWidth={1.6} fill="none">
