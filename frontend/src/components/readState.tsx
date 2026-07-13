@@ -43,7 +43,7 @@ export function ReadStateIcon({ row }: { row: StudyRow }) {
   const subs: { glyph: string; color: string; label: string; pulse?: boolean }[] = [];
   if (row.report_typing) subs.push({ glyph: "…", color: "#fbbf24", label: "판독문 입력 중 (DB에 저장되는 중)", pulse: true });
   if (row.has_report_text) subs.push({ glyph: "▤", color: "#94a3b8", label: "판독문이 DB에 저장되어 있음" });
-  if (row.image_changed) subs.push({ glyph: "Δ", color: "#fb923c", label: "영상 변경됨 — 주석/키이미지/QC로 최초 상태와 다름" });
+  if (row.image_changed) subs.push({ glyph: "Δ", color: "#fb923c", label: "영상 변경됨 — 주석/키이미지/표시상태(W·L·방향·필터·셔터)/QC로 최초 상태와 다름" });
   if (row.viewer_open && state !== "open") subs.push({ glyph: "👁", color: "#60a5fa", label: "뷰어에 열려 있음" });
   const tip = [m.label, ...subs.map((s) => s.label)].join(" · ");
   return (

@@ -306,12 +306,20 @@ export const api = {
     req<NlQueryResult>("/api/worklist/nl-query", { method: "POST", body: JSON.stringify({ text }) }),
   mergeReports: (study_ids: number[]) =>
     req<Report>("/api/reports/merge", { method: "POST", body: JSON.stringify({ study_ids }) }),
+  // 저장 표시상태(시리즈별) — 적용 툴 값. shutter 는 {kind, pts(정규화 0~1)} 또는 null
   annotations: (studyId: number) =>
     req<{ items: Anno[] }>(`/api/studies/${studyId}/annotations`),
   saveAnnotations: (studyId: number, items: Anno[]) =>
     req<{ ok: boolean; count: number }>(`/api/studies/${studyId}/annotations`, {
       method: "PUT", body: JSON.stringify({ items }),
     }),
+  // 검사 표시상태(적용 툴: W/L·방향·필터·셔터) 저장/로드 — 재오픈 시 재현. series 는 {series_uid: PState}
+  savePresentation: (studyId: number, series: Record<string, PState>) =>
+    req<{ ok: boolean; series: number }>(`/api/studies/${studyId}/presentation`, {
+      method: "PUT", body: JSON.stringify({ series }),
+    }),
+  presentation: (studyId: number) =>
+    req<{ series: Record<string, PState> }>(`/api/studies/${studyId}/presentation`),
   ctr: (studyId: number) =>
     req<CtrResult>(`/api/studies/${studyId}/ctr`, { method: "POST" }),
   sendGsps: (studyId: number, body: {
@@ -1024,6 +1032,17 @@ export interface Anno {
   source?: "user" | "ai" | "external";
   confidence?: number | null;
   verified?: boolean;
+}
+
+/** 저장 표시상태(시리즈별 적용 툴 값) — 재오픈 시 재현. 좌표는 정규화(0~1) */
+export interface PState {
+  wl?: string;                 // "center,width"
+  invert?: boolean;
+  flipH?: boolean;
+  flipV?: boolean;
+  rot?: number;                // 0/90/180/270
+  fx?: string;                 // sharpen|smooth|pseudo|""
+  shutter?: { kind: "rect" | "ellipse" | "poly"; pts: number[][] } | null;
 }
 
 /** GSPS 불러오기 결과 1건(PR 객체) — annotations는 source="external" */

@@ -425,6 +425,39 @@ def set_key_images(
     return {"ok": True, "count": len(body.items)}
 
 
+class PresentationBody(BaseModel):
+    # 시리즈별 표시상태 {series_uid: {wl, invert, flipH, flipV, rot, fx, shutter}}
+    series: dict = {}
+
+
+@router.put("/studies/{study_id}/presentation")
+def set_presentation(
+    study_id: int, body: PresentationBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
+):
+    """검사 표시상태(적용 툴: W/L·방향·필터·셔터) 저장 — 재오픈 시 자동 재현. 주석과 별도(주석은 annotations)."""
+    from app.models import AuditLog
+    from app.services.settings_service import set_setting
+
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    # 빈 값(시리즈 0)은 저장분 삭제로 취급 → 워크리스트 변경표시 해제
+    set_setting(db, f"pstate:{study_id}", {"series": body.series or {}}, scope="global")
+    db.add(AuditLog(action="presentation_save", target_type="study", target_id=str(study_id),
+                    detail={"by": user["sub"], "series": len(body.series or {})}))
+    db.commit()
+    return {"ok": True, "series": len(body.series or {})}
+
+
+@router.get("/studies/{study_id}/presentation")
+def get_presentation(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """저장된 표시상태 로드 — 뷰어가 검사 오픈 시 호출해 적용."""
+    from app.services.settings_service import get_setting
+
+    v = get_setting(db, f"pstate:{study_id}", default={}) or {}
+    return {"series": v.get("series", {}) if isinstance(v, dict) else {}}
+
+
 @router.post("/studies/{study_id}/ctr")
 def measure_ctr_endpoint(
     study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)

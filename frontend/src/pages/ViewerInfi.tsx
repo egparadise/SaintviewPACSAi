@@ -424,6 +424,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const t = await api.seriesTree(id);
       return { d, series: t.series };
     })).then(async (list) => {
+      // 저장된 표시상태(pstate: 적용 툴 W/L·방향·필터·셔터) 로드 → 시리즈별 페인 구성 시 적용(재오픈 재현)
+      try {
+        const psList = await Promise.all(
+          list.map((e) => api.presentation(e.d.id).catch(() => ({ series: {} as Record<string, import("../api").PState> }))));
+        const merged: Record<string, import("../api").PState> = {};
+        for (const ps of psList) Object.assign(merged, ps.series || {});
+        pstateRef.current = merged;
+      } catch { /* 표시상태 로드 실패 시 원본대로 */ }
       // Modality 기본 레이아웃(설정>뷰어 — 행잉과 별도) 로드
       const prefsV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value as
         { infi_default_layout?: Record<string, { s?: { r: number; c: number } | null;
@@ -501,10 +509,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                    && (list[0].series[0]?.instances.length ?? 0) >= 9) {
             p.il = { r: 3, c: 3 };   // 설정 없을 때 기본 행잉 (원본)
           }
-          return p;
+          return applyPStateToPane(p);   // 저장된 표시상태(W/L·방향·필터·셔터) 재현
         }
         const ex = list[i];
-        return ex ? { ...initPane(ex.d.study_uid), series: ex.series[0] ?? null } : initPane();
+        return applyPStateToPane(ex ? { ...initPane(ex.d.study_uid), series: ex.series[0] ?? null } : initPane());
       }));
       setActive(ai);
     }).catch(() => {});
@@ -810,12 +818,43 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       }
     }
     await Promise.all([...byExam].map(([id, items]) => api.saveAnnotations(id, items)));
+    // ── 표시상태(적용 툴: W/L·방향·필터·셔터) 검사별 시리즈 pstate 저장 → 재오픈 재현 ──
+    const pstateByExam = new Map<number, Record<string, import("../api").PState>>();
+    for (const p of panes) {
+      if (!p.series) continue;
+      const ex2 = exams.find((e) => e.d.study_uid === p.studyUid);
+      if (!ex2) continue;
+      const inst0 = p.series.instances[p.index] ?? p.series.instances[0];
+      const cw = inst0?.cols || 1, ch = inst0?.rows || 1;
+      if (!pstateByExam.has(ex2.d.id)) pstateByExam.set(ex2.d.id, {});
+      pstateByExam.get(ex2.d.id)![p.series.series_uid] = {
+        wl: p.wl || undefined, invert: p.invert || undefined, flipH: p.flipH || undefined,
+        flipV: p.flipV || undefined, rot: p.rot || undefined, fx: p.fx || undefined,
+        shutter: p.shutter ? { kind: p.shutter.kind, pts: p.shutter.pts.map((pt) => [pt.x / cw, pt.y / ch]) } : null,
+      };
+    }
+    await Promise.all([...pstateByExam].map(([id, series]) => api.savePresentation(id, series).catch(() => {})));
     // 저장된 로컬 추가분에 orig 부착 — 주석 재로드(Refresh Exam 등) 시 서버본과 중복 생성 방지
     if (saved.size) {
       setAnnos((prev) => Object.fromEntries(Object.entries(prev).map(([sop, arr]) =>
         [sop, arr.map((a) => (saved.has(a) ? { ...a, orig: saved.get(a)! } : a))])));
     }
-    say(`주석 ${n}건 저장됨 (서버)${skipped ? ` · ${skipped}건 제외(과거 시리즈)` : ""}`);
+    say(`주석 ${n}건 + 표시상태 저장됨 (서버) — 재오픈 시 재현${skipped ? ` · ${skipped}건 제외(과거 시리즈)` : ""}`);
+  };
+  // 로드된 표시상태(pstate) — 검사 오픈 시 GET 하여 시리즈별 적용(pane 로드 시 참조)
+  const pstateRef = useRef<Record<string, import("../api").PState>>({});
+  const applyPStateToPane = (p: Pane): Pane => {
+    if (!p.series) return p;
+    const ps = pstateRef.current[p.series.series_uid];
+    if (!ps) return p;
+    const inst0 = p.series.instances[p.index] ?? p.series.instances[0];
+    const cw = inst0?.cols || 1, ch = inst0?.rows || 1;
+    return {
+      ...p,
+      wl: ps.wl ?? p.wl, invert: ps.invert ?? p.invert, flipH: ps.flipH ?? p.flipH,
+      flipV: ps.flipV ?? p.flipV, rot: ps.rot ?? p.rot, fx: (ps.fx ?? p.fx) as Pane["fx"],
+      shutter: ps.shutter ? { kind: ps.shutter.kind, pts: ps.shutter.pts.map(([x, y]) => ({ x: x * cw, y: y * ch })) } : p.shutter,
+    };
   };
   /** ③ GSPS 저장 — 활성 검사의 주석 + 활성 페인 W/L 을 Presentation State 로 */
   const doGsps = async (): Promise<void> => {
@@ -1036,6 +1075,22 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       case "ohif":       // IN-2 ⑦: OHIF 뷰어로 활성 검사 열기 (ohif_enabled 계정만 버튼 노출)
         openViewer(panes[active]?.studyUid || curD.study_uid);
         break;
+      case "shutRect": case "shutEl": case "shutPoly": {
+        // 토글: 활성 페인에 이미 셔터가 있으면 재클릭 시 제거(작업 취소·삭제), 없으면 툴 무장(드래그로 그림)
+        if (panes[active]?.shutter) {
+          upd(active, { shutter: null });
+          setTool("select"); setPend(null);
+          say("셔터 해제 — 적용된 작업이 제거되었습니다");
+          schedHist();
+        } else {
+          setTool(id as Tool); setPend(null);
+          setSelAnno(null); setSelAnnos(null); setMarquee(null);
+          say(id === "shutPoly" ? "다각 셔터 — 점을 찍고 더블클릭으로 완료 (다시 누르면 해제)"
+            : id === "shutEl" ? "타원 셔터 — 드래그로 영역 지정 (다시 누르면 해제)"
+            : "사각 셔터 — 드래그로 영역 지정 (다시 누르면 해제)");
+        }
+        break;
+      }
       default: {
         const item = PALETTE.find((t) => t.id === id);
         if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {

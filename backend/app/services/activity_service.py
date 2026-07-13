@@ -175,6 +175,19 @@ def qc_meta(db: Session, studies: list[Study]) -> dict[int, dict]:
             .distinct()
         )
     }
+    # ── 저장된 표시상태(pstate: 적용 툴 W/L·방향·필터·셔터) — 워크리스트 변경표시 반영 ──
+    from app.models import AppSetting
+
+    pstate_key_to_id = {f"pstate:{i}": i for i in ids}
+    pstate_set: set[int] = set()
+    if pstate_key_to_id:
+        for key, val in db.execute(
+            select(AppSetting.key, AppSetting.value).where(
+                AppSetting.scope == "global", AppSetting.key.in_(list(pstate_key_to_id))
+            )
+        ):
+            if isinstance(val, dict) and val.get("series"):
+                pstate_set.add(pstate_key_to_id[key])
 
     # ── 병합: 활성 병합(undone_at IS NULL)의 master 환자 집합 — PatientMerge 직접 쿼리 ──
     patient_ids = {s.patient_id for s in studies}
@@ -213,6 +226,7 @@ def qc_meta(db: Session, studies: list[Study]) -> dict[int, dict]:
             "has_report_text": s.id in has_text,
             "image_changed": (
                 s.id in anno_set
+                or s.id in pstate_set
                 or bool(s.key_images)
                 or s.id in del_series
                 or s.id in del_images

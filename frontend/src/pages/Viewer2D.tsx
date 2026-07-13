@@ -694,7 +694,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     histRef.current = [];
     histIdx.current = -1;
     setHistTick((t) => t + 1);
-    api.seriesTree(detail.id).then((r) => {
+    Promise.all([
+      api.seriesTree(detail.id),
+      api.presentation(detail.id).catch(() => ({ series: {} as Record<string, import("../api").PState> })),
+    ]).then(([r, ps]) => {
+      pstateRef.current = { ...pstateRef.current, ...(ps.series || {}) };   // 저장된 표시상태(W/L·방향·필터·셔터)
       let imgSeries = r.series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
       // ⑤ Key Image View: 키 이미지 SOP만 남긴다 (빈 시리즈 제거)
       if (keySops?.length) {
@@ -719,8 +723,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             // 시리즈가 레이아웃보다 적으면 남는 페인은 빈 칸 유지 — 마지막 시리즈 반복 채움 금지(In Viewer 규칙)
             const s = imgSeries[i];
             next[pid] = s
-              ? { ...initPane(detail.study_uid), series: s,
-                  index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" }
+              ? applyPState({ ...initPane(detail.study_uid), series: s,
+                  index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" })
               : initPane(detail.study_uid);
           });
           return next;
@@ -1453,11 +1457,50 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     } catch (e) { setStatus(e instanceof Error ? e.message : "CTR 실패"); }
   };
 
+  // ── 저장된 표시상태(pstate: 적용 툴 W/L·방향·필터·셔터) — 재오픈 재현 ──
+  const pstateRef = useRef<Record<string, import("../api").PState>>({});
+  const applyPState = (p: PaneState): PaneState => {
+    if (!p.series) return p;
+    const ps = pstateRef.current[p.series.series_uid];
+    if (!ps) return p;
+    return {
+      ...p,
+      wl: ps.wl ?? p.wl, invert: ps.invert ?? p.invert, flipH: ps.flipH ?? p.flipH,
+      flipV: ps.flipV ?? p.flipV, rot: ps.rot ?? p.rot,
+      fx: (ps.fx ?? p.fx) as PaneState["fx"],
+      shutter: ps.shutter ?? p.shutter,   // TY 셔터 좌표는 이미 정규화(0~1)
+    };
+  };
   const saveAnnos = async () => {
     try {
       await api.saveAnnotations(detail.id, annos);
-      setStatus(`주석 ${annos.length}건 저장됨 (서버)`);
+      // 표시상태 저장 — 페인들의 검사별 시리즈 pstate 를 수집(스터디 uid → openTabs examId 매핑)
+      const pstateByExam = new Map<number, Record<string, import("../api").PState>>();
+      for (const p of Object.values(panes)) {
+        if (!p.series) continue;
+        const exId = openTabsRef.current.find((t) => t.uid === p.studyUid)?.id ?? detail.id;
+        if (!pstateByExam.has(exId)) pstateByExam.set(exId, {});
+        pstateByExam.get(exId)![p.series.series_uid] = {
+          wl: p.wl || undefined, invert: p.invert || undefined, flipH: p.flipH || undefined,
+          flipV: p.flipV || undefined, rot: p.rot || undefined, fx: p.fx || undefined,
+          shutter: p.shutter,
+        };
+      }
+      await Promise.all([...pstateByExam].map(([id, s]) => api.savePresentation(id, s).catch(() => {})));
+      setStatus(`주석 ${annos.length}건 + 표시상태 저장됨 (서버) — 재오픈 시 재현`);
     } catch { setStatus("주석 저장 실패"); }
+  };
+  // 툴 선택 — 셔터 툴 재클릭 시 적용된 셔터 제거(작업 취소·삭제), 그 외 토글 선택 (In Viewer 동일)
+  const pickTool = (tk: ToolKind) => {
+    if ((tk === "shutRect" || tk === "shutEl" || tk === "shutPoly") && panes[activePane]?.shutter) {
+      patch(activePane, { shutter: null });
+      setTool(null); setDraft(null);
+      setStatus("셔터 해제 — 적용된 작업이 제거되었습니다");
+      schedHist();
+      return;
+    }
+    setTool(tool === tk ? null : tk);
+    setDraft(null);
   };
 
   /* GSPS 내보내기 — 주석 + 현재 W/L을 표준 Presentation State로 */
@@ -2201,7 +2244,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     ...Object.fromEntries([...TOOL_DEFS, ...ANATOMY_TOOL_DEFS, ...PIXEL_TOOL_DEFS, ...SHUTTER_TOOL_DEFS]
       .map(([tk, label]) => [tk, {
         icon: tk, label, anatomy: ANATOMY_TOOL_DEFS.some(([k]) => k === tk),
-        run: () => { setTool(tool === tk ? null : tk); setDraft(null); },
+        run: () => { pickTool(tk); },
       }])),
   };
   // 사용 상위 6개(3회 미만 비표시), ty_quick_row=false 면 행 자체를 숨김
@@ -2312,7 +2355,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               {k === "anno" && (<>
                 {TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
-                          onClick={() => { recordUse(tk); setTool(tool === tk ? null : tk); setDraft(null); }}
+                          onClick={() => { recordUse(tk); pickTool(tk); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === tk ? "var(--accent)" : undefined }}>
                     <TyInner id={tk} label={label} />
@@ -2406,7 +2449,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               {k === "anatomy" && (<>
                 {ANATOMY_TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
-                          onClick={() => { recordUse(tk); setTool(tool === tk ? null : tk); setDraft(null); }}
+                          onClick={() => { recordUse(tk); pickTool(tk); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === tk ? "var(--accent)" : undefined }}>
                     <TyInner id={tk} label={label} anatomy />
@@ -2416,7 +2459,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               {k === "px" && (<>
                 {PIXEL_TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
-                          onClick={() => { recordUse(tk); setTool(tool === tk ? null : tk); setDraft(null); }}
+                          onClick={() => { recordUse(tk); pickTool(tk); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === tk ? "var(--accent)" : undefined }}>
                     <TyInner id={tk} label={label} />
@@ -2426,7 +2469,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               {k === "shut" && (<>
                 {SHUTTER_TOOL_DEFS.filter(([tk]) => tbOn(tk)).map(([tk, label, title]) => (
                   <button key={tk} title={title}
-                          onClick={() => { recordUse(tk); setTool(tool === tk ? null : tk); setDraft(null); }}
+                          onClick={() => { recordUse(tk); pickTool(tk); }}
                           style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                                    background: tool === tk ? "var(--accent)" : undefined }}>
                     <TyInner id={tk} label={label} />
