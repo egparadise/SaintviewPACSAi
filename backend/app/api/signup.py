@@ -23,7 +23,9 @@ router = APIRouter(prefix="/api/signup", tags=["signup"])
 
 class HospitalInfo(BaseModel):
     name: str
+    zip: str = ""                # 우편번호(주소 검색)
     address: str = ""
+    address_detail: str = ""     # 상세주소(직접 입력)
     departments: str = ""        # 진료과(콤마 구분)
     phone: str = ""
     fax: str = ""
@@ -87,7 +89,8 @@ def signup(body: SignupBody, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="이미 존재하는 ID입니다")
 
     hospital = Hospital(
-        code=_slug_code(db, h.name), name=h.name.strip(), address=h.address.strip(),
+        code=_slug_code(db, h.name), name=h.name.strip(),
+        zip=h.zip.strip()[:8], address=h.address.strip(), address_detail=h.address_detail.strip()[:256],
         departments=h.departments.strip(), phone=h.phone.strip(), fax=h.fax.strip(),
         homepage=h.homepage.strip(), contact=r.name.strip(),
         license_clients=max(0, h.license_clients), modality_limit=max(0, h.modality_limit),

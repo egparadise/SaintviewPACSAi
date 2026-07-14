@@ -29,7 +29,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function Signup({ onDone, onCancel }: { onDone: (username: string) => void; onCancel: () => void }) {
   const [f, setF] = useState({
     // 병원 정보
-    name: "", address: "", departments: "", phone: "", fax: "", homepage: "",
+    name: "", zip: "", address: "", address_detail: "", departments: "", phone: "", fax: "", homepage: "",
     license_clients: 1, modality_limit: 0,
     // 가입자
     rname: "", title: "", sex: "", birth6: "", rphone: "", mobile: "", email: "",
@@ -50,6 +50,35 @@ export function Signup({ onDone, onCancel }: { onDone: (username: string) => voi
   const reqd = (k: string) => !!fieldCfg?.[k]?.required;
   const set = (k: string, v: unknown) => setF((p) => ({ ...p, [k]: v }));
 
+  // 주소 검색 — Daum(카카오) 우편번호 서비스 지연 로드 후 팝업. 완료 시 우편번호+주소 채움.
+  // 오프라인/스크립트 실패 시 주소 직접 입력으로 자연 폴백(주소 input 은 편집 가능 유지).
+  type DaumData = { zonecode: string; roadAddress: string; jibunAddress: string };
+  type DaumWin = { daum?: { Postcode: new (o: { oncomplete: (d: DaumData) => void }) => { open: () => void } } };
+  const loadDaum = () => new Promise<void>((resolve, reject) => {
+    const w = window as unknown as DaumWin;
+    if (w.daum?.Postcode) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("주소 검색 서비스를 불러오지 못했습니다 — 인터넷 연결을 확인하거나 주소를 직접 입력하세요"));
+    document.head.appendChild(s);
+  });
+  const searchAddr = async () => {
+    setErr("");
+    try {
+      await loadDaum();
+      const w = window as unknown as Required<DaumWin>;
+      new w.daum.Postcode({
+        oncomplete: (d) => {
+          set("zip", d.zonecode);
+          set("address", d.roadAddress || d.jibunAddress);
+        },
+      }).open();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "주소 검색 실패");
+    }
+  };
+
   const submit = async () => {
     setErr("");
     if (!f.name.trim()) return setErr("병원 이름을 입력하세요");
@@ -69,7 +98,8 @@ export function Signup({ onDone, onCancel }: { onDone: (username: string) => voi
     try {
       const r = await api.signup({
         hospital: {
-          name: f.name, address: f.address, departments: f.departments, phone: f.phone,
+          name: f.name, zip: f.zip, address: f.address, address_detail: f.address_detail,
+          departments: f.departments, phone: f.phone,
           fax: f.fax, homepage: f.homepage,
           license_clients: Number(f.license_clients), modality_limit: Number(f.modality_limit),
         },
@@ -98,7 +128,19 @@ export function Signup({ onDone, onCancel }: { onDone: (username: string) => voi
         <Section title="병원 정보">
           <Field label="병원 이름" req><input style={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
           {show("departments") && <Field label="진료과 (콤마 구분)" req={reqd("departments")}><input style={inp} placeholder="영상의학과,내과" value={f.departments} onChange={(e) => set("departments", e.target.value)} /></Field>}
-          {show("address") && <Field label="주소" req={reqd("address")}><input style={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>}
+          {show("address") && (
+            <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                  <span style={{ color: "var(--text-secondary)" }}>우편번호</span>
+                  <input style={{ ...inp, width: 130 }} value={f.zip} readOnly placeholder="검색" />
+                </div>
+                <button type="button" onClick={searchAddr} style={{ padding: "7px 14px", whiteSpace: "nowrap" }}>🔍 주소 검색</button>
+              </div>
+              <Field label="주소" req={reqd("address")}><input style={inp} value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="주소 검색 또는 직접 입력" /></Field>
+              <Field label="상세주소"><input style={inp} value={f.address_detail} onChange={(e) => set("address_detail", e.target.value)} placeholder="동·호수 등 상세주소 직접 입력" /></Field>
+            </div>
+          )}
           {show("homepage") && <Field label="홈페이지" req={reqd("homepage")}><input style={inp} value={f.homepage} onChange={(e) => set("homepage", e.target.value)} /></Field>}
           {show("phone") && <Field label="연락처" req={reqd("phone")}><input style={inp} value={f.phone} onChange={(e) => set("phone", e.target.value)} /></Field>}
           {show("fax") && <Field label="Fax" req={reqd("fax")}><input style={inp} value={f.fax} onChange={(e) => set("fax", e.target.value)} /></Field>}

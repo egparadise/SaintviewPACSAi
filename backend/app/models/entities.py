@@ -320,7 +320,9 @@ class Hospital(Base):
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # 병원 식별 코드
     name: Mapped[str] = mapped_column(String(128), default="")
     ae_title: Mapped[str] = mapped_column(String(32), default="")  # 병원 대표 AET(수신 식별 보조)
-    address: Mapped[str] = mapped_column(String(256), default="")
+    zip: Mapped[str] = mapped_column(String(8), default="")            # 우편번호(주소 검색)
+    address: Mapped[str] = mapped_column(String(256), default="")       # 도로명/지번 주소
+    address_detail: Mapped[str] = mapped_column(String(256), default="")  # 상세주소(직접 입력)
     phone: Mapped[str] = mapped_column(String(64), default="")
     fax: Mapped[str] = mapped_column(String(64), default="")
     homepage: Mapped[str] = mapped_column(String(256), default="")

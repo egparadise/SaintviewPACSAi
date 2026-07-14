@@ -884,7 +884,8 @@ export interface ServerStatusAll {
 // ── 가입 / 관리자 감독 타입 ──
 export interface SignupRequest {
   hospital: {
-    name: string; address?: string; departments?: string; phone?: string; fax?: string;
+    name: string; zip?: string; address?: string; address_detail?: string;
+    departments?: string; phone?: string; fax?: string;
     homepage?: string; license_clients?: number; modality_limit?: number;
   };
   registrant: {
