@@ -6,6 +6,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2983,6 +2984,23 @@ export function Worklist() {
       api.putSetting("worklist.prefs", { ...r.value, infi_sizes: infiSzRef.current }, "user")).catch(() => {});
   }, []);
   const infiSzRef = useRef(infiSz);
+
+  // In/SAINT VIEW 좌측 검색레일 스크롤 보장 — flex 체인 대신 실제 top 을 측정해 뷰포트 기준 maxHeight 를
+  // 직접 지정한다(상단 바 구성이 바뀌어도 정확, 브라우저 환경차 무관). 렌더/리사이즈마다 재측정.
+  const railScrollRef = useRef<HTMLDivElement | null>(null);
+  const fitRail = useCallback(() => {
+    const el = railScrollRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    // 아래 여백 = Preview(prevH) + h-스플리터(6) + 소폭 마진. 최소 80px 보장.
+    const h = Math.max(80, Math.round(window.innerHeight - top - infiSzRef.current.prevH - 14));
+    el.style.maxHeight = `${h}px`;
+  }, []);
+  useLayoutEffect(fitRail);   // 매 렌더 후 재측정(조건부 상단 바 출현/사라짐까지 반영)
+  useEffect(() => {
+    window.addEventListener("resize", fitRail);
+    return () => window.removeEventListener("resize", fitRail);
+  }, [fitRail]);
   useEffect(() => { infiSzRef.current = infiSz; }, [infiSz]);
 
   // In 모드 ① 상단 아이콘 툴바 (INFINITT 원본 13종) — 기존 doAction + 특수 동작 매핑
@@ -3232,7 +3250,8 @@ export function Worklist() {
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 0, padding: 3 }}>
           {/* 좌열: Search Filter(위) ─h스플리터─ Preview(아래, prevH) */}
           <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0 }}>
-            <div style={{ flex: 1, minHeight: 40, overflow: "auto", display: "block", background: "var(--bg-panel)" }}>
+            <div ref={railScrollRef}
+                 style={{ flex: 1, minHeight: 0, overflow: "auto", display: "block", background: "var(--bg-panel)" }}>
               <SearchRail width={sizes.railW} active={datePreset} unifiedScroll
                           mods={modCounts} activeMod={filters.modality ?? ""}
                           onMod={(m) => setFilters((f) => ({ ...f, modality: m }))}
