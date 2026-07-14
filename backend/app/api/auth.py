@@ -60,15 +60,28 @@ def client_login(body: ClientLoginRequest, request: Request, db: Session = Depen
     병원 ID로 병원을 식별하고, 해당 병원 소속 계정만 그 병원 PACS Viewer에 로그인된다.
     레인 S 보안 훅: 관리 콘솔 로그인과 동일한 실패 잠금 적용.
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, or_, select
 
     from app.models import Hospital
     from app.services import security_service
 
     ip = _client_ip(request)
     security_service.ensure_login_allowed(db, body.username, ip)
-    code = body.hospital_id.strip()
-    hospital = db.execute(select(Hospital).where(Hospital.code == code)).scalar_one_or_none()
+    # 병원 식별 — 병원 코드(HOSP002) 또는 병원 이름("광주씨티병원") 둘 다 허용(대소문자·공백 무시).
+    # 이름은 유니크가 아니므로: 코드 정확일치 우선 → 활성 병원 우선 → id 오름차순으로 1건.
+    norm = body.hospital_id.strip().lower()
+    hospital = db.execute(
+        select(Hospital)
+        .where(or_(
+            func.lower(func.trim(Hospital.code)) == norm,
+            func.lower(func.trim(Hospital.name)) == norm,
+        ))
+        .order_by(
+            (func.lower(func.trim(Hospital.code)) == norm).desc(),
+            Hospital.enabled.desc(),
+            Hospital.id.asc(),
+        )
+    ).scalars().first()
     if not hospital or not hospital.enabled:
         raise HTTPException(status_code=401, detail="병원 ID가 올바르지 않거나 비활성 병원입니다")
     account = authenticate(db, body.username, body.password)

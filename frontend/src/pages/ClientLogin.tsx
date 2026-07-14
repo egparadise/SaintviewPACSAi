@@ -10,10 +10,12 @@ const inp: React.CSSProperties = {
 export function ClientLogin({ onLogin, onBack }: {
   onLogin: (r: LoginResp) => void; onBack?: () => void;
 }) {
-  const [hospitalId, setHospitalId] = useState("SAMPLE01");
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(localStorage.getItem("sv_remember") === "1");
+  // 자동 로그인 체크 시 병원ID·개별ID·PW 를 모두 기억(localStorage)하고 다음 로드에 프리필.
+  const remembered = localStorage.getItem("sv_remember") === "1";
+  const [hospitalId, setHospitalId] = useState(remembered ? (localStorage.getItem("sv_client_hosp") ?? "SAMPLE01") : "SAMPLE01");
+  const [username, setUsername] = useState(remembered ? (localStorage.getItem("sv_client_user") ?? "admin") : "admin");
+  const [password, setPassword] = useState(remembered ? (localStorage.getItem("sv_client_pw") ?? "") : "");
+  const [remember, setRemember] = useState(remembered);
   const [error, setError] = useState("");
 
   const submit = async (e: React.FormEvent) => {
@@ -23,6 +25,13 @@ export function ClientLogin({ onLogin, onBack }: {
       const r = await api.clientLogin(hospitalId.trim(), username.trim(), password);
       setToken(r.token, remember);
       localStorage.setItem("sv_remember", remember ? "1" : "0");
+      if (remember) {
+        localStorage.setItem("sv_client_hosp", hospitalId.trim());
+        localStorage.setItem("sv_client_user", username.trim());
+        localStorage.setItem("sv_client_pw", password);
+      } else {
+        ["sv_client_hosp", "sv_client_user", "sv_client_pw"].forEach((k) => localStorage.removeItem(k));
+      }
       onLogin(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인 실패");
@@ -38,7 +47,7 @@ export function ClientLogin({ onLogin, onBack }: {
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>Client 뷰어 로그인</div>
         <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>병원 ID
-          <input style={inp} placeholder="병원 코드(예: HOSP001)" value={hospitalId} onChange={(e) => setHospitalId(e.target.value)} autoFocus />
+          <input style={inp} placeholder="병원 코드 또는 이름(예: HOSP002, 광주씨티병원)" value={hospitalId} onChange={(e) => setHospitalId(e.target.value)} autoFocus />
         </label>
         <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>개별 ID
           <input style={inp} placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)} />
