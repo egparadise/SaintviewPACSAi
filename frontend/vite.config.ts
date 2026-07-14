@@ -21,6 +21,10 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8000',        // 백엔드 FastAPI
       '/dicom-web': 'http://localhost:3000',  // Orthanc DICOMweb (OHIF nginx 경유)
+      '/orthanc': {                            // 썸네일 프리뷰 — Orthanc 네이티브 /instances/.../preview
+        target: 'http://localhost:8042',
+        rewrite: (p) => p.replace(/^\/orthanc/, ''),
+      },
     },
   },
 })

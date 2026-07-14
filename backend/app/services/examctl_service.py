@@ -106,7 +106,7 @@ def study_tree(db: Session, study: Study) -> dict:
     from app.config import get_settings
 
     materialize_tree(db, study)
-    base = get_settings().orthanc_url
+    base = get_settings().orthanc_preview_base   # 클라이언트 브라우저용 썸네일(상대경로 기본, Vite 프록시)
     series_rows = db.execute(
         select(Series).where(Series.study_id == study.id)
         .order_by(Series.series_number, Series.id)

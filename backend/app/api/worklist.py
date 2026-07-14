@@ -229,7 +229,7 @@ def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depen
     from app.services.examctl_service import overlay_viewer_tree
 
     tree = overlay_viewer_tree(db, study, tree)
-    base = get_settings().orthanc_url
+    base = get_settings().orthanc_preview_base   # 클라이언트 브라우저용(상대경로 기본, Vite 프록시)
     for s in tree:
         for inst in s["instances"]:
             inst["preview_url"] = f"{base}/instances/{inst['orthanc_id']}/preview"
@@ -258,7 +258,7 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
     from app.services.examctl_service import filter_visible_instances
 
     items = filter_visible_instances(db, study, items)
-    base = get_settings().orthanc_url
+    base = get_settings().orthanc_preview_base   # 클라이언트 브라우저용(상대경로 기본, Vite 프록시)
     for it in items:
         it["preview_url"] = f"{base}/instances/{it['orthanc_id']}/preview"
     return {"items": items, "key_images": study.key_images or []}
