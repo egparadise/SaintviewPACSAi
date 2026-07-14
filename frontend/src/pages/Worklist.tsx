@@ -440,9 +440,11 @@ const DATE_PRESETS = [
   { key: "1m", label: "최근 1개월", days: 30 },
   { key: "all", label: "전체", days: -1 },
 ];
-function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
+function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifiedScroll }: {
   active: string; onPick: (key: string, from: string) => void; tree: React.ReactNode; width: number;
   mods: Record<string, number>; activeMod: string; onMod: (m: string) => void;
+  // true 면 섹션별 개별 스크롤(30vh/22vh) 대신 레일 전체가 한 번에 스크롤(In/SAINT VIEW 좌열).
+  unifiedScroll?: boolean;
 }) {
   const total = Object.values(mods).reduce((a, b) => a + b, 0);
   const [favTick, setFavTick] = useState(0);   // Favorites 편집(이름변경/삭제) 후 재렌더
@@ -572,8 +574,8 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
           )}
         </span>
       </div>
-      {/* 항목이 늘어나도 섹션 안에서 스크롤 */}
-      <div style={{ maxHeight: "30vh", overflowY: "auto", flexShrink: 0 }}>
+      {/* 항목이 늘어나도 섹션 안에서 스크롤 (unifiedScroll 이면 레일 전체 스크롤에 맡김) */}
+      <div style={unifiedScroll ? { flexShrink: 0 } : { maxHeight: "30vh", overflowY: "auto", flexShrink: 0 }}>
         <div onClick={() => onMod("")}
              style={{
                padding: "3px 8px", borderRadius: 3, cursor: "pointer", fontSize: 12.5,
@@ -633,7 +635,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
                   }}>＋</button>
         </span>
       </div>
-      <div style={{ maxHeight: "22vh", overflowY: "auto", flexShrink: 0 }}>
+      <div style={unifiedScroll ? { flexShrink: 0 } : { maxHeight: "22vh", overflowY: "auto", flexShrink: 0 }}>
         {favs.length === 0 && (
           <div style={{ padding: "2px 8px", fontSize: 11, color: "var(--text-secondary)" }}>
             툴바 ★저장으로 현재 검색조건 등록
@@ -676,7 +678,9 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod }: {
       }}>
         검색 폴더
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{tree}</div>
+      <div style={unifiedScroll
+        ? { flexShrink: 0, display: "flex", flexDirection: "column" }
+        : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{tree}</div>
     </div>
   );
 }
@@ -3228,8 +3232,8 @@ export function Worklist() {
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 0, padding: 3 }}>
           {/* 좌열: Search Filter(위) ─h스플리터─ Preview(아래, prevH) */}
           <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0 }}>
-            <div style={{ flex: 1, minHeight: 40, overflow: "auto", display: "flex" }}>
-              <SearchRail width={sizes.railW} active={datePreset}
+            <div style={{ flex: 1, minHeight: 40, overflow: "auto", display: "block", background: "var(--bg-panel)" }}>
+              <SearchRail width={sizes.railW} active={datePreset} unifiedScroll
                           mods={modCounts} activeMod={filters.modality ?? ""}
                           onMod={(m) => setFilters((f) => ({ ...f, modality: m }))}
                           onPick={(key, from) => {
