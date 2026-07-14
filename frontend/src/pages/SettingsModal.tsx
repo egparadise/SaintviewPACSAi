@@ -5,6 +5,7 @@ import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseE
 import { GridPicker } from "../lib/GridPicker";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_LAYOUTS, IN_PALETTE } from "../lib/infiConfig";
+import { screenApiIssue } from "../lib/screens";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
@@ -1593,12 +1594,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                                 screens: { label?: string; availLeft: number; availTop: number; availWidth: number; availHeight: number }[];
                               }>;
                             };
-                            if (!w.getScreenDetails) {
-                              setMonitorMsg("이 브라우저는 모니터 확인을 지원하지 않습니다 — Chrome/Edge 권장");
-                              return;
-                            }
+                            const issue0 = screenApiIssue();
+                            if (issue0) { setMonitorMsg(issue0); return; }
                             try {
-                              const det = await w.getScreenDetails();
+                              const det = await w.getScreenDetails!();
                               const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
                               let blocked = 0;
                               det.screens.forEach((s, i) => {
@@ -1629,12 +1628,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         screens: { label?: string; availWidth: number; availHeight: number; isPrimary?: boolean }[];
                       }>;
                     };
-                    if (!w.getScreenDetails) {
-                      setMonitorMsg("이 브라우저는 모니터 감지(Window Management API)를 지원하지 않습니다 — Chrome/Edge 권장");
-                      return;
-                    }
+                    const issue = screenApiIssue();
+                    if (issue) { setMonitorMsg(issue); return; }
                     try {
-                      const det = await w.getScreenDetails();
+                      const det = await w.getScreenDetails!();
                       setMonitors(det.screens.map((s, i) => ({
                         label: s.label || `모니터 ${i + 1}`, w: s.availWidth, h: s.availHeight,
                         primary: !!s.isPrimary,
@@ -1645,6 +1642,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </span>
                 }>
                   {monitorMsg && <div style={{ fontSize: 12, color: "var(--stat-final)" }}>{monitorMsg}</div>}
+                  {screenApiIssue() && (
+                    <div style={{
+                      fontSize: 12, color: "var(--warning)", lineHeight: 1.5,
+                      border: "1px solid var(--warning)", borderRadius: 6, padding: "6px 9px",
+                      background: "color-mix(in srgb, var(--warning) 10%, transparent)",
+                    }}>
+                      ⚠ {screenApiIssue()}
+                    </div>
+                  )}
                   {monitors.length === 0 ? (
                     <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
                       아직 감지된 모니터가 없습니다 — 우측 상단 <b>① 모니터 감지</b>를 누르세요
