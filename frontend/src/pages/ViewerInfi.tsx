@@ -358,6 +358,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // §3.1 툴바 상단(원본): Report 도크(ReportDock — TY 와 동일 기능) + Prev/Next 워크리스트 내비게이션
   // 열림 상태는 viewer.prefs.infi_report_dock 로 계정 로밍
   const [reportDock, setReportDock] = useState(false);
+  const [reportCollapsed, setReportCollapsed] = useState(false);  // 판독창 오른쪽 접기/펼치기
   // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [show3d, setShow3d] = useState(false);   // 정보바 3D 버튼 — 현재 검사 MPR/MIP
@@ -2804,13 +2805,24 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
         {/* ── Report 도크 (§3.1 Report 버튼) — TY 와 동일 ReportDock 컴포넌트,
               활성 Exam 탭(curD) 전환 시 도크 검사도 동기. 폭 최소 320px, 스플리터로 조절 ── */}
-        {reportDock && (
+        {reportDock && !reportCollapsed && (
           <Splitter dir="v" onEnd={saveUi}
                     onDrag={(dx) => setUi((u) => ({ ...u, dockW: clampW(u.dockW - dx, 320, 520) }))} />
         )}
-        {reportDock && (
+        {reportDock && !reportCollapsed && (
+          <button title="판독창 숨기기 (오른쪽으로 접기)" onClick={() => setReportCollapsed(true)}
+                  style={{ width: 16, padding: 0, borderRadius: 0, alignSelf: "stretch", fontSize: 12,
+                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>▸</button>
+        )}
+        {reportDock && !reportCollapsed && (
           <ReportDock detail={curD} width={Math.max(320, ui.dockW)}
                       onLoadPrior={dockLoadPrior} onStatus={say} />
+        )}
+        {reportDock && reportCollapsed && (
+          <button title="판독창 펼치기" onClick={() => setReportCollapsed(false)}
+                  style={{ width: 24, padding: "8px 0", borderRadius: 0, alignSelf: "stretch",
+                           writingMode: "vertical-rl", fontSize: 12, fontWeight: 700,
+                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>◂ 판독</button>
         )}
       </div>
 

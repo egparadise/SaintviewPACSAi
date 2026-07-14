@@ -536,6 +536,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   }, []);
   const [thumbOpen, setThumbOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(true);
+  const [reportCollapsed, setReportCollapsed] = useState(false);  // 판독창 오른쪽 접기/펼치기
   const [overlayOn, setOverlayOn] = useState(true);
   // 키이미지 마크 — 열린 검사의 key_images SOP 집합(반응형). 페인에 🔑 마크 표시, 토글 시 즉시 갱신
   const [keyMarks, setKeyMarks] = useState<Set<string>>(new Set());
@@ -3242,14 +3243,27 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {skin !== "saint" && !paletteOpen && paletteRight && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
         )}
-        {prefs.reportDock && (
+        {prefs.reportDock && !reportCollapsed && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, dockW: clampSz(p.dockW - dx, 180, 480) }))} />
         )}
+        {/* 판독창 접기 버튼 — 오른쪽으로 숨김 */}
+        {prefs.reportDock && !reportCollapsed && (
+          <button title="판독창 숨기기 (오른쪽으로 접기)" onClick={() => setReportCollapsed(true)}
+                  style={{ width: 16, padding: 0, borderRadius: 0, alignSelf: "stretch", fontSize: 12,
+                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>▸</button>
+        )}
         {/* 판독 도크 — 공유 컴포넌트 (리포트 로드/저장/승인/상용구/단축키 내장) */}
-        {prefs.reportDock && (
+        {prefs.reportDock && !reportCollapsed && (
           <ReportDock detail={detail} width={prefs.dockW}
                       onLoadPrior={(id) => void loadPrior(id)} onStatus={setStatus} />
+        )}
+        {/* 접힘 상태 — 우측 세로 탭으로 다시 펼치기 */}
+        {prefs.reportDock && reportCollapsed && (
+          <button title="판독창 펼치기" onClick={() => setReportCollapsed(false)}
+                  style={{ width: 24, padding: "8px 0", borderRadius: 0, alignSelf: "stretch",
+                           writingMode: "vertical-rl", fontSize: 12, fontWeight: 700,
+                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>◂ 판독</button>
         )}
       </div>
       {thumbHoriz && thumbs}
