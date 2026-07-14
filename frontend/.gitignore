@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 로컬 개발용 자체서명 HTTPS 인증서 (원격/Tailscale secure-context) — 절대 커밋 금지
+certs/
+*.key
+*.crt
+*.pem

@@ -13,12 +13,12 @@ rem strictPort ? 포트 선점 시 새 인스턴스는 종료되고 기존 인스턴스가 계속 서비스
 rem 자식 창 출력은 %TEMP%\sv_517x.log 에 남는다(창이 닫혀도 진단 가능)
 start "Saintview Landing (5173)" /min cmd /c "cd /d %~dp0frontend && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort > %TEMP%\sv_5173.log 2>&1"
 start "Saintview Admin (5174)" /min cmd /c "cd /d %~dp0frontend && npm run dev -- --host 0.0.0.0 --port 5174 --strictPort > %TEMP%\sv_5174.log 2>&1"
-start "Saintview Client (5175)" /min cmd /c "cd /d %~dp0frontend && npm run dev -- --host 0.0.0.0 --port 5175 --strictPort > %TEMP%\sv_5175.log 2>&1"
+start "Saintview Client (5175)" /min cmd /c "cd /d %~dp0frontend && set VITE_HTTPS=1 && npm run dev -- --host 0.0.0.0 --port 5175 --strictPort > %TEMP%\sv_5175.log 2>&1"
 
 echo.
 echo   Saintview PACS AI Landing : http://localhost:5173
 echo   관리자 포털                : http://localhost:5174  (admin / admin1234)
-echo   Client 뷰어 포털           : http://localhost:5175  (SAMPLE01 + 개별 ID)
+echo   Client 뷰어 포털           : https://localhost:5175  (SAMPLE01 + 개별 ID)
 echo.
 rem Landing(:5173) 응답 대기 후 브라우저 오픈 ? 콜드 스타트에서 '연결할 수 없음' 방지(최대 60초)
 echo   Landing 페이지 준비 대기 중...
