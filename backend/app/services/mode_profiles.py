@@ -17,7 +17,7 @@ _DEFAULT_FIND_FIELDS = ["pid", "pname", "sex", "modality", "date", "desc", "stat
 DEFAULT_MODE_PROFILES: dict = {
     "profiles": {
         "saintvidw": {
-            "label": "saintvidw (기본 — AI 중심)",
+            "label": "SaintView",
             "worklist": {
                 "columns": _DEFAULT_COLUMNS,
                 "find_fields": _DEFAULT_FIND_FIELDS,
@@ -30,7 +30,7 @@ DEFAULT_MODE_PROFILES: dict = {
         },
         # TY — 현행 자체 뷰어(Viewer2D) 레이아웃. 선택+적용 시 이 레이아웃으로 전환된다.
         "ty": {
-            "label": "TY (자체 뷰어 — 현행 레이아웃)",
+            "label": "T-View",
             "worklist": {
                 "columns": _DEFAULT_COLUMNS,
                 "find_fields": _DEFAULT_FIND_FIELDS,
@@ -45,7 +45,7 @@ DEFAULT_MODE_PROFILES: dict = {
         # infi — 신규 개발 뷰어(Infi Viewer) 레이아웃 저장소. 새 뷰어의 레이아웃을
         # 설정 화면 [현재 화면을 프로파일에 저장]으로 여기에 채워 넣는다.
         "infi": {
-            "label": "infi (신규 뷰어 — 개발 중)",
+            "label": "In-View",
             "worklist": {
                 "columns": ["status", "patient_name", "patient_key", "sex", "study_date",
                             "accession_no", "modality", "series_count", "instance_count",
