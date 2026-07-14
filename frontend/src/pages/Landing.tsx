@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import invizLogo from "../assets/inviz-logo.png";
+import heroLaptop from "../assets/hero-laptop.png";
 
 const INVIZ_URL = "https://www.inviz.co.kr/";
 
@@ -72,94 +73,11 @@ function ensureCss() {
   document.head.appendChild(s);
 }
 
-// 히어로 — 노트북 목업 위 다크 PACS 화면(흉부 X-ray + 뇌 MRI 2×2). 부드러운 그라디언트/글로우로 정돈.
+// 히어로 — Saintview Viewer 실제 목업 이미지(회사 제공 에셋). 배경(라벤더)까지 포함된 png.
 function HeroArt() {
-  const ribs = [0, 1, 2, 3, 4, 5];
   return (
-    <svg viewBox="0 0 660 500" width="100%" style={{ maxWidth: 660, display: "block" }} aria-hidden>
-      <defs>
-        <radialGradient id="glow" cx=".52" cy=".4" r=".62">
-          <stop offset="0" stopColor="#c9b6ff" stopOpacity=".5" /><stop offset="1" stopColor="#c9b6ff" stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id="deck" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#f2eefc" /><stop offset="1" stopColor="#dcd3f4" />
-        </linearGradient>
-        <radialGradient id="lung" cx=".5" cy=".42" r=".7">
-          <stop offset="0" stopColor="#3b4a6b" /><stop offset="1" stopColor="#0a1120" />
-        </radialGradient>
-        <radialGradient id="brain" cx=".5" cy=".45" r=".6">
-          <stop offset="0" stopColor="#33405f" /><stop offset="1" stopColor="#0b1222" />
-        </radialGradient>
-        <filter id="soft"><feGaussianBlur stdDeviation=".5" /></filter>
-      </defs>
-      <ellipse cx="330" cy="240" rx="320" ry="190" fill="url(#glow)" />
-
-      {/* 노트북 화면 본체 */}
-      <rect x="118" y="40" width="424" height="282" rx="16" fill="#0c1020" stroke="#2a2f48" strokeWidth="2" />
-      <rect x="130" y="52" width="400" height="258" rx="9" fill="#080b15" />
-      {/* 상단바 */}
-      <rect x="130" y="52" width="400" height="24" rx="9" fill="#151d31" />
-      <circle cx="145" cy="64" r="3.4" fill="#ff5f57" /><circle cx="157" cy="64" r="3.4" fill="#febc2e" /><circle cx="169" cy="64" r="3.4" fill="#28c840" />
-      <rect x="360" y="60" width="110" height="8" rx="4" fill="#26314e" />
-      {/* 좌측 툴 사이드바 */}
-      <rect x="130" y="76" width="46" height="234" fill="#0d1526" />
-      {[92, 112, 132, 152, 172].map((y) => <rect key={y} x="142" y={y} width="22" height="10" rx="3" fill="#222c47" />)}
-
-      {/* 좌측 대형 흉부 X-ray 패널 */}
-      <g>
-        <rect x="182" y="86" width="214" height="216" rx="6" fill="url(#lung)" stroke="#1b2440" />
-        <g filter="url(#soft)">
-          {/* 흉곽 갈비뼈(대칭 부드러운 아치) */}
-          <g stroke="#aebbdd" strokeWidth="1.5" fill="none" opacity=".55" strokeLinecap="round">
-            {ribs.map((k) => {
-              const y = 118 + k * 22;
-              return (
-                <g key={k}>
-                  <path d={`M287 ${y} Q236 ${y + 6} 214 ${y + 34}`} />
-                  <path d={`M291 ${y} Q342 ${y + 6} 364 ${y + 34}`} />
-                </g>
-              );
-            })}
-          </g>
-          {/* 쇄골 */}
-          <g stroke="#c3cee9" strokeWidth="2" fill="none" opacity=".6" strokeLinecap="round">
-            <path d="M289 112 Q258 104 226 116" /><path d="M289 112 Q320 104 352 116" />
-          </g>
-          {/* 척추 */}
-          <g fill="#9fabcc" opacity=".5">
-            {[0, 1, 2, 3, 4, 5, 6].map((k) => <rect key={k} x="284" y={116 + k * 22} width="10" height="14" rx="3" />)}
-          </g>
-          {/* 심장 음영 */}
-          <ellipse cx="266" cy="238" rx="46" ry="40" fill="#8493b8" opacity=".22" />
-          {/* 횡격막 */}
-          <path d="M200 282 Q252 258 300 282" stroke="#9fabcc" strokeWidth="1.6" fill="none" opacity=".45" />
-          <path d="M300 282 Q350 258 386 280" stroke="#9fabcc" strokeWidth="1.6" fill="none" opacity=".4" />
-        </g>
-      </g>
-
-      {/* 우측 뇌 MRI 2×2 */}
-      {[[406, 86], [472, 86], [406, 196], [472, 196]].map(([x, y], i) => (
-        <g key={i} filter="url(#soft)">
-          <rect x={x} y={y} width="58" height="104" rx="5" fill="#060a14" stroke="#182135" />
-          <ellipse cx={x + 29} cy={y + 52} rx="23" ry="30" fill="url(#brain)" stroke="#8ea0cc" strokeWidth="1.2" opacity=".92" />
-          <ellipse cx={x + 29} cy={y + 52} rx="14" ry="19" fill="none" stroke="#7c8db8" strokeWidth="1" opacity=".55" />
-          <path d={`M${x + 18} ${y + 46} q11 -7 22 0`} stroke="#7c8db8" strokeWidth=".9" fill="none" opacity=".5" />
-          <path d={`M${x + 18} ${y + 58} q11 7 22 0`} stroke="#7c8db8" strokeWidth=".9" fill="none" opacity=".5" />
-          <circle cx={x + 29} cy={y + 52} r="2.4" fill={i % 2 ? "#a855f7" : "#38bdf8"} opacity=".8" />
-        </g>
-      ))}
-
-      {/* 노트북 받침(플랫폼) */}
-      <path d="M70 322 H590 L626 358 H34 Z" fill="url(#deck)" stroke="#cabfec" strokeWidth="1.5" />
-      <rect x="34" y="356" width="592" height="10" rx="5" fill="#cdc3ee" />
-      <rect x="292" y="324" width="76" height="7" rx="3" fill="#c2b6e6" />
-
-      {/* 떠다니는 강조 점(image 1 무드) */}
-      <circle className="lp-dot" cx="586" cy="120" r="12" fill="#ff6a3d" style={{ animationDelay: "0s" }} />
-      <circle className="lp-dot" cx="76" cy="256" r="10" fill="#8b5cf6" style={{ animationDelay: ".7s" }} />
-      <circle className="lp-dot" cx="556" cy="298" r="8" fill="#ec4899" style={{ animationDelay: "1.5s" }} />
-      <circle className="lp-dot" cx="104" cy="92" r="6" fill="#6366f1" style={{ animationDelay: "2.1s" }} />
-    </svg>
+    <img src={heroLaptop} alt="Saintview Viewer"
+         style={{ width: "100%", maxWidth: 720, display: "block" }} />
   );
 }
 
