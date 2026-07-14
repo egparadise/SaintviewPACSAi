@@ -480,6 +480,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setHpRules(rules);
       const up = (s: string) => (s || "").toUpperCase();
       const hpMatch = rules.find((x) =>
+        x.use_on_exam_open !== false &&   // 'Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외(행잉 콤보에서 수동 적용)
         (!x.modality || x.modality === detail.modality) &&
         (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
         (!x.projection || up(detail.study_desc).includes(up(x.projection)))) ?? null;
@@ -524,8 +525,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const defCfg = single ? (defMap[mod] ?? defMap["*"]) : undefined;
       let r: number, c: number;
       if (single && hpMatch) {
-        r = Math.min(hpMatch.s.r, 10); c = Math.min(hpMatch.s.c, 10);
+        const vg = hpMatch.displays?.find((d) => d.role === "viewer")?.grid ?? hpMatch.s;
+        r = Math.min(vg.r, 10); c = Math.min(vg.c, 10);
         setHpName(hpMatch.name);
+        // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영, 미정의는 유지)
+        setXlink((x) => ({ ...x,
+          crosslink: hpMatch.cross_link ?? x.crosslink,
+          auto_sync: hpMatch.full_link ?? x.auto_sync,
+          sync_other: hpMatch.full_scroll_sync ?? x.sync_other,
+          scout: hpMatch.scout_image ?? x.scout,
+        }));
       }
       else if (defCfg?.s) { r = defCfg.s.r; c = defCfg.s.c; }
       else { const n = Math.max(1, list.length); c = Math.min(n, 4); r = Math.ceil(n / c); }
@@ -638,12 +647,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   };
   /* IN-2 ①: 행잉 콤보에서 HP 규칙 수동 선택 — Series/Image layout + W/L (TY applyHp 등가) */
   const applyHpIn = (rule: HpRule) => {
-    applySLayout({ r: Math.min(rule.s.r, 10), c: Math.min(rule.s.c, 10) });
+    const vg = rule.displays?.find((d) => d.role === "viewer")?.grid ?? rule.s;
+    applySLayout({ r: Math.min(vg.r, 10), c: Math.min(vg.c, 10) });
     setPanes((ps) => ps.map((p) => ({
       ...p,
       il: { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) },
       ...(rule.wl !== undefined ? { wl: rule.wl ?? "" } : {}),
     })));
+    // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영)
+    setXlink((x) => ({ ...x,
+      crosslink: rule.cross_link ?? x.crosslink,
+      auto_sync: rule.full_link ?? x.auto_sync,
+      sync_other: rule.full_scroll_sync ?? x.sync_other,
+      scout: rule.scout_image ?? x.scout,
+    }));
     setHpName(rule.name);
     say(`행잉 프로토콜 적용 — ${rule.name}`);
   };

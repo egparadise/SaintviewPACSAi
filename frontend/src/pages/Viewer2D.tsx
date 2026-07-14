@@ -259,13 +259,53 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen }: {
+/* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional).
+   항목의 run 은 Viewer2D 의 기존 툴 함수를 그대로 호출(아이콘 기능 = TY 뷰어와 동일). */
+function SaintMenuBar({ menus }: { menus: { title: string; items: { id: string; label: string; run: () => void }[] }[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div style={{ display: "flex", gap: 2, padding: "2px 8px", background: "var(--bg-panel)",
+                  borderBottom: "1px solid var(--border)", position: "relative", zIndex: 30 }}
+         onMouseLeave={() => setOpen(null)}>
+      {menus.map((m) => (
+        <div key={m.title} style={{ position: "relative" }}
+             onMouseEnter={() => setOpen((o) => (o ? m.title : o))}>
+          <button onClick={() => setOpen((o) => (o === m.title ? null : m.title))}
+                  style={{ fontSize: 12.5, padding: "5px 14px", fontWeight: 600, borderRadius: 4,
+                           background: open === m.title ? "var(--bg-elevated)" : "transparent",
+                           color: "var(--text-primary)", border: "none", cursor: "pointer" }}>
+            {m.title} ▾
+          </button>
+          {open === m.title && (
+            <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 350, minWidth: 190,
+                          background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
+                          boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
+              {m.items.map((it) => (
+                <button key={it.id} onClick={() => { it.run(); setOpen(null); }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px",
+                                 fontSize: 12, background: "transparent", border: "none", borderRadius: 3,
+                                 color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, withOpen, skin = "ty" }: {
   detail: StudyDetail;
   onClose: () => void;
   addDetail?: StudyDetail | null;    // ② Add View: 기존(detail) 유지 + 이 검사를 분할 추가
   stackDetail?: StudyDetail | null;  // ③ Stack View: 기존 유지 + 이 검사를 같은 페인에 중첩
   keySops?: string[] | null;         // ⑤ Key Image View: 이 SOP 목록만 표시 (F-16)
   withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open (p.13)
+  skin?: "ty" | "saint";             // SAINT VIEW 스킨 — 상단 가로 메뉴 툴바 + 세로 팔레트 숨김 (엔진·기능 동일)
 }) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
   // OHIF 표시 — 기본 숨김, 설정>뷰어>OHIF 허용 시에만 (viewer.prefs.ohif_enabled)
@@ -657,15 +697,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     return () => window.clearInterval(t);
   }, [imgLay, tyCineSec]);
 
-  /* HP 규칙 적용 — Series/Image layout + W/L 프리셋 */
+  /* HP 규칙 적용 — Series/Image layout + W/L 프리셋 + 옵션(Crosslink/스크롤 동기/Scout) */
   const applyHp = useCallback((rule: HpRule) => {
-    const key = `${Math.min(rule.s.r, 10)}x${Math.min(rule.s.c, 10)}`;
+    // viewer 디스플레이 그리드가 있으면 그것을, 없으면 하위호환 s 를 Series 분할로 사용
+    const vd = rule.displays?.find((d) => d.role === "viewer");
+    const sg = vd?.grid ?? rule.s;
+    const key = `${Math.min(sg.r, 10)}x${Math.min(sg.c, 10)}`;
     if (LAYOUTS[key]) setLayout(key);
     setImgLay({ r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) });
     if (rule.wl !== undefined) {
       setPanes((prev) => Object.fromEntries(
         Object.entries(prev).map(([k, p]) => [k, { ...p, wl: rule.wl ?? "" }])));
     }
+    // 옵션 → 단일 xmode 매핑(우선순위: cross_link>scout>scroll_sync>link). 켜진 옵션 없으면 유지.
+    const xm = rule.cross_link ? "all_lines" : rule.scout_image ? "scout"
+             : rule.full_scroll_sync ? "sync_other" : rule.full_link ? "auto_sync" : null;
+    if (xm) setXmode(xm);
     setHpName(rule.name);
   }, []);
 
@@ -711,7 +758,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         (!x.modality || x.modality === detail.modality) &&
         (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
         (!x.projection || up(detail.study_desc).includes(up(x.projection))));
-      if (m) applyHp(m);
+      if (m && m.use_on_exam_open !== false) applyHp(m);   // 'Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외(수동 메뉴로 적용)
     }).catch(() => {});
   }, [detail.modality, detail.body_part, detail.study_desc, applyHp]);
 
@@ -2328,8 +2375,38 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id]) => id)
     : [];
 
-  /* 팔레트(방향 전환 가능 — 요청 2) */
-  const palette = paletteOpen && (
+  /* SAINT VIEW 스킨 상단 메뉴 — 기존 툴 함수(quickDefs/act/pickTool/setMouseMode 등) 재사용, 아이콘 기능 동일 */
+  const mkItem = (id: string, label?: string, run?: () => void) => ({
+    id, label: label ?? quickDefs[id]?.label ?? id,
+    run: run ?? (() => { recordUse(id); quickDefs[id]?.run(); }),
+  });
+  const saintMenus: { title: string; items: { id: string; label: string; run: () => void }[] }[] = [
+    { title: "Image Tool", items: [
+      mkItem("wl", "W/L"), mkItem("zoom", "Zoom"), mkItem("pan", "Pan"), mkItem("fit", "Fit (화면맞춤)"),
+      mkItem("invert", "Invert (반전)"), mkItem("rotL", "회전 ⟲90°"), mkItem("rotR", "회전 ⟳90°"), mkItem("rot180", "회전 180°"),
+      mkItem("flipH", "좌우 반전"), mkItem("flipV", "상하 반전"),
+      mkItem("sharpen", "Sharpen"), mkItem("average", "Smooth"), mkItem("pseudo", "Pseudo Color"),
+      mkItem("mag", "Magnify (확대경)"), mkItem("reset", "Reset"), mkItem("cine", "Cine (재생)"),
+    ] },
+    { title: "Measurement", items: [
+      ...[...TOOL_DEFS, ...ANATOMY_TOOL_DEFS, ...PIXEL_TOOL_DEFS].map(([tk, label]) => mkItem(tk, label)),
+      mkItem("calib", "Calibrate (기준선)"),
+    ] },
+    { title: "Reading Support", items: [
+      mkItem("key2d", "키 이미지 등록/해제", () => toggleKeyImage()),
+      mkItem("comb", "Combine all (시리즈 결합)"),
+      mkItem("scout", "Scout / 교차선", () => setXmode((x) => (x === "scout" ? "off" : "scout"))),
+      mkItem("compare", "Compare (과거검사 비교)", () => setCmpOpen(true)),
+      mkItem("gsps", "GSPS 저장", () => void doGsps()),
+      ...SHUTTER_TOOL_DEFS.map(([tk, label]) => mkItem(tk, label)),
+    ] },
+    { title: "Additional", items: [
+      mkItem("capture", "Capture (캡처)"), mkItem("print", "Print"), mkItem("rfsh", "Refresh Exam"),
+    ] },
+  ];
+
+  /* 팔레트(방향 전환 가능 — 요청 2). SAINT VIEW 스킨은 상단 가로 메뉴 툴바를 쓰므로 세로 팔레트 숨김 */
+  const palette = skin !== "saint" && paletteOpen && (
     <div style={{
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
       background: "var(--bg-panel)", flexShrink: 0, overflow: "auto", alignItems: paletteHoriz ? "center" : undefined,
@@ -2967,14 +3044,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
       </div>
 
+      {skin === "saint" && <SaintMenuBar menus={saintMenus} />}
       {paletteHoriz && palette}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
-        {prefs.paletteSide === "left" && paletteOpen && (
+        {skin !== "saint" && prefs.paletteSide === "left" && paletteOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW + dx, 64, 240) }))} />
         )}
-        {!paletteOpen && prefs.paletteSide === "left" && (
+        {skin !== "saint" && !paletteOpen && prefs.paletteSide === "left" && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
         )}
         {prefs.thumbSide === "left" && thumbs}
@@ -3034,12 +3112,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     onDrag={(dx) => setPrefs((p) => ({ ...p, thumbSize: clampSz(p.thumbSize - dx, 48, 260) }))} />
         )}
         {thumbRight && thumbs}
-        {paletteRight && paletteOpen && (
+        {skin !== "saint" && paletteRight && paletteOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW - dx, 64, 240) }))} />
         )}
         {paletteRight && palette}
-        {!paletteOpen && paletteRight && (
+        {skin !== "saint" && !paletteOpen && paletteRight && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
         )}
         {prefs.reportDock && (

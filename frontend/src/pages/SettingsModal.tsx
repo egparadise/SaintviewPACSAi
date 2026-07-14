@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { VIEWER_BASE, api, sttStatus, type AiQuality, type OrthancStatus, type PhraseRow, type SttStatus } from "../api";
 import { COLUMN_DEFS, DEFAULT_COLUMNS, DEFAULT_FIND_FIELDS, FIND_FIELDS, PhraseEditModal } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
-import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpRule, type WlPreset } from "../lib/viewerConfig";
+import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_LAYOUTS, IN_PALETTE } from "../lib/infiConfig";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
@@ -220,7 +220,6 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   });
   // 행잉 프로토콜(HP) 규칙 + 툴바 구성 + W/L 프리셋 (계정 로밍)
   const [hpRules, setHpRules] = useState<HpRule[]>([]);
-  const [hpModal, setHpModal] = useState<HpRule | "new" | null>(null);
   const [tbConfig, setTbConfig] = useState<Record<string, boolean>>({});
   const [wlPresets, setWlPresets] = useState<WlPreset[]>(DEFAULT_WL_PRESETS);
   // 판독(Reading) — 내 서명 정보(확정 시 리포트에 기록)
@@ -1734,56 +1733,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             )}
 
             {page === "hp" && (
-              <Group title="행잉 프로토콜 (HP) — 장비×부위×Projection → Series/Image Layout" right={
-                <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setHpModal("new")}>＋ 규칙 추가</button>
-              }>
-                <table className="grid-table">
-                  <thead><tr><th>이름</th><th>장비</th><th>부위</th><th>Projection</th><th>Series</th><th>Image</th><th>W/L</th><th style={{ width: 60 }}></th></tr></thead>
-                  <tbody>
-                    {hpRules.map((r) => (
-                      <tr key={r.id}>
-                        <td>{r.name}</td><td>{r.modality || "*"}</td><td>{r.body_part || "*"}</td>
-                        <td>{r.projection || "*"}</td>
-                        <td>{r.s.r}×{r.s.c}</td><td>{r.i.r}×{r.i.c}</td><td>{r.wl || "-"}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          <button style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setHpModal(r)}>✏</button>
-                          <button style={{ padding: "0 6px", fontSize: 11 }} onClick={async () => {
-                            if (!window.confirm(`HP 규칙 '${r.name}'을 삭제할까요?`)) return;
-                            const next = hpRules.filter((x) => x.id !== r.id);
-                            setHpRules(next);
-                            await api.putSetting("viewer.hp", { rules: next }, "user");
-                            setSaved("HP 규칙 저장됨");
-                          }}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {hpRules.length === 0 && (
-                      <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>
-                        규칙 없음 — 예: CR/CHEST/PA → Series 1×1·Image 1×1, MR/SHOULDER → Series 2×2
-                      </td></tr>
-                    )}
-                  </tbody>
-                </table>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  뷰어가 열릴 때 위에서부터 첫 일치 규칙이 자동 적용되고, 타이틀바 HP 메뉴에서 수동 전환할 수 있습니다.
-                  조건이 빈 항목(*)은 무관 매칭 — 계정별 저장(로밍).
-                </div>
-                {hpModal !== null && (
-                  <HpEditModal
-                    init={hpModal === "new" ? null : hpModal}
-                    onSave={async (rule) => {
-                      const next = hpModal === "new"
-                        ? [...hpRules, rule]
-                        : hpRules.map((x) => (x.id === rule.id ? rule : x));
-                      setHpRules(next);
-                      await api.putSetting("viewer.hp", { rules: next }, "user");
-                      setSaved("HP 규칙 저장됨");
-                      setHpModal(null);
-                    }}
-                    onClose={() => setHpModal(null)}
-                  />
-                )}
-              </Group>
+              <HpProtocolEditor
+                rules={hpRules}
+                onChange={async (next) => {
+                  setHpRules(next);
+                  await api.putSetting("viewer.hp", { rules: next }, "user");
+                  setSaved("행잉 프로토콜 저장됨 — 왼쪽 ⟳ Refresh 후 뷰어 재오픈 시 적용");
+                }}
+              />
             )}
 
             {page === "pdf" && isAdmin && (
@@ -2007,64 +1964,271 @@ function ReadingItemEditor({ kind, items, reload }: {
   );
 }
 
-/* ── HP 규칙 편집 모달 ── */
-function HpEditModal({ init, onSave, onClose }: {
-  init: HpRule | null;
-  onSave: (rule: HpRule) => Promise<void>;
-  onClose: () => void;
+/* ── 행잉 프로토콜 편집기 (설정>행잉) — 좌측 프로토콜 카드 목록 + 우측 기본정보·옵션·디스플레이 레이아웃 ── */
+const HP_MODALITIES = ["CT", "MR", "CR", "DX", "US", "MG", "XA", "NM", "PT", "RF", "OT"];
+const HP_OPTIONS: { key: keyof HpRule; label: string; desc: string }[] = [
+  { key: "use_on_exam_open", label: "Exam 열 때 HP 사용", desc: "검사 열 때 이 프로토콜을 자동 적용" },
+  { key: "full_link", label: "전체 링크", desc: "모든 페인을 함께 조작(동기)" },
+  { key: "full_scroll_sync", label: "전체 스크롤 동기화", desc: "페인 스크롤을 함께 이동" },
+  { key: "cross_link", label: "Cross Link 사용", desc: "교차 해부학 위치 동기(다른 시리즈)" },
+  { key: "scout_image", label: "Scout 이미지 사용", desc: "교차선(Scout) 표시" },
+];
+
+function HpProtocolEditor({ rules, onChange }: {
+  rules: HpRule[];
+  onChange: (next: HpRule[]) => void | Promise<void>;
 }) {
-  const [f, setF] = useState<HpRule>(init ?? {
-    id: `hp${Date.now().toString(36)}`, name: "", modality: "", body_part: "",
-    projection: "", s: { r: 1, c: 1 }, i: { r: 1, c: 1 }, wl: "",
+  const [selId, setSelId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<HpRule | null>(null);
+  const [dirty, setDirty] = useState(false);
+  // 최초/외부 rules 도착 시 첫 프로토콜 선택
+  useEffect(() => {
+    if (selId === null && rules.length) { setSelId(rules[0].id); setDraft(rules[0]); }
+  }, [rules, selId]);
+
+  const select = (id: string | null) => {
+    setSelId(id);
+    setDraft(id ? (rules.find((r) => r.id === id) ?? null) : null);
+    setDirty(false);
+  };
+  const upd = (patch: Partial<HpRule>) => { setDraft((d) => (d ? { ...d, ...patch } : d)); setDirty(true); };
+  const newRule = (): HpRule => ({
+    id: `hp${Date.now().toString(36)}`, name: "새 프로토콜", modality: "", body_part: "", projection: "",
+    description: "", s: { r: 1, c: 1 }, i: { r: 1, c: 1 }, wl: "",
+    use_on_exam_open: true, full_link: false, full_scroll_sync: false, cross_link: false, scout_image: false,
+    displays: DEFAULT_HP_DISPLAYS(),
   });
-  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-      <span style={{ width: 86, color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
-      {children}
-    </label>
+  const addNew = () => { const r = newRule(); void onChange([...rules, r]); setSelId(r.id); setDraft(r); setDirty(false); };
+  const dup = (r: HpRule) => {
+    const c: HpRule = { ...JSON.parse(JSON.stringify(r)), id: `hp${Date.now().toString(36)}`, name: `${r.name} (복사)` };
+    void onChange([...rules, c]); setSelId(c.id); setDraft(c); setDirty(false);
+  };
+  const del = (id: string) => {
+    if (!window.confirm("이 행잉 프로토콜을 삭제할까요?")) return;
+    const next = rules.filter((r) => r.id !== id);
+    void onChange(next);
+    if (selId === id) { const n = next[0] ?? null; setSelId(n?.id ?? null); setDraft(n); setDirty(false); }
+  };
+  const save = () => {
+    if (!draft) return;
+    if (!draft.name.trim()) { window.alert("프로토콜명을 입력하세요"); return; }
+    if (!draft.modality) { window.alert("장비를 선택하세요"); return; }
+    // viewer 디스플레이 그리드를 하위호환 s(Series 분할)로 반영 → 기존 applyHp 적용
+    const vd = (draft.displays ?? []).find((d) => d.role === "viewer");
+    const clean: HpRule = { ...draft, name: draft.name.trim(), s: vd ? { ...vd.grid } : draft.s };
+    void onChange(rules.map((r) => (r.id === clean.id ? clean : r)));
+    setDraft(clean); setDirty(false);
+  };
+
+  const tag = (text: string, color: string) => (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 3, background: `${color}22`, color, border: `1px solid ${color}55` }}>{text}</span>
   );
+  const secHead = (title: string) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 10px" }}>
+      <span style={{ width: 4, height: 15, background: "var(--accent)", borderRadius: 2 }} />
+      <b style={{ fontSize: 14 }}>{title}</b>
+    </div>
+  );
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 400 }}
-         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-                    width: 440, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-        <b style={{ fontSize: 13 }}>{init ? `HP 규칙 수정 — ${init.name}` : "새 HP 규칙"}</b>
-        <Row label="이름 *">
-          <input autoFocus value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))}
-                 placeholder="예: 흉부 CR 정면" style={{ flex: 1 }} />
-        </Row>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <Row label="장비(MOD)">
-            <select value={f.modality} onChange={(e) => setF((p) => ({ ...p, modality: e.target.value }))} style={{ flex: 1 }}>
-              <option value="">* 모든 장비</option>
-              {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM"].map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </Row>
-          <Row label="부위">
-            <input value={f.body_part} onChange={(e) => setF((p) => ({ ...p, body_part: e.target.value.toUpperCase() }))}
-                   placeholder="CHEST (빈칸=무관)" style={{ flex: 1, minWidth: 0 }} />
-          </Row>
-          <Row label="Projection">
-            <select value={f.projection} onChange={(e) => setF((p) => ({ ...p, projection: e.target.value }))} style={{ flex: 1 }}>
-              <option value="">* 무관</option>
-              {["PA", "AP", "LAT", "OBL", "AXIAL"].map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </Row>
-          <Row label="W/L">
-            <input value={f.wl ?? ""} onChange={(e) => setF((p) => ({ ...p, wl: e.target.value }))}
-                   placeholder="center,width (빈칸=기본)" style={{ flex: 1, minWidth: 0 }} />
-          </Row>
+    <div style={{ display: "flex", gap: 14, alignItems: "stretch", minHeight: 480 }}>
+      {/* 좌측 — 프로토콜 카드 목록 */}
+      <div style={{ width: 250, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8,
+                    border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "var(--bg-canvas)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <b style={{ fontSize: 14 }}>행잉 프로토콜</b>
+          <button className="primary" title="새 프로토콜 추가" onClick={addNew}
+                  style={{ width: 30, height: 30, fontSize: 17, padding: 0, borderRadius: 6 }}>＋</button>
         </div>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>레이아웃:</span>
-          <GridPicker label="Series" max={3} value={f.s} onPick={(v) => setF((p) => ({ ...p, s: v }))} />
-          <GridPicker label="Image" max={3} value={f.i} onPick={(v) => setF((p) => ({ ...p, i: v }))} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
+          {rules.map((r) => (
+            <div key={r.id} onClick={() => select(r.id)}
+                 style={{ padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                          background: r.id === selId ? "var(--bg-elevated)" : "var(--bg-panel)",
+                          border: `1px solid ${r.id === selId ? "var(--accent)" : "var(--border)"}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                <b style={{ fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {r.id === selId && dirty ? `${draft?.name || r.name} *` : r.name}
+                </b>
+                <span style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                  <button title="복제" onClick={(e) => { e.stopPropagation(); dup(r); }}
+                          style={{ padding: "2px 6px", fontSize: 12 }}>⧉</button>
+                  <button title="삭제" onClick={(e) => { e.stopPropagation(); del(r.id); }}
+                          style={{ padding: "2px 6px", fontSize: 12 }}>🗑</button>
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 5, marginTop: 6 }}>
+                {tag(r.modality || "*", "#60a5fa")}
+                {r.body_part ? tag(r.body_part, "#f59e0b") : null}
+              </div>
+            </div>
+          ))}
+          {rules.length === 0 && (
+            <div style={{ color: "var(--text-secondary)", fontSize: 12, padding: "12px 4px", textAlign: "center" }}>
+              프로토콜이 없습니다.<br />＋ 로 추가하세요.
+            </div>
+          )}
         </div>
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button className="primary" disabled={!f.name.trim()}
-                  onClick={() => void onSave({ ...f, name: f.name.trim() })}>저장</button>
-          <button onClick={onClose}>취소</button>
-        </div>
+      </div>
+
+      {/* 우측 — 기본 정보 + 옵션 + 디스플레이 레이아웃 */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {!draft ? (
+          <div style={{ display: "grid", placeItems: "center", flex: 1, color: "var(--text-secondary)" }}>
+            좌측에서 프로토콜을 선택하거나 ＋ 로 추가하세요.
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: 1, overflow: "auto", paddingRight: 4 }}>
+              {secHead("기본 정보")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <label style={{ fontSize: 12.5 }}>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>프로토콜명 <span style={{ color: "var(--stat-emergency)" }}>*</span></div>
+                  <input value={draft.name} onChange={(e) => upd({ name: e.target.value })}
+                         placeholder="프로토콜 이름을 입력하세요" style={{ width: "100%" }} />
+                </label>
+                <label style={{ fontSize: 12.5 }}>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>장비 <span style={{ color: "var(--stat-emergency)" }}>*</span></div>
+                  <select value={draft.modality} onChange={(e) => upd({ modality: e.target.value })} style={{ width: "100%" }}>
+                    <option value="">장비를 선택하세요</option>
+                    {HP_MODALITIES.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: 12.5 }}>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>부위</div>
+                  <input value={draft.body_part} onChange={(e) => upd({ body_part: e.target.value.toUpperCase() })}
+                         placeholder="부위를 입력하세요 (예: CHEST, 빈칸=무관)" style={{ width: "100%" }} />
+                </label>
+                <label style={{ fontSize: 12.5 }}>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>설명</div>
+                  <textarea value={draft.description ?? ""} onChange={(e) => upd({ description: e.target.value })}
+                            placeholder="설명을 입력하세요" rows={3} style={{ width: "100%", resize: "vertical" }} />
+                </label>
+              </div>
+
+              {/* 옵션 체크박스 */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, margin: "16px 0" }}>
+                {HP_OPTIONS.map((o) => {
+                  const on = !!draft[o.key];
+                  return (
+                    <label key={String(o.key)} title={o.desc}
+                           style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                                    border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer",
+                                    background: "var(--bg-canvas)" }}>
+                      <input type="checkbox" checked={on}
+                             onChange={(e) => upd({ [o.key]: e.target.checked } as Partial<HpRule>)}
+                             style={{ width: 18, height: 18 }} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{o.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* 디스플레이 레이아웃 */}
+              {secHead("디스플레이 레이아웃")}
+              <HpDisplayEditor displays={draft.displays ?? DEFAULT_HP_DISPLAYS()}
+                               onChange={(ds) => upd({ displays: ds })} />
+            </div>
+
+            {/* 하단 — 취소/저장 */}
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", padding: "12px 0 2px",
+                          borderTop: "1px solid var(--border)", marginTop: 8 }}>
+              <button onClick={() => select(selId)} disabled={!dirty} style={{ minWidth: 84 }}>취소</button>
+              <button className="primary" onClick={save} style={{ minWidth: 84 }}>저장</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── HP 디스플레이(모니터) 레이아웃 편집기 — 모니터별 역할·해상도·viewer 그리드(셀별 시리즈) ── */
+function HpDisplayEditor({ displays, onChange }: {
+  displays: HpDisplay[];
+  onChange: (ds: HpDisplay[]) => void;
+}) {
+  const patch = (id: string, p: Partial<HpDisplay>) => onChange(displays.map((d) => (d.id === id ? { ...d, ...p } : d)));
+  const setGrid = (d: HpDisplay, grid: { r: number; c: number }) => {
+    const n = grid.r * grid.c;
+    const cells = Array.from({ length: n }, (_, i) => d.cells[i] ?? null);
+    patch(d.id, { grid, cells });
+  };
+  const cycleCell = (d: HpDisplay, i: number) => {
+    const n = d.grid.r * d.grid.c;
+    const cur = d.cells[i];
+    const nextV = cur == null ? 1 : cur >= n ? null : cur + 1;   // null→1→…→n→null(자동)
+    patch(d.id, { cells: d.cells.map((c, k) => (k === i ? nextV : c)) });
+  };
+  const addDisplay = () => onChange([...displays, {
+    id: `d${Date.now().toString(36)}`, role: "viewer", label: `${displays.length + 1}`,
+    resolution: "1920 * 1080 (100%)", grid: { r: 1, c: 1 }, cells: [null],
+  }]);
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-canvas)" }}>
+      <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 4 }}>
+        {displays.map((d) => {
+          const viewer = d.role === "viewer";
+          return (
+            <div key={d.id} style={{ minWidth: 300, flex: "1 1 300px",
+                                     border: `2px solid ${viewer ? "#8b5cf6" : "#22c55e"}`, borderRadius: 6, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                            padding: "6px 10px", background: viewer ? "#8b5cf6" : "#22c55e", color: "#fff", fontSize: 12, fontWeight: 700 }}>
+                <span>{viewer ? "viewer" : "workList + report"} Display:{d.label}</span>
+                <span style={{ display: "flex", gap: 4 }}>
+                  <button title="역할 전환 (viewer ↔ workList+report)"
+                          onClick={() => patch(d.id, { role: viewer ? "worklist_report" : "viewer" })}
+                          style={{ padding: "0 6px", fontSize: 11, color: "#fff", background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 3 }}>⇄</button>
+                  {displays.length > 1 && (
+                    <button title="이 디스플레이 제거" onClick={() => onChange(displays.filter((x) => x.id !== d.id))}
+                            style={{ padding: "0 6px", fontSize: 11, color: "#fff", background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 3 }}>✕</button>
+                  )}
+                </span>
+              </div>
+              <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "var(--bg-panel)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)", flexShrink: 0 }}>해상도</span>
+                  <input value={d.resolution} onChange={(e) => patch(d.id, { resolution: e.target.value })}
+                         style={{ flex: 1, minWidth: 0, fontSize: 11 }} />
+                </div>
+                {viewer ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>분할</span>
+                      <GridPicker label="Series" max={10} value={d.grid} onPick={(g) => setGrid(d, g)} />
+                      <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>셀 클릭=시리즈 지정(순번↔자동)</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${d.grid.c}, 1fr)`, gap: 4,
+                                  background: "var(--bg-elevated)", padding: 6, borderRadius: 4 }}>
+                      {d.cells.map((c, i) => (
+                        <div key={i} onClick={() => cycleCell(d, i)} title="클릭=시리즈 순번 지정 / 자동"
+                             style={{ height: 44, display: "grid", placeItems: "center", cursor: "pointer",
+                                      borderRadius: 3, border: "1px solid var(--border)",
+                                      background: c == null ? "var(--bg-canvas)" : "rgba(139,92,246,0.18)",
+                                      color: c == null ? "var(--text-secondary)" : "var(--text-primary)",
+                                      fontSize: 15, fontWeight: 700 }}>
+                          {c == null ? <span style={{ fontSize: 11, opacity: 0.6 }}>자동 {i + 1}</span> : c}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ height: 90, display: "grid", placeItems: "center", color: "var(--text-secondary)",
+                                background: "var(--bg-elevated)", borderRadius: 4, fontSize: 12 }}>
+                    뷰어 사용 안함 (워크리스트 + 판독)
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+        <button onClick={addDisplay} style={{ fontSize: 11.5 }}>＋ 디스플레이 추가</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", textAlign: "center", marginTop: 6 }}>
+        viewer 디스플레이 분할이 뷰어의 Series 레이아웃으로 적용됩니다. 물리적 모니터 배치는 설정만 저장됩니다(추후 지원).
       </div>
     </div>
   );

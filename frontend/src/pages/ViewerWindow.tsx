@@ -7,8 +7,7 @@ import { DEFAULT_CLIENT_VIEWER } from "../lib/viewerConfig";
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 const ViewerInfi = lazy(() => import("./ViewerInfi").then((m) => ({ default: m.ViewerInfi })));
 
-// 선택 뷰어(설정>뷰어) → 컴포넌트. 미등록 id는 TY Viewer(Viewer2D)로 폴백
-const VIEWER_COMPONENTS: Record<string, typeof Viewer2D> = { ty: Viewer2D, infi: ViewerInfi };
+// 선택 뷰어(설정>뷰어): infi=In Viewer, 그 외(ty/sv)=Viewer2D(엔진 재사용, sv 는 SAINT VIEW 크롬 skin)
 
 export function ViewerWindow() {
   const params = new URLSearchParams(window.location.search);
@@ -79,20 +78,23 @@ export function ViewerWindow() {
       </div>
     );
   }
-  const ViewerComp = VIEWER_COMPONENTS[viewerId] ?? Viewer2D;
+  const common = {
+    detail,
+    addDetail,
+    stackDetail,
+    keySops: keySops.length ? keySops : undefined,
+    withOpen: woMode === "add" || woMode === "stack" ? { mode: woMode as "add" | "stack", ids: woIds } : undefined,
+    onClose: () => window.close(),
+  };
   return (
     <Suspense fallback={
       <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>
         뷰어 로딩…
       </div>
     }>
-      <ViewerComp detail={detail}
-                addDetail={addDetail}
-                stackDetail={stackDetail}
-                keySops={keySops.length ? keySops : undefined}
-                withOpen={woMode === "add" || woMode === "stack"
-                  ? { mode: woMode, ids: woIds } : undefined}
-                onClose={() => window.close()} />
+      {viewerId === "infi"
+        ? <ViewerInfi {...common} />
+        : <Viewer2D {...common} skin={viewerId === "sv" ? "saint" : "ty"} />}
     </Suspense>
   );
 }
