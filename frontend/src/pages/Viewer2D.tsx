@@ -163,6 +163,22 @@ function geomOf(inst: InstanceNode): Geom3 | null {
   const row = inst.orientation.slice(0, 3), col = inst.orientation.slice(3, 6);
   return { pos: inst.position, row, col, rs: inst.pixel_spacing[0], cs: inst.pixel_spacing[1], n: vcross(row, col) };
 }
+/* Spatial cross-reference (Infinitt식) — 마스터 슬라이스의 DICOM 위치를 타깃 시리즈 슬라이스 법선에 투영,
+   해부학적으로 가장 가까운 슬라이스 index 반환. 두께·장수·각도가 달라도 정합. 좌표 없으면 null(→ 인덱스 폴백). */
+function nearestSliceIndex(masterInst: InstanceNode, target: SeriesNode): number | null {
+  const gm = geomOf(masterInst);
+  if (!gm) return null;
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < target.instances.length; i++) {
+    const gt = geomOf(target.instances[i]);
+    if (!gt) continue;
+    const nn = Math.hypot(gt.n[0], gt.n[1], gt.n[2]) || 1;
+    const loc = (p: V3) => (p[0] * gt.n[0] + p[1] * gt.n[1] + p[2] * gt.n[2]) / nn;   // 슬라이스 위치(법선 투영)
+    const d = Math.abs(loc(gm.pos) - loc(gt.pos));
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best >= 0 ? best : null;
+}
 
 /* ── TY-3: 작업 히스토리 스냅샷 — 시각조정(줌/팬/회전/반전/W-L/필터/셔터)+주석 (In takeSnap 이식) ── */
 type VisSnap = Pick<PaneState, "zoom" | "tx" | "ty" | "rot" | "flipH" | "flipV" | "invert" | "wl" | "fx" | "shutter">;
@@ -447,6 +463,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [xmode, setXmode] = useState<XlinkMode>("off");
   const xmodeRef = useRef(xmode);
   useEffect(() => { xmodeRef.current = xmode; }, [xmode]);
+  // 듀얼모드 Stack 동기 — true=Spatial(DICOM 좌표 해부학적 정합, Infinitt식), false=Index(1:1 인덱스, TY식). 'G' 로 토글.
+  const [spatialSync, setSpatialSync] = useState(true);
+  const spatialSyncRef = useRef(spatialSync);
+  useEffect(() => { spatialSyncRef.current = spatialSync; }, [spatialSync]);
   // TY-3(2): 멀티 페인 선택 — Shift=범위/Ctrl=토글/A=전체, 선택 페인 연동 조작 (In selPanes 이식)
   const [selPanes, setSelPanes] = useState<Set<string>>(new Set());
   const selPanesRef = useRef(selPanes);
@@ -1097,22 +1117,36 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setPanes((prev) => {
       const next = { ...prev };
       const stride = Math.max(1, imgLay.r * imgLay.c);  // Image Layout 분할 시 페이지 단위 이동
-      const apply = (id: string) => {
-        const p = next[id];
-        if (!p?.series) return;
-        next[id] = { ...p, index: Math.min(Math.max(p.index + dir * stride, 0), p.series.instances.length - 1) };
-      };
-      // Crosslink 모드: auto_sync=같은 검사 페인, sync_other=전체(과거검사 포함) — In §3.3 이식
-      const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
-      const targets = new Set<string>([pid]);
-      if (xmode === "sync_other") vis.forEach((v) => targets.add(v));
-      else if (xmode === "auto_sync") {
-        vis.forEach((v) => { if (prev[v]?.studyUid === prev[pid]?.studyUid) targets.add(v); });
+      const clampI = (len: number, i: number) => Math.min(Math.max(i, 0), len - 1);
+      // 1) 마스터 이동 — 빈 페인이면 마스터는 안 움직이되 동기 타깃은 계속 스크롤(OLD 인덱스 동작 보존)
+      const mp = prev[pid];
+      let mIdx = mp?.index ?? 0;
+      let mInst: InstanceNode | undefined;
+      let mSeriesUid: string | undefined;
+      if (mp?.series) {
+        mIdx = clampI(mp.series.instances.length, mp.index + dir * stride);
+        next[pid] = { ...mp, index: mIdx };
+        mInst = mp.series.instances[mIdx];
+        mSeriesUid = mp.series.series_uid;
       }
-      // 멀티 선택 페인 연동 스크롤 (선택 집합에 포함된 페인에서 스크롤 시)
+      // 2) 동기 타깃(마스터 제외): auto_sync=같은 검사, sync_other=전체(과거검사 포함), 멀티선택 연동
+      const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+      const targets = new Set<string>();
+      if (xmode === "sync_other") vis.forEach((v) => { if (v !== pid) targets.add(v); });
+      else if (xmode === "auto_sync") vis.forEach((v) => { if (v !== pid && prev[v]?.studyUid === prev[pid]?.studyUid) targets.add(v); });
       const sel = selPanesRef.current;
-      if (sel.size > 1 && sel.has(pid)) sel.forEach((v) => targets.add(v));
-      targets.forEach(apply);
+      if (sel.size > 1 && sel.has(pid)) sel.forEach((v) => { if (v !== pid) targets.add(v); });
+      // 3) 타깃 동기 — 듀얼모드: Spatial(DICOM 좌표 해부학적 최근접) 우선, 좌표 없으면 Index(1:1) 폴백
+      targets.forEach((id) => {
+        const tp = next[id];
+        if (!tp?.series) return;
+        let ti: number | null = null;
+        if (spatialSyncRef.current && mInst) {
+          ti = tp.series.series_uid === mSeriesUid   // 같은 시리즈면 동일 위치(정확·경량)
+            ? mIdx : nearestSliceIndex(mInst, tp.series);
+        }
+        next[id] = { ...tp, index: ti != null ? ti : clampI(tp.series.instances.length, tp.index + dir * stride) };
+      });
       return next;
     });
   }, [xmode, layout, imgLay]);
@@ -1162,6 +1196,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             case "r": act("rotR"); break;
             case "f": act("fit"); break;
             case "l": setXmode((x) => (x === "off" ? "auto_sync" : "off")); break;  // Crosslink 토글 (In 'l' 등가)
+            case "g":   // 듀얼모드 Stack 동기 토글 — Spatial(좌표) ↔ Index(1:1)
+              setSpatialSync((s) => { setStatus(!s ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !s; });
+              break;
             case "a":   // 전체 페인 선택 (In 'A' 동일)
               e.preventDefault();
               setSelPanes(new Set(PANE_IDS.slice(0, LAYOUTS[layout].count)));
@@ -2474,13 +2511,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </select>
       {/* TY-3(3): Crosslink 5모드 — off/AutoSync(같은 검사)/SyncOther(과거 포함)/Scout/AllLines (In §3.3) */}
       {tbOn("xlink") && (
-        <select value={xmode} onChange={(e) => setXmode(e.target.value as XlinkMode)}
-                title={`Crosslink 모드 (L 키=Off↔AutoSync 토글) — ${XLINK_MODES.map((m) => `${m.label}: ${m.desc}`).join(" · ")}`}
-                style={{ fontSize: 11, width: paletteHoriz ? 86 : "100%", padding: "4px 2px",
-                         background: xmode !== "off" ? "var(--accent)" : undefined,
-                         color: xmode !== "off" ? "#fff" : undefined }}>
-          {XLINK_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-        </select>
+        <>
+          <select value={xmode} onChange={(e) => setXmode(e.target.value as XlinkMode)}
+                  title={`Crosslink 모드 (L 키=Off↔AutoSync 토글) — ${XLINK_MODES.map((m) => `${m.label}: ${m.desc}`).join(" · ")}`}
+                  style={{ fontSize: 11, width: paletteHoriz ? 86 : "100%", padding: "4px 2px",
+                           background: xmode !== "off" ? "var(--accent)" : undefined,
+                           color: xmode !== "off" ? "#fff" : undefined }}>
+            {XLINK_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
+          {/* 듀얼모드 Stack 동기 방식 (G 키) — Spatial=DICOM 좌표 정합 / Index=1:1 */}
+          <button title="Stack 동기 방식 (G 키) — Spatial: DICOM 좌표로 해부학적 정합(두께·각도·장수 달라도) / Index: 1:1 인덱스(좌표 없는 로컬 데이터·강제 정합)"
+                  onClick={() => setSpatialSync((s) => !s)}
+                  style={{ fontSize: 10.5, padding: "4px 2px", width: paletteHoriz ? 62 : "100%",
+                           background: spatialSync ? "var(--accent)" : undefined, color: spatialSync ? "#fff" : undefined }}>
+            {spatialSync ? "◈ Spatial" : "▤ Index"}
+          </button>
+        </>
       )}
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setThumbOpen((t) => !t)}>Thumb</button>
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setPaletteOpen(false)}>Hide</button>
