@@ -199,6 +199,21 @@ function buildCombined(list: { s: SeriesNode; studyUid: string }[]): SeriesNode 
     instances,
   };
 }
+/* 썸네일 DICOM 태그 — 시퀀스(T1/T2/FLAIR…, series_desc) + 단면(AX/SAG/COR, ImageOrientation 법선). 초록 표시 */
+function seriesTag(s: SeriesNode): string {
+  const d = (s.series_desc || "").toUpperCase();
+  let seq = "";
+  for (const t of ["FLAIR", "T2", "T1", "DWI", "ADC", "STIR", "PD", "SWI", "TOF", "MRA", "TOPO", "SCOUT"]) {
+    if (d.includes(t)) { seq = t; break; }
+  }
+  const o = s.instances[0]?.orientation;
+  let plane = "";
+  if (o?.length === 6) {
+    const nx = Math.abs(o[1] * o[5] - o[2] * o[4]), ny = Math.abs(o[2] * o[3] - o[0] * o[5]), nz = Math.abs(o[0] * o[4] - o[1] * o[3]);
+    plane = nz >= nx && nz >= ny ? "AX" : nx >= ny ? "SAG" : "COR";
+  }
+  return [seq, plane].filter(Boolean).join(" ");
+}
 function paneFilter(p: Pane): string | undefined {
   const parts: string[] = [];
   if (p.invert) parts.push("invert(1)");
@@ -2233,6 +2248,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           {s.instances[0] && (
             <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
           )}
+          {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}
           <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
             {s.series_number}/{s.instances.length}
           </div>

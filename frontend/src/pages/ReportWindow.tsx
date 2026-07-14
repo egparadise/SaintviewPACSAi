@@ -1,12 +1,30 @@
 // 전용 판독 창 — 뷰어 [Reading] 버튼으로 열리는 별도 페이지 (?report=1&study=ID)
 // 레이아웃: [판독|판독 기록|단축키|템플릿] 탭 · Font · CVR · ◀▶ · 초기화/저장/승인 · Reading/Conclusion
 import { useEffect, useRef, useState } from "react";
-import { api, ensureToken, type PhraseRow, type Report, type StudyDetail } from "../api";
+import { api, ensureToken, type PhraseRow, type RelatedExam, type Report, type StudyDetail } from "../api";
 import { onStudySync, postStudySync } from "../lib/sync";
 import { dictationLabel, useDictation } from "../lib/useDictation";
 import { MicIcon } from "../components/MicIcon";
 
 type Tab = "read" | "hist" | "std" | "tpl";
+
+/* History 과거검사 썸네일 — 검사의 첫 영상 시리즈 중간 프리뷰를 지연 로드 */
+function HistThumb({ examId }: { examId: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.seriesTree(examId).then((r) => {
+      const s = r.series.find((x) => x.instances.length);
+      const inst = s?.instances[Math.floor((s.instances.length - 1) / 2)];
+      if (alive) setUrl(inst?.preview_url ?? null);
+    }).catch(() => { /* 프리뷰 없음 */ });
+    return () => { alive = false; };
+  }, [examId]);
+  const box: React.CSSProperties = { width: 56, height: 56, borderRadius: 4, background: "#000", flexShrink: 0 };
+  return url
+    ? <img src={url} alt="" draggable={false} style={{ ...box, objectFit: "cover" }} />
+    : <div style={{ ...box, display: "grid", placeItems: "center", fontSize: 16, color: "var(--text-secondary)" }}>🎞️</div>;
+}
 
 export function ReportWindow() {
   const params = new URLSearchParams(window.location.search);
@@ -21,6 +39,9 @@ export function ReportWindow() {
   const [rightTab, setRightTab] = useState<"std" | "tpl">("std");        // 우측: 단축키 | 템플릿
   const [hosp, setHosp] = useState("");                                  // Hospital Comment (= study.memo)
   const [relatedView, setRelatedView] = useState<{ label: string; text: string } | null>(null);
+  const [selPast, setSelPast] = useState<number | null>(null);   // History 에서 단일 클릭한 과거 검사(기준·하이라이트)
+  const [sameCompare, setSameCompare] = useState(false);          // Same Compare — 선택 기준과 같은 장비·검사명만
+  const grabRef = useRef(false);   // 판독 텍스트를 좌클릭 잡은 상태(누른 채 V=붙여넣기)
   const [fontPx, setFontPx] = useState(12);
   const [reading, setReading] = useState("");
   const [conclusion, setConclusion] = useState("");
@@ -39,6 +60,42 @@ export function ReportWindow() {
   const [phrases, setPhrases] = useState<PhraseRow[]>([]);
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({});
   const [msg, setMsg] = useState("");
+  // ── History(과거검사) 상호작용: 단일클릭=판독 표시, 더블클릭=1:2 Compare, 드래그·잡고 V=판독영역 복사 ──
+  const pasteReading = (text: string) => {
+    if (!text || lockedRef.current || finalizedRef.current) return;
+    const add = (prev: string) => (prev ? `${prev}\n${text}` : text);
+    if (dictField.current === "conclusion") setConclusion(add); else setReading(add);
+    setTouched(true);
+    setMsg("과거 판독을 현재 판독영역에 복사했습니다");
+  };
+  const pickPast = (e: RelatedExam) => {
+    setSelPast(e.id);
+    api.reports(e.id).then((rr) => {
+      const fin = rr.items.find((x) => x.status === "finalized") ?? rr.items[0];
+      setRelatedView({ label: `${e.study_date} ${e.modality} ${e.study_desc}`, text: fin?.narrative_text || "(판독 없음)" });
+    }).catch(() => setRelatedView({ label: `${e.study_date} ${e.modality}`, text: "(판독 조회 실패)" }));
+  };
+  const openCompare = (e: RelatedExam) => {
+    if (!detail) return;
+    // 현재 판독 검사 + 과거검사를 1:2 Compare(Add View)로 — 뷰어가 좌:현재 / 우:과거 로 배치
+    const w = window.open(`${window.location.origin}${window.location.pathname}?viewer=2d&study=${detail.id}&add=${e.id}`, "sv_viewer");
+    w?.focus();
+  };
+  // 판독 텍스트를 좌클릭으로 잡은 채 'V' → 현재 판독영역에 붙여넣기 (마우스업/블러=잡기 해제)
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (grabRef.current && (ev.key === "v" || ev.key === "V") && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        ev.preventDefault();
+        pasteReading(relatedView?.text ?? "");
+      }
+    };
+    const onUp = () => { grabRef.current = false; };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("dragend", onUp);   // 네이티브 드래그는 mouseup 미발생 → dragend 로도 해제(잡기 stuck 방지)
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("mouseup", onUp); window.removeEventListener("dragend", onUp); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relatedView]);
   const report = reports[0] ?? null;
 
   // ── 계정별 로컬 단축키·템플릿 — 1차 로컬(localStorage) 저장, 주기적으로 서버(user 스코프) 백업 ──
@@ -104,10 +161,15 @@ export function ReportWindow() {
   }, []);
   const finalized = report?.status === "finalized";
   const sig = (report?.diff_metrics as { signature?: { name: string; license_no: string; signed_at: string } })?.signature;
+  // 전역 keydown(잡고 V) 핸들러에서 최신값을 읽도록 ref 동기 — pasteReading 가드용
+  const lockedRef = useRef(false);
+  const finalizedRef = useRef(false);
+  useEffect(() => { finalizedRef.current = finalized; }, [finalized]);
 
   // ── 판독 확정(Fixed) 잠금 — study.report_locked. 서버 409 가 최종 방어선, UI 는 선반영(UX) ──
   const [locked, setLocked] = useState(false);
   useEffect(() => { setLocked(!!detail?.report_locked); }, [detail?.id, detail?.report_locked]);
+  useEffect(() => { lockedRef.current = locked; }, [locked]);
   const LOCK_TIP = "판독 확정(잠금) 상태 — 변경할 수 없습니다";
   // 다른 창(뷰어 도크 등)에서 잠금이 바뀌면 detail 스냅샷이 stale — 저장/토글 실패 시 재조회로 동기화
   const syncLock = async () => {
@@ -167,6 +229,7 @@ export function ReportWindow() {
     setDetail(d);
     setHosp(d.memo ?? "");
     setRelatedView(null);
+    setSelPast(null); setSameCompare(false);   // 검사 전환 시 History 선택·Same Compare 필터 초기화(stale 방지)
     setTplPreview(null);
     setAppliedTpl(null);
     tplBackup.current = null;
@@ -374,7 +437,11 @@ export function ReportWindow() {
   });
   const phraseList = [...phrases, ...localPhrases]
     .filter((p) => p.kind === (rightTab === "std" ? "phrase" : "template"));
-  const relatedDone = detail.related_exams.filter((e) => e.status === "finalized");
+  // History 목록 — Same Compare 시 선택 기준(refExam)과 같은 장비·검사명(부위)만, 검사일 최신순
+  const refExam = detail.related_exams.find((e) => e.id === selPast) ?? null;
+  const histList = [...detail.related_exams]
+    .filter((e) => !sameCompare || !refExam || (e.modality === refExam.modality && e.study_desc === refExam.study_desc))
+    .sort((a, b) => (a.study_date < b.study_date ? 1 : a.study_date > b.study_date ? -1 : 0));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-canvas)" }}>
@@ -413,7 +480,7 @@ export function ReportWindow() {
           </div>
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {sideTab === "hist" ? (
-              reports.length === 0 && relatedDone.length === 0 ? (
+              detail.related_exams.length === 0 && reports.slice(1).length === 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
                               padding: "60px 18px", textAlign: "center" }}>
                   <div style={{ fontSize: 34, opacity: 0.5 }}>🕘</div>
@@ -440,41 +507,47 @@ export function ReportWindow() {
                       📄 현재 검사 v{r.version} · {r.status} · {r.created_by === "ai" ? "AI" : r.created_by}
                     </div>
                   ))}
-                  {relatedDone.map((e) => (
-                    <div key={e.id}
-                         onClick={async () => {
-                           try {
-                             const rr = await api.reports(e.id);
-                             const fin = rr.items.find((x) => x.status === "finalized") ?? rr.items[0];
-                             setRelatedView({
-                               label: `${e.study_date} ${e.modality} ${e.study_desc}`,
-                               text: fin?.narrative_text || "(판독 없음)",
-                             });
-                           } catch { /* 무시 */ }
-                         }}
-                         style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #24282d",
-                                  display: "flex", alignItems: "center", gap: 6 }}
-                         onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
-                         onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        🗂 {e.study_date} {e.modality}{" "}
-                        <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
-                      </span>
-                      <span title="이 과거검사 영상 열기 (뷰어)"
-                            style={{ flexShrink: 0, fontSize: 14 }}
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              const w = window.open(
-                                `${window.location.origin}${window.location.pathname}?viewer=2d&study=${e.id}`,
-                                "sv_viewer");
-                              w?.focus();
-                            }}>🎞️</span>
+                  {/* Same Compare — 선택 기준(마지막 클릭)과 같은 장비·검사명(부위)만 정렬 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid var(--border)" }}>
+                    <button onClick={() => setSameCompare((s) => !s)} disabled={!refExam}
+                            title="Same Compare — 선택한 과거영상과 같은 장비·검사명(부위)만 정렬 (먼저 과거영상 클릭)"
+                            style={{ fontSize: 11, padding: "3px 10px", opacity: refExam ? 1 : 0.5,
+                                     background: sameCompare ? "var(--accent)" : undefined, color: sameCompare ? "#fff" : undefined }}>
+                      Same Compare{sameCompare ? " ●" : ""}
+                    </button>
+                    {sameCompare && refExam && (
+                      <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{refExam.modality}/{refExam.study_desc} 기준</span>
+                    )}
+                  </div>
+                  {/* 과거검사 이미지 — 단일클릭=판독 표시, 더블클릭=1:2 Compare 열기 */}
+                  {histList.map((e) => (
+                    <div key={e.id} onClick={() => pickPast(e)} onDoubleClick={() => openCompare(e)}
+                         title="단일클릭=판독 표시 · 더블클릭=1:2 Compare(현재 옆) 열기"
+                         style={{ padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #24282d",
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  background: e.id === selPast ? "var(--bg-elevated)" : undefined }}>
+                      <HistThumb examId={e.id} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+                        <div style={{ fontWeight: 600 }}>{e.modality} · {e.study_date}</div>
+                        <div style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.study_desc}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{e.status}</div>
+                      </div>
+                      <span style={{ flexShrink: 0, fontSize: 13, color: "var(--text-secondary)" }}>⇆</span>
                     </div>
                   ))}
                   {relatedView && (
                     <div style={{ padding: 10, borderTop: "1px solid var(--border)" }}>
-                      <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 4 }}>[{relatedView.label}] 읽기 전용</div>
-                      <div style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, color: "var(--accent)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>[{relatedView.label}]</span>
+                        <button onClick={() => pasteReading(relatedView.text)} disabled={finalized || locked}
+                                title="현재 판독영역(마지막 포커스 필드)에 복사" style={{ fontSize: 10.5, padding: "1px 8px" }}>→ 복사</button>
+                      </div>
+                      <div draggable
+                           onDragStart={(ev) => ev.dataTransfer.setData("text/plain", relatedView.text)}
+                           onMouseDown={() => { grabRef.current = true; }}
+                           title="드래그하여 판독영역(Reading/Conclusion)에 놓기 · 또는 좌클릭 누른 채 V"
+                           style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)", cursor: "grab",
+                                    border: "1px dashed var(--border)", borderRadius: 4, padding: 6 }}>
                         {relatedView.text}
                       </div>
                     </div>
@@ -482,9 +555,28 @@ export function ReportWindow() {
                 </>
               )
             ) : (
-              <table className="grid-table" style={{ fontSize: 12 }}>
-                <tbody>
-                  <tr><th style={{ width: 90 }}>환자 ID</th><td>{detail.patient_key}</td></tr>
+              <>
+                {/* 선택한 과거영상의 판독 — 드래그/잡고 V 로 판독영역에 복사 */}
+                {relatedView && (
+                  <div style={{ padding: 10, borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, color: "var(--accent)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>[{relatedView.label}] 과거 판독</span>
+                      <button onClick={() => pasteReading(relatedView.text)} disabled={finalized || locked}
+                              title="현재 판독영역에 복사" style={{ fontSize: 10.5, padding: "1px 8px" }}>→ 복사</button>
+                    </div>
+                    <div draggable
+                         onDragStart={(ev) => ev.dataTransfer.setData("text/plain", relatedView.text)}
+                         onMouseDown={() => { grabRef.current = true; }}
+                         title="드래그하여 판독영역에 놓기 · 또는 좌클릭 누른 채 V"
+                         style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)", cursor: "grab",
+                                  border: "1px dashed var(--border)", borderRadius: 4, padding: 6 }}>
+                      {relatedView.text}
+                    </div>
+                  </div>
+                )}
+                <table className="grid-table" style={{ fontSize: 12 }}>
+                  <tbody>
+                    <tr><th style={{ width: 90 }}>환자 ID</th><td>{detail.patient_key}</td></tr>
                   <tr><th>이름</th><td>{detail.patient_name}</td></tr>
                   <tr><th>성별/생년</th><td>{detail.sex} / {detail.birth_date}</td></tr>
                   <tr><th>검사명</th><td>{detail.study_desc}</td></tr>
@@ -496,7 +588,8 @@ export function ReportWindow() {
                   <tr><th>의뢰의</th><td>{detail.referring_physician || "-"}</td></tr>
                   <tr><th>임상정보</th><td>{detail.clinical_info || "-"}</td></tr>
                 </tbody>
-              </table>
+                </table>
+              </>
             )}
           </div>
         </div>

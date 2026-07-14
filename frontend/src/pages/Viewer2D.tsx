@@ -163,6 +163,43 @@ function geomOf(inst: InstanceNode): Geom3 | null {
   const row = inst.orientation.slice(0, 3), col = inst.orientation.slice(3, 6);
   return { pos: inst.position, row, col, rs: inst.pixel_spacing[0], cs: inst.pixel_spacing[1], n: vcross(row, col) };
 }
+/* YYYYMMDD → Date, 두 검사일 간 기간 문자열 "- 1 Year, 3month, 5day" (Compare 과거영상 얼마전 표시) */
+function ymdToDate(s: string): Date | null {
+  return /^\d{8}$/.test(s) ? new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) : null;
+}
+function durText(olderYmd: string, newerYmd: string): string | null {
+  const a = ymdToDate(olderYmd), b = ymdToDate(newerYmd);
+  if (!a || !b || b < a) return null;
+  // a 를 mm 개월 전진(일자는 해당 월 말일로 클램프) → b 까지 남은 일수. 항상 d>=0(음수일 버그 방지)
+  const anchorOf = (mm: number) => {
+    const dt = new Date(a.getFullYear(), a.getMonth() + mm, 1);
+    const dim = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+    dt.setDate(Math.min(a.getDate(), dim));
+    return dt;
+  };
+  let months = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (anchorOf(months) > b) months -= 1;
+  const d = Math.round((b.getTime() - anchorOf(months).getTime()) / 86400000);
+  const y = Math.floor(months / 12), m = months % 12;
+  const parts: string[] = [];
+  if (y) parts.push(`${y} Year`);
+  if (m) parts.push(`${m}month`);
+  if (d || (!y && !m)) parts.push(`${d}day`);
+  return `- ${parts.join(", ")}`;
+}
+/* 썸네일 DICOM 태그 — 시퀀스(T1/T2/FLAIR…, series_desc 파싱) + 단면(AX/SAG/COR, ImageOrientation 법선). 초록 표시 */
+function seriesTag(s: SeriesNode): string {
+  const d = (s.series_desc || "").toUpperCase();
+  let seq = "";
+  for (const t of ["FLAIR", "T2", "T1", "DWI", "ADC", "STIR", "PD", "SWI", "TOF", "MRA", "TOPO", "SCOUT"]) {
+    if (d.includes(t)) { seq = t; break; }
+  }
+  const inst0 = s.instances[0];
+  const g = inst0 ? geomOf(inst0) : null;
+  let plane = "";
+  if (g) { const x = Math.abs(g.n[0]), y = Math.abs(g.n[1]), z = Math.abs(g.n[2]); plane = z >= x && z >= y ? "AX" : x >= y ? "SAG" : "COR"; }
+  return [seq, plane].filter(Boolean).join(" ");
+}
 /* Spatial cross-reference (Infinitt식) — 마스터 슬라이스의 DICOM 위치를 타깃 시리즈 슬라이스 법선에 투영,
    해부학적으로 가장 가까운 슬라이스 index 반환. 두께·장수·각도가 달라도 정합. 좌표 없으면 null(→ 인덱스 폴백). */
 function nearestSliceIndex(masterInst: InstanceNode, target: SeriesNode): number | null {
@@ -2325,6 +2362,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             <div style={ov("tl", tyOvFont)}>
               {meta.patient_name} ({meta.sex})<br />
               {priorMark ? "[비교/과거] " : ""}{meta.study_desc}<br />{meta.study_date}
+              {priorMark && (() => {
+                // 현재 판독 검사(detail) 대비 이 과거영상이 얼마전인지 — 노란색
+                const t = durText(meta.study_date, detail.study_date);
+                return t ? <><br /><span style={{ color: "#fde047", fontWeight: 700 }}>{t}</span></> : null;
+              })()}
             </div>
             <div style={ov("tr", tyOvFont)}>
               S{p.series.series_number} {p.series.series_desc || p.series.modality}<br />
@@ -2832,6 +2874,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             )}
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 9,
                           background: "rgba(0,0,0,0.65)", padding: "1px 3px" }}>
+              {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}
               S{s.series_number}·{s.instances.length}장
             </div>
           </div>
