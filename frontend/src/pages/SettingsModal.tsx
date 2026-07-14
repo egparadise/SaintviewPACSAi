@@ -64,8 +64,9 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   { key: "reading", label: "판독 (Reading)", scope: "viewer" },
   // 뷰어 설정 3분리 — 공통(선택/모드/OHIF) · TY Viewer 전용 · In Viewer 전용 (키 이름은 기존 유지 — 로밍 호환)
   { key: "viewer", label: "뷰어 공통", scope: "viewer" },
-  { key: "viewerTy", label: "뷰어 — TY Viewer", scope: "viewer" },
-  { key: "viewerIn", label: "뷰어 — In Viewer", scope: "viewer" },
+  { key: "viewerSv", label: "뷰어 — SaintView", scope: "viewer" },
+  { key: "viewerTy", label: "뷰어 — T-View", scope: "viewer" },
+  { key: "viewerIn", label: "뷰어 — In-View", scope: "viewer" },
   { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
   { key: "hp", label: "행잉 (HP)", scope: "viewer" },
@@ -580,7 +581,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭·선택 뷰어)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
-                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>TY</b>=현행 자체 뷰어 레이아웃 · <b>infi</b>=신규 뷰어(개발 중) 레이아웃 저장소.
+                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>T-View</b>=자체 뷰어 레이아웃 · <b>In-View</b>=INFINITT 스타일 레이아웃 저장소.
                   </div>
                   {isAdmin && (
                     <details>
@@ -1387,10 +1388,26 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 ))}
               </Group>
             )}
+            {page === "viewerSv" && (
+              <Group title="SaintView 뷰어 (T-View 엔진 공유)">
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                  <b>SaintView</b> 는 상단 가로 메뉴 툴바(Image Tool · Measurement · Reading Support · Additional) 스킨입니다.
+                  엔진·툴 기능·크로스링크·듀얼모드 Stack 동기(Spatial↔Index)·오버레이는 <b>T-View</b> 와 100% 동일합니다.
+                </div>
+                <Row label="툴 아이콘 크기 (T-View 공통)">
+                  <input type="range" min={13} max={64} step={1} value={tyToolSize}
+                         onChange={(e) => setTyToolSize(Number(e.target.value))} />
+                  <b style={{ marginLeft: 8 }}>{tyToolSize}px</b>
+                </Row>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  더 많은 표시 설정(오버레이·★Quick·사용 패턴)은 <b>뷰어 — T-View</b> 탭과 공유됩니다(계정 로밍).
+                </div>
+              </Group>
+            )}
             {page === "viewerTy" && (
               <>
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                  <b>TY Viewer 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.
+                  <b>T-View 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 세 뷰어 동일합니다.
                 </div>
                 <Group title="툴 아이콘·팔레트 (TY Viewer)">
                   <Row label="아이콘 크기">
