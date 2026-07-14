@@ -54,6 +54,13 @@ GLOBAL_ONLY_KEYS = {
     "infra.containers", "ddns.config", "security.policy",
 }
 
+# 계정별(user) 스코프만 허용하는 뷰어 설정 키 — 전역 저장·전역 폴백 금지(계정 간 누출 방지).
+# 규칙: '뷰어에 따라 바꿀 수 있는 모든 값'(툴·레이아웃·글자크기·행잉·워크리스트 구성)은 계정에 귀속.
+USER_ONLY_KEYS = {
+    "viewer.prefs", "worklist.prefs", "report.prefs", "viewer.hp",
+    "worklist.tree", "worklist.tabs", "report.phrases_local",
+}
+
 
 class SettingBody(BaseModel):
     value: dict
@@ -64,6 +71,15 @@ class SettingBody(BaseModel):
 def read_setting(key: str, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     if key not in ALLOWED_KEYS:
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
+    if key in USER_ONLY_KEYS:
+        # 뷰어 설정 — 계정(user) 스코프만 조회(전역 폴백 차단 → 계정 간 누출 방지)
+        from sqlalchemy import select as _select
+
+        from app.models import AppSetting
+        row = db.execute(_select(AppSetting).where(
+            AppSetting.scope == "user", AppSetting.scope_id == user["sub"], AppSetting.key == key
+        )).scalar_one_or_none()
+        return {"key": key, "value": row.value if row is not None else {}}
     # 전역 전용 키는 user 스코프 무시 — 과거에 남은 user 사본이 전역 값을 가리는 것 방지
     value = get_setting(db, key, user="" if key in GLOBAL_ONLY_KEYS else user["sub"], default={})
     if key == "mode.profiles" and not value:
@@ -81,6 +97,8 @@ def write_setting(
         raise HTTPException(status_code=404, detail="알 수 없는 설정 키")
     if key in GLOBAL_ONLY_KEYS and body.scope != "global":
         raise HTTPException(status_code=400, detail=f"{key}는 전역(global) 설정만 허용")
+    if key in USER_ONLY_KEYS and body.scope != "user":
+        raise HTTPException(status_code=400, detail=f"{key}는 계정별(user) 설정만 허용 — 전역 저장 금지")
     if key == "worklist.tabs" and len(body.value.get("items", [])) > 10:
         raise HTTPException(status_code=400, detail="워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)")
     if body.scope == "global":

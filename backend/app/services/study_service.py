@@ -354,7 +354,8 @@ def study_detail(db: Session, study_id: int) -> dict | None:
             "status": s.status,
         }
         for s in sorted(patient.studies, key=lambda x: x.study_date, reverse=True)
-        if s.id != study.id
+        # 테넌시 — 같은 환자라도 원 검사와 동일 병원 검사만 노출(교차 병원 메타데이터 누출 차단)
+        if s.id != study.id and s.hospital_id == study.hospital_id
     ]
     row["related_exams"] = related
     return row

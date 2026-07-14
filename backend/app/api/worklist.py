@@ -107,6 +107,18 @@ def _scoped_hospital(db: Session, user: dict, selected: int = 0) -> int | None:
     return None
 
 
+def _require_study(db: Session, study_id: int, user: dict) -> Study:
+    """검사 단위 병원 스코프 가드 — 시스템관리자=전체, 병원 소속=자기 병원 검사만.
+    없거나 타 병원이면 404(존재 은닉). 모든 per-study 엔드포인트 단일 진입점(테넌시 IDOR 차단)."""
+    study = db.get(Study, study_id)
+    if not study:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    is_sys_admin = user.get("role") == "admin" and not user.get("hid")
+    if not is_sys_admin and user.get("hid") and study.hospital_id != user.get("hid"):
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    return study
+
+
 class NlQueryBody(BaseModel):
     text: str
 
@@ -123,6 +135,7 @@ def nl_query(body: NlQueryBody, user: dict = Depends(current_user)):
 
 @router.get("/studies/{study_id}")
 def get_study(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    _require_study(db, study_id, user)   # 병원 스코프 가드
     detail = study_detail(db, study_id)
     if not detail:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
@@ -132,7 +145,7 @@ def get_study(study_id: int, db: Session = Depends(get_db), user: dict = Depends
 @router.post("/studies/{study_id}/analyze")
 def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """AI 초안 (재)생성 트리거 — 워커가 비동기 처리."""
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if study.report_locked:
@@ -155,7 +168,7 @@ def set_bookmark(
     """BOOKMARK 컬럼(★) 토글 — UBPACS Filter Setting 항목."""
     from app.models import AuditLog
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     study.bookmark = body.bookmark
@@ -176,7 +189,7 @@ def set_memo(
     """MEMO window (UBPACS-Z Worklist 구성) — 검사 단위 사용자 메모."""
     from app.models import AuditLog
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     study.memo = body.memo[:2000]
@@ -197,7 +210,7 @@ def set_priority(
     """F-15: Emergency/STAT 플래그 토글 (컨텍스트 메뉴 Priority)."""
     from app.models import AuditLog
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     study.emergency = body.emergency
@@ -213,7 +226,7 @@ def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depen
     from app.config import get_settings
     from app.dicom.orthanc import OrthancClient
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
@@ -242,7 +255,7 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
     from app.config import get_settings
     from app.dicom.orthanc import OrthancClient
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
@@ -445,7 +458,7 @@ def set_key_images(
 ):
     from app.models import AuditLog
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     study.key_images = body.items
@@ -468,7 +481,7 @@ def set_presentation(
     from app.models import AuditLog
     from app.services.settings_service import set_setting
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     # 빈 값(시리즈 0)은 저장분 삭제로 취급 → 워크리스트 변경표시 해제
@@ -498,7 +511,7 @@ def measure_ctr_endpoint(
     from app.models import Annotation, AuditLog
     from app.rag.ctr import measure_ctr
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if study.modality not in ("CR", "DX"):
@@ -572,7 +585,7 @@ def put_annotations(
 
     from app.models import Annotation, AuditLog
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if len(body.items) > 500:
@@ -619,7 +632,7 @@ def send_gsps(
     from app.dicom.orthanc import OrthancClient
     from app.models import AuditLog, Patient
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not body.images:
@@ -661,7 +674,7 @@ def roi_stats(study_id: int, body: RoiStatsBody, db: Session = Depends(get_db),
     from app.dicom.orthanc import OrthancClient
     from app.dicom.roi import roi_statistics
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study or not study.orthanc_id:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if len(body.points) < 2:
@@ -727,7 +740,7 @@ def load_gsps(study_id: int, db: Session = Depends(get_db), user: dict = Depends
     from app.dicom.orthanc import OrthancClient
     from pydicom import dcmread
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
@@ -764,7 +777,7 @@ def send_kos(study_id: int, db: Session = Depends(get_db), user: dict = Depends(
     from app.dicom.orthanc import OrthancClient
     from app.models import AuditLog, Patient
 
-    study = db.get(Study, study_id)
+    study = _require_study(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.key_images:

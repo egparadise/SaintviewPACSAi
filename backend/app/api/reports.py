@@ -36,8 +36,30 @@ def _report_out(r: Report) -> dict:
     }
 
 
+def _require_study_scope(db: Session, study_id: int, user: dict) -> Study:
+    """검사 병원 스코프 가드(테넌시 IDOR 차단) — 시스템관리자=전체, 병원소속=자기 병원만. 아니면 404."""
+    st = db.get(Study, study_id)
+    if not st:
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    is_sys = user.get("role") == "admin" and not user.get("hid")
+    if not is_sys and user.get("hid") and st.hospital_id != user.get("hid"):
+        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+    return st
+
+
+def _require_report(db: Session, report_id: int, user: dict) -> Report:
+    """리포트 소속 검사의 병원 스코프 가드 → 통과 시 Report 반환."""
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
+    _require_study_scope(db, report.study_id, user)
+    return report
+
+
+
 @router.get("/studies/{study_id}/reports")
 def get_reports(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    _require_study_scope(db, study_id, user)
     return {"items": [_report_out(r) for r in list_reports(db, study_id)]}
 
 
@@ -52,7 +74,7 @@ def put_report(
     db: Session = Depends(get_db),
     user: dict = Depends(require_effective("report.write")),
 ):
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     try:
@@ -65,7 +87,7 @@ def put_report(
 @router.post("/reports/{report_id}/finalize")
 def finalize(report_id: int, db: Session = Depends(get_db),
              user: dict = Depends(require_effective("report.finalize"))):
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     try:
@@ -81,7 +103,7 @@ def suspend(report_id: int, db: Session = Depends(get_db),
     """판독 보류(07 A.5 suspended — UBPACS Suspend): 확정 전 상태 유지·후순위 표시."""
     from app.models import AuditLog
 
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     if report.study.report_locked:
@@ -104,7 +126,7 @@ def confirm2(report_id: int, db: Session = Depends(get_db),
 
     from app.models import AuditLog
 
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     if report.status != "finalized":
@@ -132,7 +154,7 @@ def export_report(
     from app.models import AuditLog
     from app.services.pdf_service import render_report_pdf
 
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     if format == "pdf":
@@ -174,7 +196,7 @@ def send_sr(report_id: int, db: Session = Depends(get_db), user: dict = Depends(
     from app.dicom.sr import build_sr_dataset, sr_bytes
     from app.models import AuditLog, Patient
 
-    report = db.get(Report, report_id)
+    report = _require_report(db, report_id, user)
     if not report:
         raise HTTPException(status_code=404, detail="리포트를 찾을 수 없습니다")
     if report.status != "finalized":
@@ -204,12 +226,18 @@ def batch_review_candidates(
     from app.models import Patient, Study
     from app.rag.schemas import has_critical
 
-    rows = db.execute(
+    q = (
         select(Report, Study, Patient)
         .join(Study, Report.study_id == Study.id)
         .join(Patient, Study.patient_id == Patient.id)
         .where(Report.status == "draft", Report.created_by == "ai")
-        .order_by(Study.study_date.desc())
+    )
+    # 테넌시 — 병원 소속 사용자는 자기 병원 후보만(교차 병원 AI 초안 누출 차단)
+    is_sys = user.get("role") == "admin" and not user.get("hid")
+    if not is_sys and user.get("hid"):
+        q = q.where(Study.hospital_id == user["hid"])
+    rows = db.execute(
+        q.order_by(Study.study_date.desc())
         .limit(limit * 2)
     ).all()
     items = []
@@ -258,7 +286,7 @@ def external_ai(
     from app.rag.schemas import narrative_from_sr
     from app.services.report_service import latest_report
 
-    study = db.get(Study, study_id)
+    study = _require_study_scope(db, study_id, user)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if study.report_locked:
@@ -360,9 +388,15 @@ def batch_finalize(
     from app.rag.schemas import has_critical
 
     results = []
+    is_sys = user.get("role") == "admin" and not user.get("hid")
     for rid in body.report_ids:
         report = db.get(Report, rid)
         if not report:
+            results.append({"report_id": rid, "ok": False, "detail": "없음"})
+            continue
+        # 병원 스코프 — 타 병원 리포트는 존재 은닉(없음 처리, IDOR 차단)
+        st = db.get(Study, report.study_id)
+        if not is_sys and user.get("hid") and (not st or st.hospital_id != user.get("hid")):
             results.append({"report_id": rid, "ok": False, "detail": "없음"})
             continue
         if has_critical(report.sr_json or {}):
