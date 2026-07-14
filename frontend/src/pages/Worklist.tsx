@@ -209,6 +209,11 @@ const INFI_COL_WIDTH: Record<string, number> = {
   read_state: 52, status: 74, patient_key: 96, patient_name: 130, sex: 40, study_date: 92,
   modality: 46, series_count: 42, instance_count: 46, body_part: 84, source_aet: 90,
 };
+// SAINT VIEW 컬럼 순서 (그림1 Exam List: 검사상태 | 검사일 | 센터명 | 환자명 | 환자ID | 장비 | 시각 | 배정의사 | 부위 | 병원명)
+export const SV_COLUMNS = [
+  "read_state", "status", "study_date", "institution", "patient_name", "patient_key",
+  "modality", "study_time", "referring_physician", "body_part", "source_aet",
+];
 
 /* ── 유효 권한 게이트 (레인 W) — 액션별 필요 권한 키 (병원 매트릭스 perm/me) ──
  * 서버가 이미 403 을 강제하므로 이 UI 게이트는 UX(사전 비활성+안내) 목적이다.
@@ -2164,6 +2169,43 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
 }
 
 /* ════ 워크리스트 워크스페이스 루트 ════ */
+/* SAINT VIEW 워크리스트 상단 상태 카운트 바 (그림1) — 전체=서버 총건, 나머지=현재 페이지 집계·클릭 시 상태 필터.
+   (전 검사 정확 집계는 서버 counts 엔드포인트 필요 — 추후) */
+function SvStatusBar({ total, items, onStatus, onRefresh }: {
+  total: number;
+  items: StudyRow[];
+  onStatus: (patch: { status?: string; emergency?: string }) => void;
+  onRefresh: () => void;
+}) {
+  const n = (pred: (r: StudyRow) => boolean) => items.filter(pred).length;
+  const chips: { label: string; count: number; color: string; onClick: () => void }[] = [
+    { label: "전체", count: total, color: "var(--accent)", onClick: () => onStatus({ status: "", emergency: "" }) },
+    { label: "응급", count: n((r) => r.emergency), color: "var(--stat-emergency)", onClick: () => onStatus({ emergency: "true" }) },
+    { label: "미판독", count: n((r) => r.read_state === "unread"), color: "#f59e0b", onClick: () => onStatus({ status: "unread" }) },
+    { label: "판독중", count: n((r) => r.read_state === "reading" || r.status === "reading"), color: "#60a5fa", onClick: () => onStatus({ status: "reading" }) },
+    { label: "판독저장", count: n((r) => r.report_status === "draft"), color: "#a78bfa", onClick: () => onStatus({ status: "draft_ready" }) },
+    { label: "승인", count: n((r) => r.status === "finalized"), color: "var(--stat-final)", onClick: () => onStatus({ status: "finalized" }) },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
+                  background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+      <b style={{ fontSize: 14, marginRight: 6 }}>워크리스트</b>
+      {chips.map((c) => (
+        <button key={c.label} onClick={c.onClick} title={`${c.label} 상태로 필터`}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 16,
+                         background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 12 }}>
+          <span style={{ color: c.color, fontWeight: 700 }}>{c.label}</span>
+          <span style={{ fontWeight: 700 }}>{c.count.toLocaleString()}</span>
+        </button>
+      ))}
+      <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
+        전체=서버 총건 · 나머지=현재 페이지 집계 (클릭=상태 필터)
+      </span>
+      <button title="새로고침" onClick={onRefresh} style={{ padding: "3px 10px" }}>⟳</button>
+    </div>
+  );
+}
+
 export function Worklist() {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [searchText, setSearchText] = useState("");
@@ -2803,12 +2845,16 @@ export function Worklist() {
   // In 모드 워크리스트 배치 — 선택 뷰어(viewer.prefs.client_viewer)=infi 면 INFINITT 원본 7구역 배치,
   // ty 면 현행(TY) 배치 유지. 설정 저장/⟳Refresh 시 refreshKey 로 즉시 재적용.
   const [infiMode, setInfiMode] = useState(false);
+  // SAINT VIEW 모드 — client_viewer=sv 면 SAINT VIEW 워크리스트 스킨(상태 카운트 바 + SV 컬럼, infi 7구역 레이아웃 재사용)
+  const [svMode, setSvMode] = useState(false);
   // OHIF 표시/동작 — 기본 숨김, 설정>뷰어>OHIF 에서 허용 (viewer.prefs.ohif_enabled)
   const [ohifOn, setOhifOn] = useState(false);
   const ohifOnRef = useRef(false);
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
-      setInfiMode((r.value as { client_viewer?: string }).client_viewer === "infi");
+      const cv = (r.value as { client_viewer?: string }).client_viewer;
+      setInfiMode(cv === "infi");
+      setSvMode(cv === "sv");
       const on = !!(r.value as { ohif_enabled?: boolean }).ohif_enabled;
       setOhifOn(on);
       ohifOnRef.current = on;
@@ -2935,7 +2981,7 @@ export function Worklist() {
                            EXAM CONTROL
                          </div>
                        )}
-                       actions={!infiMode && !examCtl && (
+                       actions={!infiMode && !svMode && !examCtl && (
                          <>
                            {([
                              ["reading", "📝 Reading", "Report 창 — 판독 작성 창 열기(선택 검사)"],
@@ -3011,6 +3057,12 @@ export function Worklist() {
           </div>
         </div>
       )}
+      {/* SAINT VIEW 상단 상태 카운트 바 (그림1) */}
+      {svMode && (
+        <SvStatusBar total={total} items={items}
+                     onStatus={(p) => { setFilters((f) => ({ ...f, ...p })); setRefreshKey((k) => k + 1); }}
+                     onRefresh={() => setRefreshKey((k) => k + 1)} />
+      )}
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}
                      onSearch={() => setRefreshKey((k) => k + 1)}
@@ -3045,9 +3097,9 @@ export function Worklist() {
         </div>
       )}
 
-      {/* ── In 모드 배치 (INFINITT Worklist 원본 7구역): 좌열=⑦Search Filter+⑤Preview,
-             우열=③Study Grid→④Related Exam→⑥Report. ①툴바/②검색콤보는 상단 공용 ── */}
-      {infiMode && (
+      {/* ── In / SAINT VIEW 모드 배치 (7구역): 좌열=⑦Search Filter+⑤Preview,
+             우열=③Study Grid→④Related Exam→⑥Report. SAINT VIEW 는 SV 컬럼 + 상단 상태바 사용 ── */}
+      {(infiMode || svMode) && (
         <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 0, padding: 3 }}>
           {/* 좌열: Search Filter(위) ─h스플리터─ Preview(아래, prevH) */}
           <div style={{ width: sizes.railW, display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0 }}>
@@ -3078,7 +3130,7 @@ export function Worklist() {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
             <div style={{ flex: 1, minHeight: 60, display: "flex",
                           ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
-              <StudyGrid items={items} columns={INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
+              <StudyGrid items={items} columns={svMode ? SV_COLUMNS : INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
                          treeDisabled={localMode}
                          onSelect={onSelect}
                          onOpen={(r) => { if (localMode) setLocalViewerRow(r); else void doAction("viewdraft", r); }}
@@ -3101,7 +3153,7 @@ export function Worklist() {
       )}
 
       {/* 중단: 검색 레일(기간+폴더 트리) + 메인 그리드 — 좌우 스플리터 (TY 배치) */}
-      {!infiMode && (
+      {!infiMode && !svMode && (
       <div style={{ display: "flex", flex: 2.2, minHeight: 0 }}>
         <SearchRail width={sizes.railW} active={datePreset}
                     mods={modCounts} activeMod={filters.modality ?? ""}
@@ -3127,11 +3179,11 @@ export function Worklist() {
       )}
 
       {/* 하단1 (UBPACS p.8): Order | Related Study List-1 | Related Study List-2 — 드래그 재배치 + 상하 스플리터 */}
-      {!infiMode && panelOrder.d.some((k) => panelsOn[k]) && (
+      {!infiMode && !svMode && panelOrder.d.some((k) => panelsOn[k]) && (
         <Splitter dir="h" onEnd={persistSizes}
                   onDrag={(dy) => setSizes((s) => ({ ...s, dH: clampSz(s.dH - dy, 80, 420) }))} />
       )}
-      {!infiMode && panelOrder.d.some((k) => panelsOn[k]) && (
+      {!infiMode && !svMode && panelOrder.d.some((k) => panelsOn[k]) && (
         <div style={{ display: "flex", gap: 3, height: sizes.dH, padding: "3px 3px 0", flexShrink: 0 }}>
           {panelOrder.d.filter((k) => panelsOn[k]).map((k) => (
             <DraggablePanel key={k} zone="d" k={k} onDrop={onPanelDrop} style={{ flex: 1 }}>
@@ -3151,11 +3203,11 @@ export function Worklist() {
       )}
 
       {/* 하단2 (UBPACS p.8): Thumbnail | Reference(상용구) | Comment+MEMO | Report — 드래그 재배치 + 스플리터 */}
-      {!infiMode && panelOrder.e.some((k) => panelsOn[k]) && (
+      {!infiMode && !svMode && panelOrder.e.some((k) => panelsOn[k]) && (
         <Splitter dir="h" onEnd={persistSizes}
                   onDrag={(dy) => setSizes((s) => ({ ...s, eH: clampSz(s.eH - dy, 140, 640) }))} />
       )}
-      {!infiMode && panelOrder.e.some((k) => panelsOn[k]) && (
+      {!infiMode && !svMode && panelOrder.e.some((k) => panelsOn[k]) && (
         <div style={{ display: "flex", gap: 3, height: sizes.eH, flexShrink: 0, padding: 3 }}>
           {(() => {
             const arr = panelOrder.e.filter((k) => panelsOn[k]);
