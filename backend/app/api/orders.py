@@ -22,6 +22,23 @@ _TRANSITIONS: dict[str, set[str]] = {
 }
 
 
+def _scope_hid(user: dict, selected: int = 0) -> int | None:
+    """오더 병원 스코프(worklist._scoped_hospital 과 동일 규칙, 테넌시 격리):
+    - 시스템 관리자(병원 미소속 admin): 선택 병원 필터, 미선택이면 전체(None).
+    - 병원 소속 사용자: 항상 자기 병원으로 고정.
+    """
+    if user.get("role") == "admin" and not user.get("hid"):
+        return selected or None
+    return user.get("hid")
+
+
+def _guard_owner(order: Order, user: dict) -> None:
+    """오더 소유 병원 가드 — 병원 소속 사용자는 타 병원 오더 접근 불가(존재 은닉 위해 404)."""
+    hid = user.get("hid")
+    if hid and order.hospital_id != hid:
+        raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+
+
 def _order_out(o: Order) -> dict:
     return {
         "id": o.id, "patient_key": o.patient_key, "patient_name": o.patient_name,
@@ -47,8 +64,10 @@ def list_orders(
         q = q.where(Order.status == status)
     if date:
         q = q.where(Order.scheduled_date == date)
-    if hospital_id > 0:  # 병원 스코프 — MWL 응답 범위와 동일(병원 귀속 + 전역 NULL)
-        q = q.where((Order.hospital_id == hospital_id) | (Order.hospital_id.is_(None)))
+    # 병원 스코프 — JWT 에서 결정(병원 소속 사용자는 자기 병원 고정). NULL(전역) 누출 제거: 엄격 일치.
+    scope = _scope_hid(user, hospital_id)
+    if scope is not None:
+        q = q.where(Order.hospital_id == scope)
     if taken == "yes":   # 장비가 가져간 오더만
         q = q.where(Order.taken_aet != "")
     elif taken == "no":  # 아직 안 가져간 오더만
@@ -72,6 +91,7 @@ class OrderBody(BaseModel):
     body_part: str = ""
     projection: str = ""       # PA/AP/LAT…
     dicom_study_id: str = ""   # 빈값 = 자동 채번
+    hospital_id: int | None = None  # 시스템 관리자만 지정(병원 소속 사용자는 무시하고 자기 병원 고정)
 
 
 @router.post("")
@@ -94,6 +114,8 @@ def create_order(body: OrderBody, db: Session = Depends(get_db), user: dict = De
         body_part=body.body_part.strip().upper()[:64],
         projection=body.projection.strip().upper()[:32],
         dicom_study_id=body.dicom_study_id[:16],
+        # 테넌시 — 병원 소속 사용자는 자기 병원으로 고정, 시스템 관리자만 body 로 지정 가능
+        hospital_id=user.get("hid") or body.hospital_id,
     )
     db.add(order)
     db.flush()
@@ -141,6 +163,7 @@ def update_order(
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+    _guard_owner(order, user)
     if order.status != "scheduled":
         raise HTTPException(
             status_code=409, detail=f"'{order.status}' 상태 오더는 수정할 수 없습니다(scheduled만 허용)"
@@ -170,6 +193,7 @@ def delete_order(
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+    _guard_owner(order, user)
     db.add(AuditLog(action="order_delete", target_type="order", target_id=str(order_id),
                     detail={"by": user["sub"], "accession": order.accession_no,
                             "patient": order.patient_key, "status": order.status}))
@@ -190,6 +214,7 @@ def set_order_status(
     order = db.get(Order, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="오더를 찾을 수 없습니다")
+    _guard_owner(order, user)
     if body.status not in _TRANSITIONS.get(order.status, set()):
         raise HTTPException(
             status_code=409, detail=f"'{order.status}' → '{body.status}' 전이는 허용되지 않습니다"
@@ -206,7 +231,11 @@ def export_mwl(db: Session = Depends(get_db), user: dict = Depends(current_user)
     """scheduled 오더를 MWL .wl 파일로 내보내기 — Orthanc worklists 플러그인 폴더."""
     from app.dicom.mwl import export_worklist_files
 
-    orders = db.execute(select(Order).where(Order.status == "scheduled")).scalars().all()
+    q = select(Order).where(Order.status == "scheduled")
+    scope = _scope_hid(user)  # 병원 소속 사용자는 자기 병원 오더만 내보내기
+    if scope is not None:
+        q = q.where(Order.hospital_id == scope)
+    orders = db.execute(q).scalars().all()
     out_dir = get_settings().mwl_dir
     count = export_worklist_files(orders, out_dir)
     db.add(AuditLog(action="mwl_export", target_type="order", target_id="*",

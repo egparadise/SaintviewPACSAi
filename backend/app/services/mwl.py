@@ -82,10 +82,10 @@ def mark_taken(db: Session, order_ids: list[int], calling: str) -> None:
 
 
 def _pending_orders(db: Session, hospital_id: int) -> list[Order]:
-    """미완료(scheduled) 오더 — 해당 병원 귀속 + 전역(NULL) 오더."""
+    """미완료(scheduled) 오더 — 해당 병원 귀속만(테넌시 격리). 전역 NULL 누출 제거."""
     q = select(Order).where(
         Order.status == "scheduled",
-        (Order.hospital_id == hospital_id) | (Order.hospital_id.is_(None)),
+        Order.hospital_id == hospital_id,
     ).order_by(Order.scheduled_date, Order.scheduled_time)
     return list(db.execute(q).scalars())
 
