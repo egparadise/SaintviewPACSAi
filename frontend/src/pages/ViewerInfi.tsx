@@ -23,7 +23,7 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
-import type { HpRule } from "../lib/viewerConfig";
+import { mammoAssign, type HpRule } from "../lib/viewerConfig";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -530,8 +530,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const single = list.length === 1;
       const mod = list[0]?.d.modality ?? "";
       const defCfg = single ? (defMap[mod] ?? defMap["*"]) : undefined;
+      // Mammo(MG) 전용 행잉 — 표준 2×2 [R CC, L CC, R MLO, L MLO] + 오버레이 텍스트 제거 (전 뷰어 공통 규칙)
+      const mammo = single && mod === "MG";
+      const ma = mammo ? mammoAssign(list[0].series) : null;
+      const mammoSeries = ma && ma.some(Boolean) ? ma : null;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
+      if (mammo) setOvlVisible(false);
       let r: number, c: number;
-      if (single && hpMatch) {
+      if (mammo) { r = 2; c = 2; setHpName("Mammo 2×2"); }
+      else if (single && hpMatch) {
         const vg = hpMatch.displays?.find((d) => d.role === "viewer")?.grid ?? hpMatch.s;
         r = Math.min(vg.r, 10); c = Math.min(vg.c, 10);
         setHpName(hpMatch.name);
@@ -548,8 +554,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setSLayout({ r, c });
       setPanes(Array.from({ length: r * c }, (_, i) => {
         if (single) {
-          // 단독 검사: 페인마다 시리즈를 순서대로(부족하면 빈 페인), Image 레이아웃은 설정값
-          const s0 = list[0].series[i] ?? null;
+          // 단독 검사: 페인마다 시리즈를 순서대로(부족하면 빈 페인), Image 레이아웃은 설정값. Mammo 는 표준 4-view 배치.
+          const s0 = mammoSeries ? (mammoSeries[i] ?? null) : (list[0].series[i] ?? null);
           const p = { ...initPane(list[0].d.study_uid), series: s0 };
           if (hpMatch) {   // IN-2 ①: HP 규칙의 Image layout·W/L 적용 (TY applyHp 동일)
             p.il = { r: Math.min(hpMatch.i.r, 10), c: Math.min(hpMatch.i.c, 10) };

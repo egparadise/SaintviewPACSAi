@@ -1,5 +1,23 @@
 // 뷰어 설정 공용 정의 — Viewer2D와 SettingsModal이 함께 사용 (경량, cornerstone 미포함)
 
+/** Mammo(MG) view 분류 — series_desc 파싱(laterality R/L + view CC/MLO).
+ *  DICOM ImageLaterality/ViewPosition 이 미노출이라 first-cut(검사명 파싱). 정확도 필요 시 백엔드 태그 노출로 강화. */
+export function mammoView(desc: string): { lat: "R" | "L" | ""; view: "CC" | "MLO" | "" } {
+  const d = (desc || "").toUpperCase().replace(/[_-]/g, " ");
+  const view: "CC" | "MLO" | "" = d.includes("MLO") ? "MLO" : d.includes("CC") ? "CC" : "";   // "RCC"(무공백) 도 인식
+  let lat: "R" | "L" | "" = "";
+  if (/\bR\s?CC\b|\bR\s?MLO\b|\bR\s?ML\b|\bRIGHT\b/.test(d)) lat = "R";
+  else if (/\bL\s?CC\b|\bL\s?MLO\b|\bL\s?ML\b|\bLEFT\b/.test(d)) lat = "L";
+  if (!lat) { if (/\bRT?\b/.test(d)) lat = "R"; else if (/\bLT?\b/.test(d)) lat = "L"; }
+  return { lat, view };
+}
+/** Mammo 표준 2×2 배치 순서 — [R CC, L CC, R MLO, L MLO]. 없는 뷰는 null(빈 페인). */
+export function mammoAssign<T extends { series_desc: string }>(list: T[]): (T | null)[] {
+  const pick = (lat: "R" | "L", view: "CC" | "MLO") =>
+    list.find((s) => { const v = mammoView(s.series_desc); return v.lat === lat && v.view === view; }) ?? null;
+  return [pick("R", "CC"), pick("L", "CC"), pick("R", "MLO"), pick("L", "MLO")];
+}
+
 /** Client 뷰어 레지스트리 — Setting>뷰어>선택 뷰어.
  *  현행 자체 뷰어(Viewer2D) = TY Viewer. 신규 뷰어는 여기 등록 + ViewerWindow의 컴포넌트 맵에 연결.
  *  available=false 면 설정 콤보에서 비활성(개발 중) 표시. */

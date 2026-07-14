@@ -7,7 +7,7 @@ import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
-import { DEFAULT_WL_PRESETS, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_WL_PRESETS, mammoAssign, type HpRule } from "../lib/viewerConfig";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
@@ -868,6 +868,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         setStatus(`Key Image View — 키 이미지 ${keySops.length}장만 표시`);
       }
       setSeries(imgSeries);
+      // Mammo(MG) 전용 행잉 — 표준 2×2 [R CC, L CC, R MLO, L MLO] + 오버레이 텍스트 제거 (전 뷰어 공통 규칙)
+      const mammo = detail.modality === "MG";
+      const ma = mammo ? mammoAssign(imgSeries) : null;
+      const mammoSeries = ma && ma.some(Boolean) ? ma : null;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
+      if (mammo) { setLayout("2x2"); setOverlayOn(false); }
       if (imgSeries[0]) {
         setSelSeries(imgSeries[0].series_uid);
         // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
@@ -880,7 +885,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           const next = { ...prev };
           PANE_IDS.forEach((pid, i) => {
             // 시리즈가 레이아웃보다 적으면 남는 페인은 빈 칸 유지 — 마지막 시리즈 반복 채움 금지(In Viewer 규칙)
-            const s = imgSeries[i];
+            // Mammo 는 표준 4-view 배치, 그 외는 순서대로
+            const s = mammoSeries ? (mammoSeries[i] ?? null) : imgSeries[i];
             next[pid] = s
               ? applyPState({ ...initPane(detail.study_uid), series: s,
                   index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "" })
