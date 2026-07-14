@@ -1160,7 +1160,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setPanes((prev) => {
       const next = { ...prev };
       const stride = Math.max(1, imgLay.r * imgLay.c);  // Image Layout 분할 시 페이지 단위 이동
-      const clampI = (len: number, i: number) => Math.min(Math.max(i, 0), len - 1);
+      // 무한 순환 — 끝 다음은 처음, 처음 이전은 끝(스크롤·화살표·CINE 공통). 양방향 wrap.
+      const clampI = (len: number, i: number) => (len > 0 ? ((i % len) + len) % len : 0);
       // 1) 마스터 이동 — 빈 페인이면 마스터는 안 움직이되 동기 타깃은 계속 스크롤(OLD 인덱스 동작 보존)
       const mp = prev[pid];
       let mIdx = mp?.index ?? 0;

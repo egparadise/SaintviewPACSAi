@@ -706,8 +706,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const sameExam = p.studyUid === ps[i]?.studyUid;
       const linked = xlink.crosslink && ((xlink.auto_sync && sameExam) || (xlink.sync_other && !sameExam));
       if (!(k === i || (linked && p.series)) || !p.series) return p;
-      const max = Math.max(0, p.series.instances.length - 1);
-      return { ...p, index: Math.min(max, Math.max(0, p.index + delta)) };
+      // 무한 순환 — 끝 다음은 처음, 처음 이전은 끝(스크롤·화살표 공통). 양방향 wrap.
+      const len = p.series.instances.length;
+      return { ...p, index: len > 0 ? (((p.index + delta) % len) + len) % len : 0 };
     }));
   }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
 
