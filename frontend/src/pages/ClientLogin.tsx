@@ -17,22 +17,37 @@ export function ClientLogin({ onLogin, onBack }: {
   const [password, setPassword] = useState(remembered ? (localStorage.getItem("sv_client_pw") ?? "") : "");
   const [remember, setRemember] = useState(remembered);
   const [error, setError] = useState("");
+  const [dup, setDup] = useState(false);   // 중복 로그인 인계 프롬프트(Yes/No)
+
+  const persistRemember = () => {
+    localStorage.setItem("sv_remember", remember ? "1" : "0");
+    if (remember) {
+      localStorage.setItem("sv_client_hosp", hospitalId.trim());
+      localStorage.setItem("sv_client_user", username.trim());
+      localStorage.setItem("sv_client_pw", password);
+    } else {
+      ["sv_client_hosp", "sv_client_user", "sv_client_pw"].forEach((k) => localStorage.removeItem(k));
+    }
+  };
+  const finish = (r: LoginResp) => { setToken(r.token, remember); persistRemember(); onLogin(r); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
+    setError(""); setDup(false);
     try {
       const r = await api.clientLogin(hospitalId.trim(), username.trim(), password);
-      setToken(r.token, remember);
-      localStorage.setItem("sv_remember", remember ? "1" : "0");
-      if (remember) {
-        localStorage.setItem("sv_client_hosp", hospitalId.trim());
-        localStorage.setItem("sv_client_user", username.trim());
-        localStorage.setItem("sv_client_pw", password);
-      } else {
-        ["sv_client_hosp", "sv_client_user", "sv_client_pw"].forEach((k) => localStorage.removeItem(k));
-      }
-      onLogin(r);
+      if (r.duplicate) { setDup(true); return; }   // 이미 사용 중 → Yes/No 프롬프트
+      finish(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "로그인 실패");
+    }
+  };
+
+  // Yes — 기존 세션에 종료 카운트다운을 걸고 여기서 로그인(인계)
+  const takeover = async () => {
+    setDup(false); setError("");
+    try {
+      finish(await api.clientLoginForce(hospitalId.trim(), username.trim(), password));
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인 실패");
     }
@@ -68,6 +83,22 @@ export function ClientLogin({ onLogin, onBack }: {
           </button>
         )}
       </form>
+      {dup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
+                        padding: 24, width: 400, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>이미 사용 중인 ID</div>
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--text-secondary)" }}>
+              현재 접속하는 ID는 이미 사용중입니다.<br />
+              로그인 된 곳을 종료하고 여기에서 로그인 하시겠습니까?
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setDup(false)} style={{ padding: "6px 18px" }}>No</button>
+              <button type="button" className="primary" onClick={takeover} style={{ padding: "6px 18px" }}>Yes</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -519,3 +519,26 @@ class StudyActivity(Base):
     last_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+
+class ActiveSession(Base):
+    """동시 로그인 추적 — (hospital_id, username) 당 활성 Client 세션.
+
+    로그인 시 세션 등록(session_id = JWT 의 sid). 같은 (병원, 사용자)의 살아있는 세션이 있으면
+    중복 로그인 프롬프트를 띄우고, '인계(force)' 시 기존 세션에 revoke_deadline(카운트다운)을 설정한다.
+    기존 세션의 /auth/session-status poll 이 이를 감지해 카운트다운 후 자발적 로그아웃한다.
+    TTL(SESSION_TTL) 이내 last_seen 인 세션만 '살아있음'으로 본다(하드 revoke 아님 — 뷰어 UX).
+    """
+
+    __tablename__ = "active_session"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    hospital_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    username: Mapped[str] = mapped_column(String(64), default="", index=True)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    # 인계 예약 — 설정되면 해당 세션은 'revoke 대기'(신규 로그인 대상에서 제외) + 카운트다운 종료
+    revoke_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoke_reason: Mapped[str] = mapped_column(String(200), default="")

@@ -1,5 +1,6 @@
 from app.models.entities import (  # noqa: F401
     Account,
+    ActiveSession,
     AiJob,
     Annotation,
     AppSetting,

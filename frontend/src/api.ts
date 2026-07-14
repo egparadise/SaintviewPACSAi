@@ -211,12 +211,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
-  // Client 뷰어 로그인 — 병원 ID + 개별 ID + Password
+  // Client 뷰어 로그인 — 병원 ID/이름 + 개별 ID + Password. 중복 세션이면 {duplicate:true} 반환.
   clientLogin: (hospital_id: string, username: string, password: string) =>
-    req<LoginResp>("/api/auth/client-login", {
+    req<LoginResp & { duplicate?: boolean; hospital_name?: string }>("/api/auth/client-login", {
       method: "POST",
       body: JSON.stringify({ hospital_id, username, password }),
     }),
+  // 중복 로그인 인계 — 기존 세션 종료 카운트다운 걸고 새 세션 로그인
+  clientLoginForce: (hospital_id: string, username: string, password: string) =>
+    req<LoginResp>("/api/auth/client-login/force", {
+      method: "POST",
+      body: JSON.stringify({ hospital_id, username, password }),
+    }),
+  // 세션 poll — 인계 예고(종료 카운트다운) 여부 + 하트비트
+  sessionStatus: () =>
+    req<{ revoked: boolean; reason: string; seconds_left: number }>("/api/auth/session-status"),
   // 공개 서버 상태 — 홈(초기) 페이지 연동
   status: () => req<ServerStatus>("/api/status"),
   // 가입(공개) — 병원 + 초기 관리자 계정 생성

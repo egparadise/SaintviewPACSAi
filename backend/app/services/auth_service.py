@@ -28,7 +28,7 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_token(account: Account, hospital_id: int | None = None) -> str:
+def create_token(account: Account, hospital_id: int | None = None, sid: str | None = None) -> str:
     settings = get_settings()
     payload = {
         "sub": account.username,
@@ -38,6 +38,8 @@ def create_token(account: Account, hospital_id: int | None = None) -> str:
         "hid": hospital_id if hospital_id is not None else account.hospital_id,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes),
     }
+    if sid:
+        payload["sid"] = sid  # 동시 로그인(세션 인계) 추적용 세션 id
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

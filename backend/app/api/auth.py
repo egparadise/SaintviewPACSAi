@@ -53,13 +53,8 @@ class ClientLoginRequest(BaseModel):
     password: str
 
 
-@router.post("/client-login", response_model=LoginResponse)
-def client_login(body: ClientLoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
-    """Saintview PACS AI Client 뷰어 로그인 — 병원 ID + 개별 ID + Password.
-
-    병원 ID로 병원을 식별하고, 해당 병원 소속 계정만 그 병원 PACS Viewer에 로그인된다.
-    레인 S 보안 훅: 관리 콘솔 로그인과 동일한 실패 잠금 적용.
-    """
+def _resolve_client(body: ClientLoginRequest, request: Request, db: Session):
+    """Client 로그인 공통 — 병원 식별(코드/이름) + 계정 인증 + 소속 검증 → (account, hospital)."""
     from sqlalchemy import func, or_, select
 
     from app.models import Hospital
@@ -89,14 +84,65 @@ def client_login(body: ClientLoginRequest, request: Request, db: Session = Depen
         security_service.record_login_failure(db, body.username, ip)
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
     security_service.reset_login_failures(body.username, ip)
-    # 시스템 관리자(병원 미소속 admin)는 어느 병원이든 접속 가능(운영/지원).
-    # 그 외에는 자기 소속 병원만.
+    # 시스템 관리자(병원 미소속 admin)는 어느 병원이든 접속 가능(운영/지원). 그 외에는 자기 소속 병원만.
     is_system_admin = account.role == "admin" and not account.hospital_id
     if not is_system_admin and account.hospital_id != hospital.id:
         raise HTTPException(status_code=403, detail="이 병원에 소속된 계정이 아닙니다")
-    return LoginResponse(token=create_token(account, hospital_id=hospital.id),
-                         username=account.username, role=account.role,
-                         hospital_id=hospital.id, hospital_name=hospital.name)
+    return account, hospital
+
+
+def _client_login_ok(db: Session, account, hospital) -> dict:
+    """세션 등록 + 토큰 발급(sid 포함)."""
+    from app.services import session_service
+
+    sid = session_service.register(db, hospital.id, account.username)
+    db.commit()
+    return {"token": create_token(account, hospital_id=hospital.id, sid=sid),
+            "username": account.username, "role": account.role,
+            "hospital_id": hospital.id, "hospital_name": hospital.name}
+
+
+@router.post("/client-login")
+def client_login(body: ClientLoginRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    """Client 뷰어 로그인 — 병원 ID/이름 + 개별 ID + Password.
+
+    같은 병원·같은 ID 로 이미 살아있는 세션이 있으면 토큰 대신 {duplicate:true} 를 반환한다
+    (프론트가 Yes/No 인계 프롬프트 → /client-login/force 로 인계).
+    """
+    from app.services import session_service
+
+    account, hospital = _resolve_client(body, request, db)
+    if session_service.find_live(db, hospital.id, account.username):
+        return {"duplicate": True, "hospital_name": hospital.name}
+    return _client_login_ok(db, account, hospital)
+
+
+@router.post("/client-login/force")
+def client_login_force(body: ClientLoginRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    """중복 로그인 인계 — 기존 세션에 종료 카운트다운을 걸고 새 세션으로 로그인."""
+    from app.services import session_service
+
+    account, hospital = _resolve_client(body, request, db)
+    live = session_service.find_live(db, hospital.id, account.username)
+    if live:
+        session_service.revoke(db, live, "다른 곳에서 로그인됩니다. 10초 뒤에 종료됩니다.")
+    return _client_login_ok(db, account, hospital)
+
+
+@router.get("/session-status")
+def session_status(db: Session = Depends(get_db), user: dict = Depends(current_user)) -> dict:
+    """세션 poll — 인계 예고(종료 카운트다운) 여부 반환 + 하트비트(last_seen 갱신).
+
+    revoked=true 면 프론트가 카운트다운 배너 표시 후 seconds_left 도달 시 자발적 로그아웃.
+    """
+    from app.services import session_service
+
+    sid = user.get("sid")
+    if not sid:
+        return {"revoked": False, "reason": "", "seconds_left": 0}
+    st = session_service.status(db, sid)
+    db.commit()
+    return st
 
 
 class ProfileBody(BaseModel):

@@ -13,6 +13,7 @@ import { ReportWindow } from "./pages/ReportWindow";
 import { Landing } from "./pages/Landing";
 import { Signup } from "./pages/Signup";
 import { ClientLogin } from "./pages/ClientLogin";
+import { SessionGuard } from "./pages/SessionGuard";
 import { AdminConsole } from "./pages/AdminConsole";
 
 // 이 오리진의 포털 역할(포트 기반) — 모듈 로드 시 1회 판정
@@ -192,6 +193,7 @@ export default function App() {
       </header>
       {settingsOpen && <SettingsModal role={session.role} scope="viewer" onClose={() => setSettingsOpen(false)} />}
       <main style={{ flex: 1, minHeight: 0 }}><Worklist /></main>
+      <SessionGuard onLogout={logout} />
     </div>
   );
 }
