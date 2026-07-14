@@ -35,7 +35,8 @@ const LP_CSS = `
 .lp-hero{display:grid;grid-template-columns:1.05fr .95fr;gap:20px;align-items:center;max-width:1320px;margin:14px auto 0;padding:20px 48px 10px;}
 @media(max-width:920px){.lp-hero{grid-template-columns:1fr;}.lp-hero-art{order:-1;}}
 .lp-badge{display:inline-flex;align-items:center;gap:8px;background:#ece4fe;color:#6d28d9;font-size:13.5px;font-weight:700;padding:8px 16px;border-radius:999px;}
-.lp-title{font-size:clamp(42px,5.6vw,74px);font-weight:900;line-height:1.03;letter-spacing:-2.5px;margin:24px 0 0;color:#12101f;}
+.lp-title{font-size:clamp(30px,4.6vw,60px);font-weight:900;line-height:1.05;letter-spacing:-2px;margin:24px 0 0;color:#12101f;white-space:nowrap;}
+@media(max-width:920px){.lp-title{white-space:normal;}}
 .lp-title .grad{background:linear-gradient(110deg,#7c3aed 10%,#9333ea 55%,#6366f1);-webkit-background-clip:text;background-clip:text;color:transparent;}
 .lp-sub{margin-top:22px;font-size:17px;line-height:1.7;color:#5c5672;max-width:520px;}
 .lp-hero-art{position:relative;display:flex;align-items:center;justify-content:center;min-height:360px;}
