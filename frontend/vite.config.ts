@@ -13,4 +13,14 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  // Tailscale 등 원격 PC 접속 — 모든 인터페이스 바인딩 + 같은 출처 프록시(API/DICOMweb).
+  // 프론트는 상대경로(/api, /dicom-web)를 호출하고 Vite 가 서버 안에서 백엔드/Orthanc 로 프록시 → CORS·추가 포트 노출 불필요.
+  server: {
+    host: '0.0.0.0',
+    allowedHosts: true,      // Vite Host 헤더 체크 우회(Tailscale IP·MagicDNS 호스트 허용)
+    proxy: {
+      '/api': 'http://localhost:8000',        // 백엔드 FastAPI
+      '/dicom-web': 'http://localhost:3000',  // Orthanc DICOMweb (OHIF nginx 경유)
+    },
+  },
 })
