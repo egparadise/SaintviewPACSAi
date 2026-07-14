@@ -859,12 +859,13 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, ser
 
 /* ── [C] 메인 검사 그리드 (컬럼 구성형) ───────────── */
 function StudyGrid({
-  items, columns, selectedId, onSelect, onOpen, onContext, variant, treeDisabled,
+  items, columns, selectedId, selectedIds, onSelect, onOpen, onContext, variant, treeDisabled,
 }: {
   items: StudyRow[];
   columns: string[];
   selectedId: number | null;
-  onSelect: (row: StudyRow) => void;
+  selectedIds?: Set<number>;   // 다중선택 집합(Shift 범위/Ctrl 토글). 없으면 단일(selectedId)만.
+  onSelect: (row: StudyRow, e?: React.MouseEvent) => void;
   onOpen: (row: StudyRow) => void;
   onContext: (e: React.MouseEvent, row: StudyRow) => void;
   variant?: "infi";
@@ -916,10 +917,11 @@ function StudyGrid({
         <tbody>
           {items.map((row, i) => (
             <Fragment key={row.id}>
-              <tr className={[row.id === selectedId ? "selected" : "", row.emergency ? "emergency" : ""].join(" ")}
-                  onClick={() => onSelect(row)}
+              <tr className={[(row.id === selectedId || selectedIds?.has(row.id)) ? "selected" : "", row.emergency ? "emergency" : ""].join(" ")}
+                  onClick={(e) => onSelect(row, e)}
                   onDoubleClick={() => onOpen(row)}
-                  onContextMenu={(e) => { e.preventDefault(); onSelect(row); onContext(e, row); }}>
+                  onContextMenu={(e) => { e.preventDefault(); onSelect(row, e); onContext(e, row); }}
+                  style={{ userSelect: "none" }}>
                 {treeDisabled ? (
                   <td onDoubleClick={(e) => e.stopPropagation()} />
                 ) : (
@@ -2269,6 +2271,9 @@ export function Worklist() {
   const [items, setItems] = useState<StudyRow[]>([]);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<StudyDetail | null>(null);
+  // 다중선택 — Shift=범위, Ctrl/Cmd=개별 토글, 일반=단일. selected(포커스)와 별개의 선택 집합.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const selAnchorRef = useRef<number | null>(null);   // Shift 범위 기준점(마지막 단일/토글 클릭)
   const [compareSet, setCompareSet] = useState<CompareItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshSec, setRefreshSec] = useState(10);
@@ -2469,7 +2474,21 @@ export function Worklist() {
         .catch(() => { setItems([]); setTotal(0); });
       return;
     }
-    api.worklist(queryParams).then((r) => { setItems(r.items); setTotal(r.total); }).catch(() => {});
+    api.worklist(queryParams).then((r) => {
+      setItems(r.items);
+      setTotal(r.total);
+      // 다중선택은 현재 목록에 남아있는 항목만 유지(검색/새로고침 후 stale id 제거)
+      setSelectedIds((prev) => {
+        if (!prev.size) return prev;
+        const present = new Set(r.items.map((it) => it.id));
+        const next = new Set([...prev].filter((id) => present.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
+      // Shift 기준점도 목록에서 사라졌으면 초기화 — 다음 클릭이 새 기준점을 잡도록(stale 범위 방지)
+      if (selAnchorRef.current != null && !r.items.some((it) => it.id === selAnchorRef.current)) {
+        selAnchorRef.current = null;
+      }
+    }).catch(() => {});
   }, [queryParams, refreshKey, localMode, searchText]);
 
   // Search Filter 모달리티 분포 — 모달리티 필터가 꺼진 결과에서만 갱신(필터 중 카운트 유지)
@@ -2509,17 +2528,45 @@ export function Worklist() {
     })();
   }, []);
 
-  const onSelect = useCallback((row: StudyRow) => {
+  const onSelect = useCallback((row: StudyRow, e?: React.MouseEvent) => {
     if (localMode) return;              // LOCAL 모드 — 서버 상세/동기 호출 없음(더블클릭=로컬 뷰어)
+    const isCtrl = !!(e && (e.ctrlKey || e.metaKey));
+    const isShift = !!(e && e.shiftKey);
+    const isCtx = !!(e && (e.type === "contextmenu" || e.button === 2));
+    // 다중선택 집합 갱신 — Shift=기준점~현재 범위, Ctrl/Cmd=개별 토글, 우클릭=기존 다중선택 유지, 그 외 단일
+    setSelectedIds((prev) => {
+      if (isShift && selAnchorRef.current != null) {
+        const ids = items.map((r) => r.id);
+        const a = ids.indexOf(selAnchorRef.current), b = ids.indexOf(row.id);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          return new Set(ids.slice(lo, hi + 1));
+        }
+        return new Set([row.id]);
+      }
+      if (isCtrl) {
+        const n = new Set(prev);
+        if (n.has(row.id)) n.delete(row.id); else n.add(row.id);
+        return n;
+      }
+      if (isCtx && prev.has(row.id) && prev.size > 1) return prev;   // 우클릭: 선택 유지(배치 컨텍스트)
+      return new Set([row.id]);
+    });
+    // 범위가 실제로 형성될 때만 기준점 유지 — 그 외(단일/Ctrl/기준점 없음·필터아웃)는 클릭 행을 새 기준점으로(범위 기능 사망 방지)
+    const rangeFormed = isShift && selAnchorRef.current != null && items.some((r) => r.id === selAnchorRef.current);
+    if (!rangeFormed) selAnchorRef.current = row.id;
+    // 포커스(상세/연동)는 항상 클릭한 행
     api.study(row.id).then(setSelected);
     postStudySync(row.id, "worklist");  // Viewer·Reading 연동
     ensureReadingWindow(row.id);        // 설정 시 판독 창 자동 오픈(옆 창)
-  }, [ensureReadingWindow, localMode]);
+  }, [items, ensureReadingWindow, localMode]);
 
   // 다른 창(Viewer/Reading)에서 환자가 바뀌면 워크리스트 선택도 따라간다
   useEffect(() => {
     const off = onStudySync("worklist", (id) => {
       api.study(id).then(setSelected).catch(() => {});
+      setSelectedIds(new Set([id]));   // 외부 창 포커스 변경 → 다중선택 축소(stale 하이라이트 방지)
+      selAnchorRef.current = id;
     });
     return off;
   }, []);
@@ -2561,9 +2608,11 @@ export function Worklist() {
     });
   }, []);
 
-  // 선택 + 3창 동기(Viewer·Reading이 같은 환자를 따라감)
+  // 선택 + 3창 동기(Viewer·Reading이 같은 환자를 따라감). 포커스만 바뀌는 경로 → 다중선택은 그 행으로 축소(stale 하이라이트/카운트 방지)
   const selectAndSync = useCallback((d: StudyDetail) => {
     setSelected(d);
+    setSelectedIds(new Set([d.id]));
+    selAnchorRef.current = d.id;
     postStudySync(d.id, "worklist");
     ensureReadingWindow(d.id);
   }, [ensureReadingWindow]);
@@ -3136,6 +3185,19 @@ export function Worklist() {
       <FilterBar filters={filters} setFilters={setFilters} fields={findFields}
                  onSearch={() => setRefreshKey((k) => k + 1)} />
 
+      {/* 다중선택 상태 바 — Shift(범위)/Ctrl·Cmd(개별) 로 여러 Exam 선택 시 표시 */}
+      {selectedIds.size > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 12px",
+                      background: "var(--accent-subtle, rgba(96,165,250,0.12))", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+          <b>{selectedIds.size}개 Exam 선택됨</b>
+          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(items.map((r) => r.id))); selAnchorRef.current = items[0]?.id ?? null; }}>모두 선택</button>
+          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(selected ? [selected.id] : [])); selAnchorRef.current = selected?.id ?? null; }}>선택 해제</button>
+          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>
+            Shift+클릭 = 범위 · Ctrl/Cmd+클릭 = 개별 토글
+          </span>
+        </div>
+      )}
+
       {/* S1 자연어 검색 미리보기 — 적용 전 사용자 확인(03b: AI 결과는 항상 라벨링) */}
       {(nlBusy || nlPreview) && (
         <div style={{
@@ -3193,7 +3255,7 @@ export function Worklist() {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
             <div style={{ flex: 1, minHeight: 60, display: "flex",
                           ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
-              <StudyGrid items={items} columns={svMode ? SV_COLUMNS : INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null}
+              <StudyGrid items={items} columns={svMode ? SV_COLUMNS : INFI_COLUMNS} variant="infi" selectedId={selected?.id ?? null} selectedIds={selectedIds}
                          treeDisabled={localMode}
                          onSelect={onSelect}
                          onOpen={(r) => { if (localMode) setLocalViewerRow(r); else void doAction("viewdraft", r); }}
@@ -3232,7 +3294,7 @@ export function Worklist() {
                   onDrag={(dx) => setSizes((s) => ({ ...s, railW: clampSz(s.railW + dx, 100, 420) }))} />
         <div style={{ flex: 1, minWidth: 0, display: "flex",
                       ...(searchFlash ? { animation: `${searchFlash % 2 ? "wlSearchFlashA" : "wlSearchFlashB"} 0.5s ease` } : {}) }}>
-          <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null}
+          <StudyGrid items={items} columns={columns} selectedId={selected?.id ?? null} selectedIds={selectedIds}
                      treeDisabled={localMode}
                      onSelect={onSelect}
                      onOpen={(r) => { if (localMode) setLocalViewerRow(r); else void doAction("viewdraft", r); }}
