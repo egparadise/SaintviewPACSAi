@@ -2169,39 +2169,95 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
 }
 
 /* ════ 워크리스트 워크스페이스 루트 ════ */
-/* SAINT VIEW 워크리스트 상단 상태 카운트 바 (그림1) — 전체=서버 총건, 나머지=현재 페이지 집계·클릭 시 상태 필터.
-   (전 검사 정확 집계는 서버 counts 엔드포인트 필요 — 추후) */
-function SvStatusBar({ total, items, onStatus, onRefresh }: {
-  total: number;
+/* SAINT VIEW 워크리스트 상단 상태 카운트 바 (그림1) — 서버 counts 엔드포인트로 전 검사 정확 집계.
+   서버 응답 전/실패 시 현재 페이지 집계로 폴백. 칩 클릭 시 상태 필터. */
+function SvStatusBar({ queryParams, refreshKey, items, onStatus, onRefresh }: {
+  queryParams: Record<string, string>;
+  refreshKey: number;
   items: StudyRow[];
   onStatus: (patch: { status?: string; emergency?: string }) => void;
   onRefresh: () => void;
 }) {
-  const n = (pred: (r: StudyRow) => boolean) => items.filter(pred).length;
-  const chips: { label: string; count: number; color: string; onClick: () => void }[] = [
-    { label: "전체", count: total, color: "var(--accent)", onClick: () => onStatus({ status: "", emergency: "" }) },
-    { label: "응급", count: n((r) => r.emergency), color: "var(--stat-emergency)", onClick: () => onStatus({ emergency: "true" }) },
-    { label: "미판독", count: n((r) => r.read_state === "unread"), color: "#f59e0b", onClick: () => onStatus({ status: "unread" }) },
-    { label: "판독중", count: n((r) => r.read_state === "reading" || r.status === "reading"), color: "#60a5fa", onClick: () => onStatus({ status: "reading" }) },
-    { label: "판독저장", count: n((r) => r.report_status === "draft"), color: "#a78bfa", onClick: () => onStatus({ status: "draft_ready" }) },
-    { label: "승인", count: n((r) => r.status === "finalized"), color: "var(--stat-final)", onClick: () => onStatus({ status: "finalized" }) },
+  const [c, setC] = useState<{ total: number; emergency: number; unread: number; reading: number; draft_ready: number; finalized: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.worklistCounts(queryParams).then((r) => { if (alive) setC(r); }).catch(() => { if (alive) setC(null); });
+    return () => { alive = false; };
+  }, [queryParams, refreshKey]);
+  const pageN = (pred: (r: StudyRow) => boolean) => items.filter(pred).length;
+  const chips: { label: string; n: number | undefined; fb: number; color: string; onClick: () => void }[] = [
+    { label: "전체", n: c?.total, fb: items.length, color: "var(--accent)", onClick: () => onStatus({ status: "", emergency: "" }) },
+    { label: "응급", n: c?.emergency, fb: pageN((r) => r.emergency), color: "var(--stat-emergency)", onClick: () => onStatus({ emergency: "true" }) },
+    { label: "미판독", n: c?.unread, fb: pageN((r) => r.read_state === "unread"), color: "#f59e0b", onClick: () => onStatus({ status: "unread" }) },
+    { label: "판독중", n: c?.reading, fb: pageN((r) => r.read_state === "reading" || r.status === "reading"), color: "#60a5fa", onClick: () => onStatus({ status: "reading" }) },
+    { label: "판독저장", n: c?.draft_ready, fb: pageN((r) => r.status === "draft_ready"), color: "#a78bfa", onClick: () => onStatus({ status: "draft_ready" }) },
+    { label: "승인", n: c?.finalized, fb: pageN((r) => r.status === "finalized"), color: "var(--stat-final)", onClick: () => onStatus({ status: "finalized" }) },
   ];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
                   background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
       <b style={{ fontSize: 14, marginRight: 6 }}>워크리스트</b>
-      {chips.map((c) => (
-        <button key={c.label} onClick={c.onClick} title={`${c.label} 상태로 필터`}
+      {chips.map((ch) => (
+        <button key={ch.label} onClick={ch.onClick} title={`${ch.label} 상태로 필터`}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 16,
                          background: "var(--bg-elevated)", border: "1px solid var(--border)", cursor: "pointer", fontSize: 12 }}>
-          <span style={{ color: c.color, fontWeight: 700 }}>{c.label}</span>
-          <span style={{ fontWeight: 700 }}>{c.count.toLocaleString()}</span>
+          <span style={{ color: ch.color, fontWeight: 700 }}>{ch.label}</span>
+          <span style={{ fontWeight: 700 }}>{(ch.n ?? ch.fb).toLocaleString()}</span>
         </button>
       ))}
-      <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
-        전체=서버 총건 · 나머지=현재 페이지 집계 (클릭=상태 필터)
-      </span>
-      <button title="새로고침" onClick={onRefresh} style={{ padding: "3px 10px" }}>⟳</button>
+      {!c && (
+        <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>현재 페이지 집계 (서버 집계 대기…)</span>
+      )}
+      <button title="새로고침" onClick={onRefresh} style={{ padding: "3px 10px", marginLeft: c ? "auto" : 8 }}>⟳</button>
+    </div>
+  );
+}
+
+/* SAINT VIEW 상단 탭 스트립 (그림1) — 로고 + General/Performance/Update upload */
+function SvTabStrip({ perf, onGeneral, onPerf, onUpload }: {
+  perf: boolean;
+  onGeneral: () => void;
+  onPerf: () => void;
+  onUpload: () => void;
+}) {
+  const tab = (label: string, active: boolean, onClick: () => void) => (
+    <button onClick={onClick}
+            style={{ padding: "9px 16px", fontSize: 13, fontWeight: 600, border: "none", background: "transparent",
+                     color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                     borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent", cursor: "pointer" }}>
+      {label}
+    </button>
+  );
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 12px",
+                  background: "var(--bg-canvas)", borderBottom: "1px solid var(--border)" }}>
+      <b style={{ fontSize: 15, letterSpacing: 1.5, color: "var(--accent)", marginRight: 16 }}>SAINT VIEW</b>
+      {tab("General", !perf, onGeneral)}
+      {tab("Performance", perf, onPerf)}
+      {tab("Update upload", false, onUpload)}
+    </div>
+  );
+}
+
+/* SAINT VIEW Performance 패널 — 현재 검색 결과의 모달리티 분포(막대) */
+function SvPerfCard({ mods }: { mods: Record<string, number> }) {
+  const entries = Object.entries(mods).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...entries.map(([, n]) => n));
+  return (
+    <div style={{ padding: "10px 14px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
+      <b style={{ fontSize: 13 }}>Performance — 모달리티 분포 (현재 검색 범위)</b>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8, maxWidth: 560 }}>
+        {entries.length === 0 && <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>데이터 없음</span>}
+        {entries.map(([m, nn]) => (
+          <div key={m} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+            <span style={{ width: 44, color: "var(--text-secondary)" }}>{m || "-"}</span>
+            <div style={{ flex: 1, background: "var(--bg-elevated)", borderRadius: 3, height: 14, overflow: "hidden" }}>
+              <div style={{ width: `${(nn / max) * 100}%`, height: "100%", background: "var(--accent)" }} />
+            </div>
+            <span style={{ width: 64, textAlign: "right", fontWeight: 700 }}>{nn.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2847,6 +2903,7 @@ export function Worklist() {
   const [infiMode, setInfiMode] = useState(false);
   // SAINT VIEW 모드 — client_viewer=sv 면 SAINT VIEW 워크리스트 스킨(상태 카운트 바 + SV 컬럼, infi 7구역 레이아웃 재사용)
   const [svMode, setSvMode] = useState(false);
+  const [svPerf, setSvPerf] = useState(false);   // SAINT VIEW 상단 탭 — General/Performance 전환
   // OHIF 표시/동작 — 기본 숨김, 설정>뷰어>OHIF 에서 허용 (viewer.prefs.ohif_enabled)
   const [ohifOn, setOhifOn] = useState(false);
   const ohifOnRef = useRef(false);
@@ -3057,11 +3114,17 @@ export function Worklist() {
           </div>
         </div>
       )}
-      {/* SAINT VIEW 상단 상태 카운트 바 (그림1) */}
+      {/* SAINT VIEW 상단 탭(General/Performance/Update upload) + 상태 카운트 바 (그림1) */}
       {svMode && (
-        <SvStatusBar total={total} items={items}
-                     onStatus={(p) => { setFilters((f) => ({ ...f, ...p })); setRefreshKey((k) => k + 1); }}
-                     onRefresh={() => setRefreshKey((k) => k + 1)} />
+        <>
+          <SvTabStrip perf={svPerf} onGeneral={() => setSvPerf(false)} onPerf={() => setSvPerf(true)}
+                      onUpload={() => setImportOpen(true)} />
+          {svPerf
+            ? <SvPerfCard mods={modCounts} />
+            : <SvStatusBar queryParams={queryParams} refreshKey={refreshKey} items={items}
+                           onStatus={(p) => { setFilters((f) => ({ ...f, ...p })); setRefreshKey((k) => k + 1); }}
+                           onRefresh={() => setRefreshKey((k) => k + 1)} />}
+        </>
       )}
       <ActionToolbar selected={selected} onAction={(a) => doAction(a)}
                      searchText={searchText} setSearchText={setSearchText}

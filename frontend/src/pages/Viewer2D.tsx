@@ -259,14 +259,31 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-/* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional).
-   항목의 run 은 Viewer2D 의 기존 툴 함수를 그대로 호출(아이콘 기능 = TY 뷰어와 동일). */
-function SaintMenuBar({ menus }: { menus: { title: string; items: { id: string; label: string; run: () => void }[] }[] }) {
+/* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional)
+   + 좌측 환자 ◀▶ 이동 + 활성 마우스모드/툴 칩. 항목 run 은 기존 툴 함수 그대로 호출(기능=TY 뷰어 동일). */
+function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled }: {
+  menus: { title: string; items: { id: string; label: string; run: () => void }[] }[];
+  activeId: string;                 // 현재 활성 마우스모드/툴 id (드롭다운·칩 하이라이트)
+  onNav: (dir: 1 | -1) => void;     // 환자(검사) ◀▶ 이동
+  navPrevDisabled: boolean;
+  navNextDisabled: boolean;
+}) {
   const [open, setOpen] = useState<string | null>(null);
+  const activeLabel = menus.flatMap((m) => m.items).find((it) => it.id === activeId)?.label ?? activeId;
   return (
-    <div style={{ display: "flex", gap: 2, padding: "2px 8px", background: "var(--bg-panel)",
+    <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "2px 8px", background: "var(--bg-panel)",
                   borderBottom: "1px solid var(--border)", position: "relative", zIndex: 30 }}
          onMouseLeave={() => setOpen(null)}>
+      {/* 환자 ◀▶ 이동 */}
+      <button title="◀ 이전 검사" disabled={navPrevDisabled} onClick={() => onNav(-1)}
+              style={{ padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navPrevDisabled ? 0.35 : 1 }}>◀</button>
+      <button title="▶ 다음 검사" disabled={navNextDisabled} onClick={() => onNav(1)}
+              style={{ padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navNextDisabled ? 0.35 : 1 }}>▶</button>
+      {/* 활성 마우스모드/툴 칩 */}
+      <span title="현재 활성 도구" style={{ margin: "0 8px 0 4px", padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                    borderRadius: 12, background: "var(--accent)", color: "#fff", whiteSpace: "nowrap" }}>
+        ● {activeLabel}
+      </span>
       {menus.map((m) => (
         <div key={m.title} style={{ position: "relative" }}
              onMouseEnter={() => setOpen((o) => (o ? m.title : o))}>
@@ -280,16 +297,20 @@ function SaintMenuBar({ menus }: { menus: { title: string; items: { id: string; 
             <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 350, minWidth: 190,
                           background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
                           boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
-              {m.items.map((it) => (
-                <button key={it.id} onClick={() => { it.run(); setOpen(null); }}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 12px",
-                                 fontSize: 12, background: "transparent", border: "none", borderRadius: 3,
-                                 color: "var(--text-primary)", cursor: "pointer", whiteSpace: "nowrap" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                  {it.label}
-                </button>
-              ))}
+              {m.items.map((it) => {
+                const on = it.id === activeId;
+                return (
+                  <button key={it.id} onClick={() => { it.run(); setOpen(null); }}
+                          style={{ display: "flex", justifyContent: "space-between", gap: 10, width: "100%", textAlign: "left",
+                                   padding: "6px 12px", fontSize: 12, borderRadius: 3, border: "none", cursor: "pointer",
+                                   whiteSpace: "nowrap", background: on ? "var(--accent)" : "transparent",
+                                   color: on ? "#fff" : "var(--text-primary)", fontWeight: on ? 700 : 400 }}
+                          onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--bg-panel)"; }}
+                          onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                    <span>{it.label}</span>{on && <span>●</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -3044,7 +3065,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
       </div>
 
-      {skin === "saint" && <SaintMenuBar menus={saintMenus} />}
+      {skin === "saint" && (
+        <SaintMenuBar menus={saintMenus} activeId={tool || mouseMode}
+                      onNav={navPatient}
+                      navPrevDisabled={navTarget(-1) === undefined}
+                      navNextDisabled={navTarget(1) === undefined} />
+      )}
       {paletteHoriz && palette}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}

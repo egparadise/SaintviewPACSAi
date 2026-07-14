@@ -144,11 +144,9 @@ def register_study(
     return study
 
 
-def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
-    q = (
-        select(Study, Patient)
-        .join(Patient, Study.patient_id == Patient.id)
-    )
+def _apply_worklist_filters(q, f: WorklistFilter, *, with_status: bool = True, with_emergency: bool = True):
+    """워크리스트 필터를 쿼리에 적용 — search_worklist(목록)와 worklist_counts(상태바)가 공유해 드리프트 방지.
+    counts 는 상태/응급 칩을 채워야 하므로 with_status/with_emergency=False 로 그 두 필터를 제외한다."""
     if f.patient_query:
         like = f"%{f.patient_query}%"
         q = q.where(or_(Patient.patient_key.like(like), Patient.name_masked.like(like)))
@@ -164,7 +162,7 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         q = q.where(Study.modality == f.modality)
     if f.body_part:
         q = q.where(Study.body_part.like(f"%{f.body_part}%"))
-    if f.status:
+    if with_status and f.status:
         if f.status == "unread":
             # S1 '미판독' — 확정 전 전체(received/draft_ready/reading/suspended)
             q = q.where(Study.status != "finalized")
@@ -174,7 +172,7 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         q = q.where(Study.study_date >= f.date_from)
     if f.date_to:
         q = q.where(Study.study_date <= f.date_to)
-    if f.emergency_only:
+    if with_emergency and f.emergency_only:
         q = q.where(Study.emergency.is_(True))
     if f.key_only:
         # key_images JSON 이 비어있지 않은 검사 — PG/SQLite 공통(텍스트 캐스트 비교)
@@ -187,6 +185,42 @@ def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
         # F-2: SR 텍스트 검색 — 최신 리포트 narrative 기준 (단순 LIKE, pg에선 추후 FTS)
         sub = select(Report.study_id).where(Report.narrative_text.like(f"%{f.finding_query}%"))
         q = q.where(Study.id.in_(sub))
+    return q
+
+
+def worklist_counts(db: Session, f: WorklistFilter) -> dict[str, int]:
+    """SAINT VIEW 상태 카운트 바용 — 목록과 동일 스코프/필터(상태·응급 제외)에서 상태별 집계.
+    단일 집계 쿼리(조건부 SUM)로 전 검사 정확 카운트(페이지 무관)."""
+    from sqlalchemy import case
+
+    base = (
+        select(Study.status.label("status"), Study.emergency.label("emergency"))
+        .join(Patient, Study.patient_id == Patient.id)
+    )
+    base = _apply_worklist_filters(base, f, with_status=False, with_emergency=False)
+    sub = base.subquery()
+    total, emergency, unread, reading, draft, finalized = db.execute(
+        select(
+            func.count(),
+            func.coalesce(func.sum(case((sub.c.emergency.is_(True), 1), else_=0)), 0),
+            func.coalesce(func.sum(case((sub.c.status != "finalized", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((sub.c.status == "reading", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((sub.c.status == "draft_ready", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((sub.c.status == "finalized", 1), else_=0)), 0),
+        ).select_from(sub)
+    ).one()
+    return {
+        "total": int(total or 0), "emergency": int(emergency or 0), "unread": int(unread or 0),
+        "reading": int(reading or 0), "draft_ready": int(draft or 0), "finalized": int(finalized or 0),
+    }
+
+
+def search_worklist(db: Session, f: WorklistFilter) -> tuple[list[dict], int]:
+    q = (
+        select(Study, Patient)
+        .join(Patient, Study.patient_id == Patient.id)
+    )
+    q = _apply_worklist_filters(q, f)
 
     total = db.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
     # Emergency 최우선 → 검사일 역순 (F-15 / 설계 §6.2)

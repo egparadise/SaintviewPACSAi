@@ -232,6 +232,13 @@ export const api = {
     const p = { ...params, ...(hid ? { hospital_id: hid } : {}) };
     return req<{ items: StudyRow[]; total: number }>(`/api/worklist?${new URLSearchParams(p)}`);
   },
+  // SAINT VIEW 상태 카운트 바 — 목록과 동일 스코프/필터(상태·응급 제외)에서 상태별 전 검사 정확 집계
+  worklistCounts: (params: Record<string, string>) => {
+    const hid = localStorage.getItem("sv_active_hospital");
+    const p = { ...params, ...(hid ? { hospital_id: hid } : {}) };
+    return req<{ total: number; emergency: number; unread: number; reading: number; draft_ready: number; finalized: number }>(
+      `/api/worklist/counts?${new URLSearchParams(p)}`);
+  },
   // 병원 선택 → 자원관리 → Client 선택 흐름
   myHospitals: () => req<MyHospitals>("/api/my/hospitals"),
   hospitalResources: (hid: number) => req<HospitalResources>(`/api/hospitals/${hid}/resources`),

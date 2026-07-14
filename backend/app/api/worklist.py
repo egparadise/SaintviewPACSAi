@@ -12,6 +12,7 @@ from app.services.study_service import (
     queue_ai_job,
     search_worklist,
     study_detail,
+    worklist_counts,
 )
 
 router = APIRouter(prefix="/api", tags=["worklist"])
@@ -60,6 +61,35 @@ def worklist(
         ),
     )
     return {"items": items, "total": total}
+
+
+@router.get("/worklist/counts")
+def worklist_counts_ep(
+    q: str = "",
+    pid: str = "",
+    pname: str = "",
+    sex: str = "",
+    desc: str = "",
+    modality: str = "",
+    body_part: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    finding: str = "",
+    key: bool = False,
+    hospital_id: int = Query(0, description="선택 병원 스코프(0=자동)"),
+    db: Session = Depends(get_db),
+    user: dict = Depends(current_user),
+):
+    """SAINT VIEW 상태 카운트 바 — 목록과 동일 스코프/필터(상태·응급 제외)에서 상태별 전 검사 정확 집계."""
+    return worklist_counts(
+        db,
+        WorklistFilter(
+            patient_query=q, patient_id=pid, patient_name=pname, sex=sex, study_desc=desc,
+            modality=modality, body_part=body_part, date_from=date_from, date_to=date_to,
+            finding_query=finding, key_only=key,
+            hospital_id=_scoped_hospital(db, user, hospital_id),
+        ),
+    )
 
 
 def _scoped_hospital(db: Session, user: dict, selected: int = 0) -> int | None:
