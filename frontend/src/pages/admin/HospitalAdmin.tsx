@@ -61,17 +61,33 @@ export function AccountsTab({ hid }: { hid: number }) {
   const [name, setName] = useState("");
   const [loc, setLoc] = useState("");
   const [role, setRole] = useState("staff");
+  const [pw, setPw] = useState("1111");            // 발급 시 초기 비번(기본 1111)
+  const [reveal, setReveal] = useState<Set<number>>(new Set());  // 비번 표시 중인 행
   const [msg, setMsg] = useState("");
   const load = () => api.clients(hid).then((r) => setItems(r.items)).catch((e) => setMsg(errMsg(e)));
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [hid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = async () => {
-    try { await api.createClient(hid, { name: name.trim(), location: loc.trim(), role }); setName(""); setLoc(""); setMsg("추가됨"); load(); }
+    try { await api.createClient(hid, { name: name.trim(), location: loc.trim(), role, password: pw.trim() || "1111" }); setName(""); setLoc(""); setPw("1111"); setMsg(`발급됨 — 로그인 ID는 좌석 코드, 초기 비번 "${pw.trim() || "1111"}"`); load(); }
     catch (e) { setMsg(errMsg(e)); }
   };
   const patch = async (c: ClientRow, body: { enabled?: boolean; role?: string }) => {
     try { await api.updateClient(hid, c.id, { name: c.name, location: c.location, enabled: c.enabled, role: c.role, ...body }); load(); }
     catch (e) { setMsg(errMsg(e)); }
+  };
+  const toggleReveal = (id: number) => setReveal((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const editPw = async (c: ClientRow) => {
+    const np = prompt(`'${c.name}' 새 비밀번호 (admin 지정)`, c.password || "");
+    if (np == null || !np.trim()) return;
+    try { await api.setClientPassword(hid, c.id, np.trim()); setMsg(`'${c.name}' 비번 변경됨`); load(); } catch (e) { setMsg(errMsg(e)); }
+  };
+  const resetPw = async (c: ClientRow) => {
+    if (!confirm(`'${c.name}' 비밀번호를 초기값 "1111" 로 리셋할까요? (다음 로그인 시 강제 변경)`)) return;
+    try { await api.resetClientPassword(hid, c.id); setMsg(`'${c.name}' → 1111 리셋됨`); load(); } catch (e) { setMsg(errMsg(e)); }
+  };
+  const resetAll = async () => {
+    if (!confirm(`이 병원의 모든 발급 계정 비밀번호를 "1111" 로 일괄 리셋할까요? (전부 다음 로그인 시 강제 변경)`)) return;
+    try { const r = await api.resetAllClientPasswords(hid); setMsg(`${r.count}개 계정 → 1111 일괄 리셋됨`); load(); } catch (e) { setMsg(errMsg(e)); }
   };
 
   return (
@@ -84,12 +100,14 @@ export function AccountsTab({ hid }: { hid: number }) {
         <select style={inp} value={role} onChange={(e) => setRole(e.target.value)}>
           {CLIENT_ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
+        <input style={{ ...inp, width: 110 }} placeholder="초기 비번(1111)" value={pw} onChange={(e) => setPw(e.target.value)} title="발급 시 초기 비밀번호 — 최초 로그인 시 1회 변경 강제" />
         <button onClick={add} disabled={!name.trim()}>＋ 발급</button>
+        <button onClick={resetAll} style={{ color: "var(--stat-emergency,#f87171)" }} title="이 병원 모든 발급 계정 비번을 1111 로 일괄 리셋">↺ 모든 비번 리셋</button>
       </div>
       {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th>이름</th><th>코드</th><th>등급</th><th>위치</th><th>접속</th><th>마지막</th><th>사용</th><th></th></tr></thead>
+        <thead><tr><th>이름</th><th>코드(로그인 ID)</th><th>등급</th><th>비밀번호</th><th>위치</th><th>접속</th><th>마지막</th><th>사용</th><th></th></tr></thead>
         <tbody>
           {items.map((c) => (
             <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.5 }}>
@@ -98,6 +116,17 @@ export function AccountsTab({ hid }: { hid: number }) {
                 <select style={{ ...inp, padding: "3px 6px" }} value={c.role ?? "staff"} onChange={(e) => patch(c, { role: e.target.value })}>
                   {CLIENT_ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
                 </select>
+              </td>
+              <td>
+                {c.has_login ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                    <code style={{ fontSize: 12 }}>{reveal.has(c.id) ? (c.password || "—") : "••••"}</code>
+                    <span onClick={() => toggleReveal(c.id)} style={{ cursor: "pointer" }} title="비번 표시/숨김">👁</span>
+                    <span onClick={() => editPw(c)} style={{ cursor: "pointer" }} title="비번 수정(지정)">✏️</span>
+                    <span onClick={() => resetPw(c)} style={{ cursor: "pointer" }} title="1111 로 리셋">↺</span>
+                    {c.must_change && <span title="최초 로그인 시 변경 필요" style={{ color: "var(--stat-emergency,#f87171)", fontSize: 10 }}>변경필요</span>}
+                  </span>
+                ) : <span style={{ color: "var(--text-secondary)" }}>—</span>}
               </td>
               <td>{c.location || "—"}</td>
               <td>
@@ -109,7 +138,7 @@ export function AccountsTab({ hid }: { hid: number }) {
               <td><button onClick={async () => { if (confirm(`계정 '${c.name}' 삭제?`)) { try { await api.deleteClient(hid, c.id); load(); } catch (e) { setMsg(errMsg(e)); } } }}>삭제</button></td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>발급된 계정이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>발급된 계정이 없습니다.</td></tr>}
         </tbody>
       </table>
       </div>

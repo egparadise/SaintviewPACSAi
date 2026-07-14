@@ -28,6 +28,17 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def set_password(account: "Account", plain: str, must_change: bool = False) -> None:
+    """계정 비번 설정 — argon2 해시 + 복원용 평문(admin 뷰/리셋) + 변경강제 플래그. 커밋은 호출부.
+
+    ⚠ pw_plain 은 admin 조회/리셋 요구를 위한 복원 저장(발급 좌석 계정). 인증은 해시로만.
+    """
+    account.password_hash = hash_password(plain)
+    account.algo = "argon2"
+    account.pw_plain = (plain or "")[:128]
+    account.must_change = must_change
+
+
 def create_token(account: Account, hospital_id: int | None = None, sid: str | None = None) -> str:
     settings = get_settings()
     payload = {

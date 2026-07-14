@@ -206,6 +206,12 @@ class Account(Base):
     license_no: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ── 비밀번호 라이프사이클(발급 계정) ──
+    must_change: Mapped[bool] = mapped_column(Boolean, default=False)   # 최초 로그인 시 비번 1회 강제 변경
+    # ⚠ 보안 절충: admin 의 비번 조회/리셋을 위해 현재 비번을 복원 가능한 형태로 별도 저장(해시와 병행).
+    #    발급(좌석) 계정 운영 요구로 명시 채택 — 인증 자체는 여전히 password_hash(argon2)로만 수행.
+    pw_plain: Mapped[str] = mapped_column(String(128), default="")
+    client_id: Mapped[int | None] = mapped_column(ForeignKey("clients.id"), nullable=True, index=True)  # 발급 좌석 연동
 
 
 class Phrase(Base):

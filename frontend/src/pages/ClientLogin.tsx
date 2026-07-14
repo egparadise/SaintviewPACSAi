@@ -18,18 +18,38 @@ export function ClientLogin({ onLogin, onBack }: {
   const [remember, setRemember] = useState(remembered);
   const [error, setError] = useState("");
   const [dup, setDup] = useState(false);   // 중복 로그인 인계 프롬프트(Yes/No)
+  const [mustChange, setMustChange] = useState<LoginResp | null>(null);  // 발급 계정 최초 로그인 강제변경
+  const [np1, setNp1] = useState("");      // 새 비번
+  const [np2, setNp2] = useState("");      // 새 비번 확인(2회)
+  const [cerr, setCerr] = useState("");
 
-  const persistRemember = () => {
+  const persistRemember = (pw: string) => {
     localStorage.setItem("sv_remember", remember ? "1" : "0");
     if (remember) {
       localStorage.setItem("sv_client_hosp", hospitalId.trim());
       localStorage.setItem("sv_client_user", username.trim());
-      localStorage.setItem("sv_client_pw", password);
+      localStorage.setItem("sv_client_pw", pw);
     } else {
       ["sv_client_hosp", "sv_client_user", "sv_client_pw"].forEach((k) => localStorage.removeItem(k));
     }
   };
-  const finish = (r: LoginResp) => { setToken(r.token, remember); persistRemember(); onLogin(r); };
+  const finish = (r: LoginResp) => {
+    // 발급 계정 최초 로그인 → 토큰만 세팅하고 비번 1회 강제 변경(2회 확인) 후 진입
+    if (r.must_change) { setToken(r.token, remember); setMustChange(r); setNp1(""); setNp2(""); setCerr(""); return; }
+    setToken(r.token, remember); persistRemember(password); onLogin(r);
+  };
+  // 최초 로그인 강제 변경 실행 — 현재 비번(로그인한 값) + 새 비번(2회 일치, 8자↑)
+  const doChange = async () => {
+    setCerr("");
+    if (np1.length < 8) return setCerr("새 비밀번호는 8자 이상이어야 합니다");
+    if (np1 !== np2) return setCerr("새 비밀번호 확인이 일치하지 않습니다");
+    try {
+      await api.changePassword(password, np1);
+      persistRemember(np1);   // 기억 중이면 바뀐 비번으로 갱신
+      const r = mustChange!; setMustChange(null); onLogin(r);
+    } catch (err) { setCerr(err instanceof Error ? err.message : "변경 실패"); }
+  };
+  const cancelChange = () => { setToken(null); setMustChange(null); setError("비밀번호 변경을 완료해야 로그인됩니다"); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,6 +115,29 @@ export function ClientLogin({ onLogin, onBack }: {
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setDup(false)} style={{ padding: "6px 18px" }}>No</button>
               <button type="button" className="primary" onClick={takeover} style={{ padding: "6px 18px" }}>Yes</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mustChange && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1100 }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
+                        padding: 26, width: 380, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>비밀번호 변경 (최초 로그인)</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text-secondary)" }}>
+              발급받은 초기 비밀번호는 최초 1회 반드시 변경해야 합니다. 새 비밀번호를 두 번 입력하세요(8자 이상).
+            </div>
+            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>새 비밀번호
+              <input style={inp} type="password" value={np1} autoFocus onChange={(e) => setNp1(e.target.value)} />
+            </label>
+            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>새 비밀번호 확인
+              <input style={inp} type="password" value={np2} onChange={(e) => setNp2(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === "Enter") void doChange(); }} />
+            </label>
+            {cerr && <div style={{ color: "var(--stat-emergency,#f87171)", fontSize: 12 }}>{cerr}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={cancelChange} style={{ padding: "6px 16px" }}>취소</button>
+              <button type="button" className="primary" onClick={doChange} style={{ padding: "6px 16px" }}>변경 후 로그인</button>
             </div>
           </div>
         </div>

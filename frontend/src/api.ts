@@ -252,12 +252,22 @@ export const api = {
   myHospitals: () => req<MyHospitals>("/api/my/hospitals"),
   hospitalResources: (hid: number) => req<HospitalResources>(`/api/hospitals/${hid}/resources`),
   clients: (hid: number) => req<{ items: ClientRow[] }>(`/api/hospitals/${hid}/clients`),
-  createClient: (hid: number, body: { name: string; location?: string; enabled?: boolean; role?: string }) =>
+  createClient: (hid: number, body: { name: string; location?: string; enabled?: boolean; role?: string; password?: string }) =>
     req<ClientRow>(`/api/hospitals/${hid}/clients`, { method: "POST", body: JSON.stringify(body) }),
   updateClient: (hid: number, cid: number, body: { name: string; location?: string; enabled?: boolean; role?: string }) =>
     req<ClientRow>(`/api/hospitals/${hid}/clients/${cid}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteClient: (hid: number, cid: number) =>
     req<{ ok: boolean }>(`/api/hospitals/${hid}/clients/${cid}`, { method: "DELETE" }),
+  // admin 비번 관리 — 수정(지정)/리셋(→1111)/전체리셋(→1111)
+  setClientPassword: (hid: number, cid: number, password: string) =>
+    req<{ ok: boolean; password: string }>(`/api/hospitals/${hid}/clients/${cid}/password`, { method: "PUT", body: JSON.stringify({ password }) }),
+  resetClientPassword: (hid: number, cid: number) =>
+    req<{ ok: boolean; password: string }>(`/api/hospitals/${hid}/clients/${cid}/reset`, { method: "PUT" }),
+  resetAllClientPasswords: (hid: number) =>
+    req<{ ok: boolean; count: number; password: string }>(`/api/hospitals/${hid}/clients/reset-all`, { method: "POST" }),
+  // 비밀번호 변경(최초 로그인 강제변경·자율변경 공용) — 현재 비번 재확인 + 새 비번
+  changePassword: (current_password: string, new_password: string) =>
+    req<{ ok: boolean }>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password, new_password }) }),
   enterClient: (hid: number, cid: number) =>
     req<{ ok: boolean; hospital_id: number; client_id: number; client_name: string }>(
       `/api/hospitals/${hid}/clients/${cid}/enter`, { method: "POST" }),
@@ -804,6 +814,7 @@ export interface StorageOverview {
 export interface LoginResp {
   token: string; username: string; role: string;
   hospital_id: number | null; hospital_name?: string;
+  must_change?: boolean;   // 발급 계정 최초 로그인 → 비번 1회 강제 변경
 }
 
 // ── 병원 선택 / 자원관리 / Client ──
@@ -820,6 +831,8 @@ export interface ClientRow {
   enabled: boolean; online: boolean; last_seen: string | null; last_user: string;
   /** 계정 등급 — doctor|radiologist|technologist|staff (레인 B 확장, 미구현 서버는 미포함) */
   role?: string; role_label?: string;
+  /** 발급 계정 로그인 — login_id(=코드)/복원 비번(admin)/최초강제변경/연동계정 유무 */
+  login_id?: string; password?: string; must_change?: boolean; has_login?: boolean;
 }
 
 // ── 병원별 관리 계약 타입 (레인 F/B 공통) ──

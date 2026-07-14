@@ -99,7 +99,9 @@ def _client_login_ok(db: Session, account, hospital) -> dict:
     db.commit()
     return {"token": create_token(account, hospital_id=hospital.id, sid=sid),
             "username": account.username, "role": account.role,
-            "hospital_id": hospital.id, "hospital_name": hospital.name}
+            "hospital_id": hospital.id, "hospital_name": hospital.name,
+            # 발급 계정 최초 로그인 → 프론트가 비번 1회 강제 변경(2회 확인) 유도
+            "must_change": bool(getattr(account, "must_change", False))}
 
 
 @router.post("/client-login")
@@ -200,14 +202,15 @@ def change_password(
     from sqlalchemy import select
 
     from app.models import Account, AuditLog
-    from app.services.auth_service import hash_password, verify_password
+    from app.services.auth_service import set_password, verify_password
 
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="새 비밀번호는 8자 이상이어야 합니다")
     account = db.execute(select(Account).where(Account.username == user["sub"])).scalar_one_or_none()
     if not account or not verify_password(body.current_password, account.password_hash):
         raise HTTPException(status_code=401, detail="현재 비밀번호가 올바르지 않습니다")
-    account.password_hash = hash_password(body.new_password)
+    # 해시 갱신 + 복원용 평문 동기화 + 강제변경 플래그 해제(최초 로그인 강제변경 완료 처리)
+    set_password(account, body.new_password, must_change=False)
     db.add(AuditLog(account_id=account.id, action="password_change", target_type="account",
                     target_id=account.username))
     db.commit()

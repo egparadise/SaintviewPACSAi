@@ -44,6 +44,13 @@ def _require_access(user: dict, hospital_id: int) -> None:
     raise HTTPException(status_code=403, detail="이 병원에 접근할 권한이 없습니다")
 
 
+def _require_admin(user: dict, hospital_id: int) -> None:
+    """관리자(시스템 or 병원 admin) 전용 — 좌석 비번 조회/변경/리셋. 일반 좌석 사용자 차단."""
+    _require_access(user, hospital_id)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="비밀번호 관리는 관리자만 가능합니다")
+
+
 def _accessible_hospitals(db: Session, user: dict) -> list[Hospital]:
     q = select(Hospital).where(Hospital.enabled.is_(True)).order_by(Hospital.name)
     if _is_system_admin(user):
@@ -159,6 +166,11 @@ class ClientBody(BaseModel):
     location: str = ""
     enabled: bool = True
     role: str = ""  # 계정 등급 — doctor|radiologist|technologist|staff ("" = 변경 없음/기본 staff)
+    password: str = ""  # 발급 시 초기 비번(빈값=기본 "1111"). 로그인 ID = 좌석 코드.
+
+
+class PasswordBody(BaseModel):
+    password: str  # admin 이 지정하는 새 비번(수정)
 
 
 # Client(좌석)별 계정 등급 — Client 테이블에 컬럼이 없어(스키마 마이그레이션 금지)
@@ -181,21 +193,34 @@ def _validate_client_role(role: str) -> None:
                             detail=f"알 수 없는 등급: {role} ({'|'.join(CLIENT_ROLES)})")
 
 
-def _client_dict(c: Client, role: str = "staff") -> dict:
+def _client_dict(c: Client, role: str = "staff", acct=None, include_pw: bool = False) -> dict:
     from app.services.permissions import ROLES
 
     return {"id": c.id, "hospital_id": c.hospital_id, "name": c.name, "code": c.code,
             "location": c.location, "enabled": c.enabled, "online": _is_online(c.last_seen),
             "last_seen": c.last_seen.isoformat() if c.last_seen else None, "last_user": c.last_user,
-            "role": role, "role_label": ROLES.get(role, role)}
+            "role": role, "role_label": ROLES.get(role, role),
+            # 로그인 ID = 좌석 코드. password(복원 평문)는 관리자에게만 노출.
+            "login_id": c.code,
+            "password": (acct.pw_plain if (acct and include_pw) else ""),
+            "must_change": bool(acct.must_change) if acct else False,
+            "has_login": acct is not None}
 
 
 @router.get("/hospitals/{hid}/clients")
 def list_clients(hid: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     _require_access(user, hid)
+    from app.models import Account
+
     roles = _client_roles(db, hid)
     rows = db.execute(select(Client).where(Client.hospital_id == hid).order_by(Client.id)).scalars().all()
-    return {"items": [_client_dict(c, roles.get(str(c.id), "staff")) for c in rows]}
+    ids = [c.id for c in rows]
+    accts = {}
+    if ids:
+        accts = {a.client_id: a for a in
+                 db.execute(select(Account).where(Account.client_id.in_(ids))).scalars()}
+    is_admin = user.get("role") == "admin"   # 비번 노출은 관리자에게만
+    return {"items": [_client_dict(c, roles.get(str(c.id), "staff"), accts.get(c.id), is_admin) for c in rows]}
 
 
 @router.post("/hospitals/{hid}/clients")
@@ -220,11 +245,19 @@ def create_client(hid: int, body: ClientBody, db: Session = Depends(get_db),
         roles = _client_roles(db, hid)
         roles[str(c.id)] = body.role
         set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
+    # 로그인 계정 자동 발급 — username = 좌석 코드, 초기 비번(기본 "1111"), 최초 로그인 강제변경.
+    from app.models import Account
+    from app.services.auth_service import set_password
+
+    acct = Account(username=c.code, role=role, hospital_id=hid,
+                   display_name=c.name, enabled=c.enabled, client_id=c.id)
+    set_password(acct, body.password.strip() or "1111", must_change=True)
+    db.add(acct)
     db.add(AuditLog(account_id=user.get("uid"), action="client_create",
                     target_type="client", target_id=str(c.id),
-                    detail={"hospital": hid, "role": role}))
+                    detail={"hospital": hid, "role": role, "login_id": c.code}))
     db.commit()
-    return _client_dict(c, role)
+    return _client_dict(c, role, acct)
 
 
 @router.put("/hospitals/{hid}/clients/{cid}")
@@ -244,8 +277,17 @@ def update_client(hid: int, cid: int, body: ClientBody, db: Session = Depends(ge
 
         roles[str(c.id)] = body.role
         set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
+    # 연동 로그인 계정 동기화(등급/사용/이름). 비번은 별도 엔드포인트에서만 변경.
+    from app.models import Account
+
+    acct = db.execute(select(Account).where(Account.client_id == c.id)).scalar_one_or_none()
+    if acct:
+        if body.role:
+            acct.role = body.role
+        acct.enabled = c.enabled
+        acct.display_name = c.name
     db.commit()
-    return _client_dict(c, roles.get(str(c.id), "staff"))
+    return _client_dict(c, roles.get(str(c.id), "staff"), acct)
 
 
 @router.delete("/hospitals/{hid}/clients/{cid}")
@@ -260,9 +302,83 @@ def delete_client(hid: int, cid: int, db: Session = Depends(get_db),
         from app.services.settings_service import set_hospital_setting
 
         set_hospital_setting(db, hid, _CLIENT_ROLES_KEY, roles)
+    # 연동 로그인 계정도 함께 삭제(고아 계정 방지). 감사로그 FK 는 NULL 처리 후 삭제.
+    from sqlalchemy import update
+
+    from app.models import Account
+
+    acct = db.execute(select(Account).where(Account.client_id == cid)).scalar_one_or_none()
+    if acct:
+        db.execute(update(AuditLog).where(AuditLog.account_id == acct.id).values(account_id=None))
+        db.delete(acct)
     db.delete(c)
     db.commit()
     return {"ok": True}
+
+
+def _seat_account(db: Session, hid: int, cid: int):
+    """좌석의 연동 로그인 계정 조회(admin 비번 관리용). 없으면 404."""
+    from app.models import Account
+
+    c = db.get(Client, cid)
+    if not c or c.hospital_id != hid:
+        raise HTTPException(status_code=404, detail="Client를 찾을 수 없습니다")
+    acct = db.execute(select(Account).where(Account.client_id == cid)).scalar_one_or_none()
+    if not acct:
+        raise HTTPException(status_code=404, detail="연동 로그인 계정이 없습니다")
+    return c, acct
+
+
+@router.put("/hospitals/{hid}/clients/{cid}/password")
+def set_client_password(hid: int, cid: int, body: PasswordBody, db: Session = Depends(get_db),
+                        user: dict = Depends(current_user)):
+    """admin — 좌석 계정 비번 '수정'(지정 값). must_change 해제(admin 이 정한 값 그대로 사용)."""
+    _require_admin(user, hid)
+    from app.services.auth_service import set_password
+
+    _, acct = _seat_account(db, hid, cid)
+    pw = body.password.strip()
+    if not pw:
+        raise HTTPException(status_code=400, detail="비밀번호를 입력하세요")
+    set_password(acct, pw, must_change=False)
+    db.add(AuditLog(account_id=user.get("uid"), action="client_pw_set",
+                    target_type="client", target_id=str(cid), detail={"hospital": hid}))
+    db.commit()
+    return {"ok": True, "password": acct.pw_plain}
+
+
+@router.put("/hospitals/{hid}/clients/{cid}/reset")
+def reset_client_password(hid: int, cid: int, db: Session = Depends(get_db),
+                          user: dict = Depends(current_user)):
+    """admin — 좌석 계정 비번 리셋 → 초기 비번 "1111" + 최초 로그인 강제변경."""
+    _require_admin(user, hid)
+    from app.services.auth_service import set_password
+
+    _, acct = _seat_account(db, hid, cid)
+    set_password(acct, "1111", must_change=True)
+    db.add(AuditLog(account_id=user.get("uid"), action="client_pw_reset",
+                    target_type="client", target_id=str(cid), detail={"hospital": hid}))
+    db.commit()
+    return {"ok": True, "password": "1111"}
+
+
+@router.post("/hospitals/{hid}/clients/reset-all")
+def reset_all_client_passwords(hid: int, db: Session = Depends(get_db),
+                               user: dict = Depends(current_user)):
+    """admin — 이 병원 모든 발급 좌석 계정 비번을 초기 "1111" 로 일괄 리셋(+강제변경)."""
+    _require_admin(user, hid)
+    from app.models import Account
+    from app.services.auth_service import set_password
+
+    accts = db.execute(
+        select(Account).where(Account.hospital_id == hid, Account.client_id.isnot(None))
+    ).scalars().all()
+    for a in accts:
+        set_password(a, "1111", must_change=True)
+    db.add(AuditLog(account_id=user.get("uid"), action="client_pw_reset_all",
+                    target_type="hospital", target_id=str(hid), detail={"count": len(accts)}))
+    db.commit()
+    return {"ok": True, "count": len(accts), "password": "1111"}
 
 
 @router.post("/hospitals/{hid}/clients/{cid}/enter")
