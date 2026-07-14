@@ -16,7 +16,8 @@ const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewe
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT } from "../lib/cornerstone";
-import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_LAYOUTS, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
+import { GridPicker } from "../lib/GridPicker";
 import { ReportDock } from "../components/ReportDock";
 import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
@@ -102,15 +103,6 @@ const initPane = (studyUid = ""): Pane => ({
   series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
   flipH: false, flipV: false, invert: false, wl: "", fx: "", il: { r: 1, c: 1 },
 });
-/** "00 x 00" 임의 레이아웃 입력(1~10) */
-function askLayout(cur: { r: number; c: number }): { r: number; c: number } | null {
-  const v = prompt("Image Layout — 행 x 열 (1~10)", `${cur.r} x ${cur.c}`);
-  if (!v) return null;
-  const m = v.match(/(\d+)\s*[xX*]\s*(\d+)/);
-  if (!m) return null;
-  const clamp = (n: number) => Math.min(10, Math.max(1, n));
-  return { r: clamp(+m[1]), c: clamp(+m[2]) };
-}
 
 /* ── Scout line 기하 — DICOM ImagePosition/Orientation 으로 소스 이미지의 절단선을
       타깃 이미지 픽셀좌표에 투영 (§3.3 ④⑤ Scout Line / All Lines) ── */
@@ -1775,8 +1767,6 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     }).catch(() => say("과거검사 로드 실패"));
   };
 
-  const layoutLabel = (l: { r: number; c: number }) => `${l.r} x ${l.c}`;
-
   // ── 표시 설정 (계정별 viewer.prefs 로밍): 오버레이 글자 크기/표시, 멀티선택 색 ──
   // 단축키: T+마우스스크롤=글자 크기, T+Del=오버레이 숨김/표시 토글. 변경은 자동 저장.
   const [ovlFont, setOvlFont] = useState(9.5);
@@ -2463,42 +2453,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           Examined, {curD.study_date}, {curD.patient_name}, {curD.patient_key}
         </span>
         <span style={{ display: "flex", gap: 4, alignItems: "center", marginLeft: 10 }}>
-          Series
-          <select value={layoutLabel(sLayout)} title="화면을 시리즈 페인으로 분할 (DICOM Series 단위)"
-                  onChange={(e) => {
-                    if (e.target.value === "custom") {
-                      const res = askLayout(sLayout);
-                      if (res) applySLayout(res);
-                      return;
-                    }
-                    const [r, c] = e.target.value.split(" x ").map(Number);
-                    applySLayout({ r, c });
-                  }} style={{ fontSize: 11 }}>
-            {IN_LAYOUTS.map((l) => <option key={layoutLabel(l)}>{layoutLabel(l)}</option>)}
-            {!IN_LAYOUTS.some((l) => layoutLabel(l) === layoutLabel(sLayout)) && (
-              <option>{layoutLabel(sLayout)}</option>
-            )}
-            <option value="custom">직접 입력(00 x 00)…</option>
-          </select>
-          Image
-          <select value={layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })}
-                  title="선택된 페인 안에서 해당 시리즈의 연속 이미지를 타일로 분할 (DICOM Image 단위, 페인별 적용)"
-                  onChange={(e) => {
-                    const cur = panes[active]?.il ?? { r: 1, c: 1 };
-                    if (e.target.value === "custom") {
-                      const res = askLayout(cur);
-                      if (res) upd(active, { il: res });
-                      return;
-                    }
-                    const [r, c] = e.target.value.split(" x ").map(Number);
-                    upd(active, { il: { r, c } });
-                  }} style={{ fontSize: 11 }}>
-            {IN_LAYOUTS.map((l) => <option key={layoutLabel(l)}>{layoutLabel(l)}</option>)}
-            {!IN_LAYOUTS.some((l) => layoutLabel(l) === layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })) && (
-              <option>{layoutLabel(panes[active]?.il ?? { r: 1, c: 1 })}</option>
-            )}
-            <option value="custom">직접 입력(00 x 00)…</option>
-          </select>
+          {/* Series/Image 레이아웃 — 드래그 그리드 선택(TY 동일 GridPicker, 최대 10×10) */}
+          <GridPicker label="Series" max={10} value={sLayout}
+                      onPick={(v) => applySLayout({ r: Math.min(v.r, 10), c: Math.min(v.c, 10) })} />
+          <GridPicker label="Image" max={10} value={panes[active]?.il ?? { r: 1, c: 1 }}
+                      onPick={(v) => upd(active, { il: { r: Math.min(v.r, 10), c: Math.min(v.c, 10) } })} />
           <button title="3D — 현재 검사의 MPR/MIP 볼륨 뷰어 열기"
                   onClick={() => setShow3d(true)}
                   style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
