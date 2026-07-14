@@ -2593,7 +2593,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               ...(paletteHoriz ? {} : { gridTemplateColumns: "1fr 1fr", padding: "3px 0" }),
             }}>
               {k === "common" && (<>
-                <ModeBtn k="select" label="⬆ Select" title="선택 모드 — 주석 클릭 편집 / 빈 공간 드래그=녹색 점선 마퀴 다중선택 → Del 삭제" />
+                <ModeBtn k="select" label="Select" title="선택 모드 — 주석 클릭 편집 / 빈 공간 드래그=녹색 점선 마퀴 다중선택 → Del 삭제" />
                 {tbOn("zoom") && <ModeBtn k="zoom" label="Zoom" title="좌드래그=확대 (우드래그 항상 Zoom)" />}
                 {tbOn("pan") && <ModeBtn k="pan" label="Pan" title="좌드래그=이동 (중드래그 항상 Pan)" />}
                 {tbOn("fit") && <ActBtn a="fit" label="Fit" title="화면 맞춤" />}

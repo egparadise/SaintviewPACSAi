@@ -36,6 +36,14 @@ interface IconDef {
 
 const ICONS: Record<string, IconDef> = {
   // ── Common (스틸블루) ──────────────────────────────────────────────
+  // Select(포인터) — 클래식 커서 화살표 볼륨. 선택 모드. zoom/pan 과 동일 그룹·레시피(크기 일치)
+  select: {
+    g: "common",
+    body: (p) => (
+      <path fill={p} d="M5.5 3 L5.5 17.6 L9 14.3 L11.5 20.2 L13.6 19.3 L11.1 13.4 L16.2 13 Z" />
+    ),
+    spec: [7.8, 7.2, 1.6, 0.8, -52],
+  },
   zoom: {
     g: "common",
     body: (p) => (
