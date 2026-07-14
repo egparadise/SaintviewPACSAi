@@ -12,7 +12,7 @@ import {
   HospitalsPanel, OverviewPanel, ServerPanel, StoragePanel,
 } from "./admin/ServerAdmin";
 import {
-  AccountsTab, ConnDashboardTab, ExamControlTab, HospitalDataTab, HospitalLogsTab,
+  AccountsTab, BackupTab, ConnDashboardTab, ExamControlTab, HospitalDataTab, HospitalLogsTab,
   HospitalModalityTab, HospitalStatsTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab,
 } from "./admin/HospitalAdmin";
 import {
@@ -166,6 +166,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     { key: "link", label: "⑪ 연동 (HL7·원격판독·MWL·가상환자)" },
     { key: "cont", label: "⑫ 컨테이너 (Orthanc)" },
     { key: "examctl", label: "⑬ Exam Control (검사 QC)" },
+    { key: "backup", label: "⑭ 백업 (설정 내보내기·복원)" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -244,6 +245,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     else if (sub === "link") content = <Hl7Panel hid={hid} />;
     else if (sub === "cont") content = <HospitalContainersSection hid={hid} />;
     else if (sub === "examctl") content = <ExamControlTab hid={hid} />;
+    else if (sub === "backup") content = <BackupTab hid={hid} hospitalName={hosps.find((h) => h.id === hid)?.name || ""} />;
   }
 
   return (

@@ -679,3 +679,93 @@ export function ExamControlTab({ hid }: { hid: number }) {
     </div>
   );
 }
+
+// ════════════════════════════ ⑭ 백업 (설정 내보내기·복원) ════════════════════════════
+const BACKUP_CATS: { key: string; label: string; note?: string }[] = [
+  { key: "hospital", label: "병원 정보", note: "이름·주소·연락처·라이선스" },
+  { key: "network", label: "네트워크", note: "DICOM 노드·SCP설정·MWL·DDNS·원격판독" },
+  { key: "modalities", label: "등록 장비 (SCP/SCU)", note: "AET·IP·Port·수신허용" },
+  { key: "accounts", label: "계정·좌석", note: "⚠ 자격증명(해시·복원비번) 포함" },
+  { key: "account_settings", label: "계정별 뷰어 설정", note: "툴·레이아웃·글자크기·행잉·워크리스트" },
+  { key: "hospital_settings", label: "병원 설정", note: "권한 매트릭스·상용구·AI·모드 프로파일" },
+];
+
+export function BackupTab({ hid, hospitalName }: { hid: number; hospitalName: string }) {
+  const [sel, setSel] = useState<Set<string>>(new Set(BACKUP_CATS.map((c) => c.key)));  // 기본 전체 선택
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const allOn = sel.size === BACKUP_CATS.length;
+
+  const doExport = async () => {
+    const items = BACKUP_CATS.filter((c) => sel.has(c.key)).map((c) => c.key);
+    if (!items.length) return setMsg("백업할 항목을 하나 이상 선택하세요");
+    setBusy(true); setMsg("");
+    try {
+      const b = await api.backupHospital(hid, items);
+      const d = new Date(); const p = (n: number) => String(n).padStart(2, "0");
+      const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+      const base = (hospitalName || b.meta.hospital || "backup").replace(/[\\/:*?"<>|\s]/g, "_");
+      const fname = `${base}_${stamp}.json`;
+      const url = URL.createObjectURL(new Blob([JSON.stringify(b, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a"); a.href = url; a.download = fname; a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`백업 파일 다운로드: ${fname} (${items.length}개 항목)`);
+    } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const doImport = async (file: File) => {
+    setBusy(true); setMsg("");
+    try {
+      const backup = JSON.parse(await file.text());
+      const avail: string[] = Object.keys((backup && backup.data) || {});
+      const items = BACKUP_CATS.filter((c) => sel.has(c.key) && avail.includes(c.key)).map((c) => c.key);
+      if (!avail.length) { setMsg("백업 형식이 아닙니다(data 없음)"); return; }
+      if (!items.length) { setMsg(`선택 항목이 이 백업에 없습니다. 백업 포함 항목: ${avail.join(", ")}`); return; }
+      if (!confirm(`선택 항목(${items.join(", ")})을 '${hospitalName}' 로 복원(부활)합니다. 기존 값을 덮어씁니다. 계속할까요?`)) return;
+      const r = await api.restoreHospital(hid, backup, items);
+      setMsg(`복원 완료 — ${r.restored.join(", ")} (원본: ${backup?.meta?.hospital || "?"} / ${backup?.meta?.generated_at || "?"})`);
+    } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  return (
+    <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontWeight: 700 }}>💾 백업 (설정 내보내기 · 복원)</div>
+      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+        병원별·계정별 모든 설정을 항목 선택으로 JSON 백업하고, 업로드해 복원(부활)합니다.
+        파일명은 <code>병원이름_날짜_시간.json</code>.
+      </div>
+
+      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
+        <input type="checkbox" checked={allOn}
+               onChange={() => setSel(allOn ? new Set() : new Set(BACKUP_CATS.map((c) => c.key)))} />
+        전체 선택
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
+        {BACKUP_CATS.map((c) => (
+          <label key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5,
+                                      border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px",
+                                      background: sel.has(c.key) ? "var(--accent-subtle, rgba(124,58,237,.08))" : "transparent" }}>
+            <input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} style={{ marginTop: 2 }} />
+            <span>
+              <div style={{ fontWeight: 600 }}>{c.label}</div>
+              {c.note && <div style={{ color: "var(--text-secondary)", fontSize: 11, marginTop: 2 }}>{c.note}</div>}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="primary" onClick={doExport} disabled={busy}>⬇ 백업 (JSON 다운로드)</button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy}>⬆ 복원 (JSON 업로드)</button>
+        <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+               onChange={(e) => { const f = e.target.files?.[0]; if (f) void doImport(f); }} />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--stat-emergency,#f87171)" }}>
+        ⚠ '계정·좌석' 항목은 로그인 자격증명(비번 해시·복원 평문)을 포함합니다. 백업 파일은 안전한 곳에 보관하세요.
+      </div>
+      <Msg text={msg} />
+    </div>
+  );
+}

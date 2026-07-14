@@ -265,6 +265,12 @@ export const api = {
     req<{ ok: boolean; password: string }>(`/api/hospitals/${hid}/clients/${cid}/reset`, { method: "PUT" }),
   resetAllClientPasswords: (hid: number) =>
     req<{ ok: boolean; count: number; password: string }>(`/api/hospitals/${hid}/clients/reset-all`, { method: "POST" }),
+  // 병원·계정 설정 백업/복원 — 항목 선택 → JSON export/import
+  backupHospital: (hid: number, items: string[]) =>
+    req<{ meta: { hospital: string; hospital_id: number; code: string; generated_at: string; version: number; items: string[] }; data: Record<string, unknown> }>(
+      `/api/hospitals/${hid}/backup`, { method: "POST", body: JSON.stringify({ items }) }),
+  restoreHospital: (hid: number, backup: unknown, items: string[]) =>
+    req<{ ok: boolean; restored: string[] }>(`/api/hospitals/${hid}/restore`, { method: "POST", body: JSON.stringify({ backup, items }) }),
   // 비밀번호 변경(최초 로그인 강제변경·자율변경 공용) — 현재 비번 재확인 + 새 비번
   changePassword: (current_password: string, new_password: string) =>
     req<{ ok: boolean }>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password, new_password }) }),

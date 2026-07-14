@@ -12,6 +12,7 @@ from app.api import (
     activity,
     admin,
     auth,
+    backup,
     examctl,
     hospital_admin,
     hospitals,
@@ -102,6 +103,7 @@ app.include_router(management.router)
 app.include_router(signup.router)
 app.include_router(hospitals.router)
 app.include_router(hospital_admin.router)
+app.include_router(backup.router)  # 병원·계정 설정 백업/복원(/api/hospitals/{hid}/backup·restore)
 app.include_router(settings_api.router)
 app.include_router(orders.router)
 app.include_router(phrases.router)
