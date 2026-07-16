@@ -130,7 +130,11 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
   const engineRef = useRef<RenderingEngine | null>(null);
   const [status, setStatus] = useState("초기화 중…");
   const [error, setError] = useState("");
-  const [slabMm, setSlabMm] = useState(30);
+  const [slabMm, setSlabMm] = useState(10);
+  const [blend, setBlend] = useState<"mip" | "minip" | "avip" | "off">("mip");   // 강도 투영 모드
+  const [mipSetOpen, setMipSetOpen] = useState(false);                            // MIP Settings 패널
+  const [vrOn, setVrOn] = useState(false);                                        // 3D 볼륨 렌더링 페인(슬랩 조정 시 자동)
+  const volumeIdRef = useRef("");
   const [activeVp, setActiveVp] = useState("vp-axial");
   const [seriesList, setSeriesList] = useState<SeriesCand[]>([]);
   const [selSeries, setSelSeries] = useState("");
@@ -138,14 +142,20 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
   const [mipOrient, setMipOrient] = useState<"AXIAL" | "SAGITTAL" | "CORONAL">("AXIAL");
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
-  const applySlab = useCallback((mm: number) => {
+  const applySlab = useCallback((mm: number, mode?: "mip" | "minip" | "avip" | "off") => {
     const engine = engineRef.current;
     if (!engine) return;
     const vp = engine.getViewport(MIP_ID) as Types.IVolumeViewport | undefined;
     if (!vp) return;
+    const m = mode ?? "mip";
     try {
-      vp.setBlendMode(Enums.BlendModes.MAXIMUM_INTENSITY_BLEND);
-      vp.setProperties({ slabThickness: mm });
+      // 강도 투영 모드 — MIP(최대)/MinIP(최소)/AvIP(평균)/끄기(일반 컴포지트 렌더링)
+      const BM = Enums.BlendModes;
+      vp.setBlendMode(m === "mip" ? BM.MAXIMUM_INTENSITY_BLEND
+                    : m === "minip" ? BM.MINIMUM_INTENSITY_BLEND
+                    : m === "avip" ? BM.AVERAGE_INTENSITY_BLEND
+                    : BM.COMPOSITE);
+      vp.setProperties({ slabThickness: m === "off" ? 0.1 : mm });
       vp.render();
     } catch { /* 뷰포트 미준비 */ }
   }, []);
@@ -240,7 +250,7 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
           getReferenceLineColor: (id: string) => REF_COLORS[id] ?? "#94a3b8",
           getReferenceLineControllable: () => true,
           getReferenceLineDraggableRotatable: () => true,
-          getReferenceLineSlabThicknessControlsOn: () => false,
+          getReferenceLineSlabThicknessControlsOn: () => true,   // 참조선 점선 핸들 — 드래그로 슬랩 폭 조정
         });
         mpr.setToolActive(ZoomTool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Secondary }],
@@ -275,6 +285,7 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
 
         // 시리즈별 고유 볼륨 ID — 시리즈 전환 시 캐시 충돌 방지
         const volumeId = `cornerstoneStreamingImageVolume:sv-${selSeries.slice(-24)}`;
+        volumeIdRef.current = volumeId;
         const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
         await (volume as { load: () => Promise<unknown> | unknown }).load?.();
         await setVolumesForViewports(
@@ -282,7 +293,7 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
           [{ volumeId }],
           [...MPR_VIEWPORTS.map((v) => v.id), MIP_ID],
         );
-        applySlab(slabMm);
+        applySlab(slabMm, blend);
         applyToolMode(toolMode);   // 기본 Crosshair — 십자선 연동
         engine.render();
         requestAnimationFrame(() => {
@@ -336,8 +347,62 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
 
   useEffect(() => () => { resizeObserverRef.current?.disconnect(); }, []);
 
+  // 참조선 점선(슬랩 폭) 드래그 감지 — MPR 뷰포트의 slabThickness 가 2mm 를 넘으면 3D(VR) 페인 자동 추가
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const check = () => {
+      const engine = engineRef.current;
+      if (!engine || vrOn) return;
+      for (const v of MPR_VIEWPORTS) {
+        try {
+          const vp = engine.getViewport(v.id) as Types.IVolumeViewport | undefined;
+          const t = vp?.getProperties?.()?.slabThickness;
+          if (t && t > 2) { setVrOn(true); return; }
+        } catch { /* 미준비 */ }
+      }
+    };
+    const up = () => window.setTimeout(check, 50);
+    el.addEventListener("pointerup", up);
+    return () => el.removeEventListener("pointerup", up);
+  }, [vrOn]);
+
+  // 3D 볼륨 렌더링(VR) 페인 — vrOn 시 동적 enable, 모달리티별 프리셋(CT=Bone, 그 외 MR 기본)
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!vrOn || !engine || !volumeIdRef.current) return;
+    const elVr = containerRefs.current["vp-vr"];
+    if (!elVr) return;
+    let dead = false;
+    (async () => {
+      try {
+        engine.enableElement({
+          viewportId: "vp-vr",
+          type: Enums.ViewportType.VOLUME_3D,
+          element: elVr,
+          defaultOptions: { background: [0.04, 0.04, 0.055] as Types.Point3 },
+        });
+        await setVolumesForViewports(engine, [{ volumeId: volumeIdRef.current }], ["vp-vr"]);
+        if (dead) return;
+        const vp = engine.getViewport("vp-vr") as Types.IVolumeViewport;
+        const mod = seriesList.find((x) => x.uid === selSeries)?.modality ?? "";
+        try { (vp as unknown as { setProperties: (p: { preset: string }) => void })
+          .setProperties({ preset: mod === "CT" ? "CT-Bone" : "MR-Default" }); } catch { /* 프리셋 미지원 */ }
+        vp.render();
+        engine.resize(true, true);
+        engine.render();
+      } catch { /* VR 미지원 환경 — 페인만 비움 */ }
+    })();
+    return () => {
+      dead = true;
+      try { engine.disableElement("vp-vr"); } catch { /* 무시 */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vrOn, selSeries]);
+
   const VIEWPORTS = [...MPR_VIEWPORTS.map((v) => ({ ...v, mip: false })),
-                     { id: MIP_ID, label: `MIP (${mipOrient})`, mip: true }];
+                     { id: MIP_ID, label: `MIP (${mipOrient})`, mip: true },
+                     ...(vrOn ? [{ id: "vp-vr", label: "3D (Volume Rendering)", mip: true }] : [])];
 
   return (
     <div style={{
@@ -379,26 +444,89 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
         {status && <span style={{ color: "var(--stat-draft)", fontSize: 12 }}>{status}</span>}
         {error && <span style={{ color: "var(--stat-emergency)", fontSize: 12 }}>⚠ {error}</span>}
         <div style={{ flex: 1 }} />
-        <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12 }}>
-          MIP 방향
-          <select value={mipOrient} style={{ fontSize: 12 }}
-                  onChange={(e) => {
-                    const o = e.target.value as "AXIAL" | "SAGITTAL" | "CORONAL";
-                    setMipOrient(o);
-                    applyMipOrient(o);
-                  }}>
-            <option value="AXIAL">Axial</option>
-            <option value="SAGITTAL">Sagittal</option>
-            <option value="CORONAL">Coronal</option>
-          </select>
-        </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-          MIP 두께 {slabMm}mm
-          <input
-            type="range" min={5} max={200} step={5} value={slabMm}
-            onChange={(e) => { const v = Number(e.target.value); setSlabMm(v); applySlab(v); }}
-          />
-        </label>
+        <button onClick={() => setVrOn((v) => !v)}
+                title="3D 볼륨 렌더링 페인 추가/제거 — MPR 참조선의 점선 핸들로 슬랩 폭을 조정해도 자동 추가됩니다"
+                style={{ fontSize: 11.5, padding: "2px 10px",
+                         background: vrOn ? "var(--accent)" : undefined, color: vrOn ? "#fff" : undefined }}>🧊 3D 렌더링</button>
+        <div style={{ position: "relative" }}>
+          <button onClick={() => setMipSetOpen((o) => !o)}
+                  title="MIP Settings — 강도 투영 모드(MIP/MinIP/AvIP/끄기)·슬랩 두께"
+                  style={{ fontSize: 11.5, padding: "2px 10px",
+                           background: mipSetOpen ? "var(--bg-elevated)" : undefined }}>
+            ⚙ MIP 설정 <span style={{ color: "var(--ai)" }}>
+              {blend === "off" ? "끄기" : blend.toUpperCase()}{blend !== "off" ? ` | ${slabMm}mm` : ""}</span>
+          </button>
+          {mipSetOpen && (
+            <div style={{ position: "absolute", top: "110%", right: 0, zIndex: 400, width: 280,
+                          background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                          boxShadow: "0 10px 30px rgba(0,0,0,0.55)", padding: 12, fontSize: 12 }}>
+              <b style={{ fontSize: 13 }}>MIP Settings</b>
+              <div style={{ color: "var(--text-secondary)", fontSize: 11, marginBottom: 8 }}>강도 투영 설정</div>
+              <div style={{ color: "var(--text-secondary)", fontSize: 10.5, letterSpacing: 1, margin: "6px 0 4px" }}>BLEND MODE</div>
+              {([["mip", "MIP", "최대 강도 투영 - 혈관, 석회화 강조"],
+                 ["minip", "MinIP", "최소 강도 투영 - 기도, 폐 강조"],
+                 ["avip", "AvIP", "평균 강도 투영 - 노이즈 감소"],
+                 ["off", "끄기", "일반 렌더링"]] as const).map(([k, label, desc]) => (
+                <div key={k} onClick={() => { setBlend(k); applySlab(slabMm, k); }}
+                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                              padding: "7px 10px", borderRadius: 6, cursor: "pointer", marginBottom: 2,
+                              background: blend === k ? "var(--bg-elevated)" : "transparent" }}>
+                  <span>
+                    <div style={{ fontWeight: 700 }}>{label}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{desc}</div>
+                  </span>
+                  {blend === k && <span style={{ color: "var(--accent)", fontWeight: 800 }}>✓</span>}
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                            margin: "10px 0 2px" }}>
+                <span style={{ color: "var(--text-secondary)", fontSize: 10.5, letterSpacing: 1 }}>SLAB THICKNESS</span>
+                <b style={{ color: "var(--ai)" }}>{slabMm}MM</b>
+              </div>
+              <input type="range" min={1} max={100} step={1} value={slabMm} disabled={blend === "off"}
+                     style={{ width: "100%" }}
+                     onChange={(e) => { const v = Number(e.target.value); setSlabMm(v); applySlab(v, blend); }} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-secondary)" }}>
+                <span>1mm</span><span>100mm</span>
+              </div>
+              <div style={{ display: "flex", gap: 4, margin: "8px 0" }}>
+                {[5, 10, 20, 30, 50].map((v) => (
+                  <button key={v} disabled={blend === "off"}
+                          onClick={() => { setSlabMm(v); applySlab(v, blend); }}
+                          style={{ flex: 1, fontSize: 11, padding: "3px 0",
+                                   border: slabMm === v ? "1px solid var(--accent)" : undefined,
+                                   color: slabMm === v ? "var(--accent)" : undefined }}>{v}mm</button>
+                ))}
+              </div>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5 }}>
+                커스텀:
+                <input type="number" min={1} max={200} value={slabMm} disabled={blend === "off"}
+                       style={{ width: 64 }}
+                       onChange={(e) => {
+                         const v = Math.min(200, Math.max(1, Number(e.target.value) || 1));
+                         setSlabMm(v); applySlab(v, blend);
+                       }} /> mm
+              </label>
+              <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11.5, marginTop: 8 }}>
+                MIP 방향
+                <select value={mipOrient} style={{ fontSize: 12 }}
+                        onChange={(e) => {
+                          const o = e.target.value as "AXIAL" | "SAGITTAL" | "CORONAL";
+                          setMipOrient(o);
+                          applyMipOrient(o);
+                        }}>
+                  <option value="AXIAL">Axial</option>
+                  <option value="SAGITTAL">Sagittal</option>
+                  <option value="CORONAL">Coronal</option>
+                </select>
+              </label>
+              <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border)",
+                            color: "var(--accent)", fontWeight: 700, fontSize: 11.5 }}>
+                {blend === "off" ? "일반 렌더링" : `${blend === "mip" ? "MIP" : blend === "minip" ? "MinIP" : "AvIP"} | ${slabMm}mm`}
+              </div>
+            </div>
+          )}
+        </div>
         <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
           좌={toolMode === "crosshair" ? "십자선" : "W/L"} · 우=Zoom · 휠=스크롤 · 중=Pan
         </span>
@@ -407,7 +535,7 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
 
       {/* 2×2 뷰포트 그리드 */}
       <div ref={gridRef} style={{
-        flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr",
+        flex: 1, display: "grid", gridTemplateColumns: vrOn ? "1fr 1fr 1fr" : "1fr 1fr", gridTemplateRows: "1fr 1fr",
         gap: 2, padding: 2, minHeight: 0,
       }}>
         {VIEWPORTS.map((v) => (
