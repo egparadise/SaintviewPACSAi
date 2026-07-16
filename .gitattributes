@@ -1,0 +1,2 @@
+# cmd 배치 파일은 CRLF 필수 — LF 면 cmd 파서 오동작(if 블록·라벨)
+*.bat text eol=crlf
