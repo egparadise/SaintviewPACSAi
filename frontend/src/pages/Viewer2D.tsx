@@ -502,6 +502,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
+  const [mprSeries, setMprSeries] = useState("");  // 3D 모드에서 썸네일 클릭으로 지정한 볼륨 시리즈
   const [settingsOpen, setSettingsOpen] = useState(false);  // 뷰어 내 Setting
   // ◀▶ 환자 이동 — 시간대별 한 단계(워크리스트 정렬: 최신이 위/앞).
   // 방향은 Setting>정책(nav_left)을 따른다: past=◀가 과거(아래 행) / recent=◀가 최신(위 행)
@@ -3349,6 +3350,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                    })));
                    return;
                  }
+                 // 3D(MPR/MIP) 모드 — 클릭한 시리즈로 볼륨 재구성(Axial/Sagittal/Coronal 소스 교체)
+                 if (mprOn) {
+                   setMprSeries(s.series_uid);
+                   setStatus(`3D 볼륨 시리즈 전환 — S${s.series_number} ${s.series_desc || s.modality} (${s.instances.length}장)`);
+                   return;
+                 }
                  // 클릭 = 활성 페인에 이 시리즈 표시(교체) — 이미지 목록 펼침은 더블클릭
                  patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) });
                }}
@@ -3742,7 +3749,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               </div>
             }>
               <Viewer3DEmbed studyUid={panes[activePane].studyUid || detail.study_uid}
-                             embedded onClose={() => setMprOn(false)} />
+                             seriesUid={mprSeries || undefined}
+                             embedded onClose={() => { setMprOn(false); setMprSeries(""); }} />
             </Suspense>
           </div>
         ) : (

@@ -120,10 +120,11 @@ async function buildImageIds(studyUid: string, seriesUid: string): Promise<strin
   return withIds.map((x) => x.imageId);
 }
 
-export function Viewer3D({ studyUid, onClose, embedded }: {
+export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   studyUid: string;
   onClose: () => void;
   embedded?: boolean;  // Viewer2D 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 표시
+  seriesUid?: string;  // 외부(좌측 썸네일 클릭)에서 지정한 볼륨 시리즈 — 변경 시 볼륨 재구성
 }) {
   const containerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -189,6 +190,13 @@ export function Viewer3D({ studyUid, onClose, embedded }: {
       vp.render();
     } catch { /* 미지원 시 무시 */ }
   }, []);
+
+  // 좌측 썸네일 클릭 → 볼륨 시리즈 전환(목록에 있는 시리즈만) — 3D 를 원하는 시리즈로 재구성
+  useEffect(() => {
+    if (!seriesUid) return;
+    setSelSeries((cur) => (seriesUid !== cur && seriesList.some((x) => x.uid === seriesUid) ? seriesUid : cur));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seriesUid, seriesList]);
 
   // 시리즈 목록 로드 → 기본(최다 슬라이스, 10장 이상 우선) 선택
   useEffect(() => {
