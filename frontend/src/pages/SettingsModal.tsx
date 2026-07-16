@@ -6,6 +6,7 @@ import { GridPicker } from "../lib/GridPicker";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_LAYOUTS, IN_PALETTE } from "../lib/infiConfig";
 import { screenApiIssue } from "../lib/screens";
+import { SC_ACTIONS, SC_DEFAULTS, displayKey } from "../lib/shortcutDefs";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { HospitalsPanel, ModalityPanel, OverviewPanel, ServerPanel, StoragePanel, UsersPanel } from "./admin/ServerAdmin";
@@ -212,6 +213,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // 단축키(마우스·키) — 계정별 저장(viewer.prefs.shortcuts)
   const [scRdrag, setScRdrag] = useState<"wl" | "zoom" | "pan">("wl");
   const [scShiftR, setScShiftR] = useState<"zoomout" | "none">("zoomout");
+  const [scKeys, setScKeys] = useState<Record<string, string>>({ ...SC_DEFAULTS });
   // 정책 — ◀(왼쪽) 버튼이 시간상 어느 방향으로 갈지 (워크리스트는 최신이 위)
   const [polNavLeft, setPolNavLeft] = useState<"past" | "recent">("past");
   const [quality, setQuality] = useState<AiQuality | null>(null);
@@ -343,6 +345,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       const sc = (v as { shortcuts?: { rdrag?: "wl" | "zoom" | "pan"; shift_rclick?: "zoomout" | "none" } }).shortcuts;
       if (sc?.rdrag) setScRdrag(sc.rdrag);
       if (sc?.shift_rclick) setScShiftR(sc.shift_rclick);
+      const kk = (sc as { keys?: Record<string, string> } | undefined)?.keys;
+      if (kk) setScKeys({ ...SC_DEFAULTS, ...kk });
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -452,7 +456,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
-      shortcuts: { rdrag: scRdrag, shift_rclick: scShiftR },
+      shortcuts: { rdrag: scRdrag, shift_rclick: scShiftR, keys: scKeys },
     }, "user");
     await api.putSetting("report.prefs",
       { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
@@ -1611,8 +1615,42 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </select>
                 </label>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  · 우클릭(클릭만)=컨텍스트 메뉴 · 중클릭 드래그=Pan 고정 · 향후 단축키 항목은 이 페이지에 추가됩니다.
+                  · 우클릭(클릭만)=컨텍스트 메뉴 · 중클릭 드래그=Pan 고정 · 고정 키: Esc(계층 취소) · 1~9(시리즈 선택) · T 홀드(오버레이) · Backspace(주석 삭제 보조)
                 </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                  <b style={{ fontSize: 12.5 }}>키 바인딩 (전체 기능)</b>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>칸 클릭 후 키 입력 — Backspace=해제. 중복 키는 빨간 표시.</span>
+                  <button style={{ marginLeft: "auto", fontSize: 11, padding: "1px 10px" }}
+                          onClick={() => setScKeys({ ...SC_DEFAULTS })}>↺ 전체 기본값</button>
+                </div>
+                {(() => {
+                  const dup = new Set(Object.values(scKeys).filter((v, _, arr) => v && arr.filter((x) => x === v).length > 1));
+                  const groups = [...new Set(SC_ACTIONS.map((x) => x.group))];
+                  return groups.map((g) => (
+                    <div key={g} style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", padding: "2px 0" }}>{g}</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 4 }}>
+                        {SC_ACTIONS.filter((x) => x.group === g).map((x) => (
+                          <label key={x.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                            <span style={{ flex: 1, color: "var(--text-primary)" }}>{x.label}</span>
+                            <input readOnly value={displayKey(scKeys[x.id] ?? x.def)} placeholder="키 입력"
+                                   title={`기본값: ${displayKey(x.def)} — 클릭 후 원하는 키 입력 (Backspace=해제)`}
+                                   onKeyDown={(e) => {
+                                     e.preventDefault();
+                                     if (e.key === "Escape") return;
+                                     const nk = e.key === "Backspace" ? ""
+                                       : e.key.length === 1 ? e.key.toLowerCase() : e.key;
+                                     setScKeys((prev) => ({ ...prev, [x.id]: nk }));
+                                   }}
+                                   style={{ width: 92, textAlign: "center", cursor: "pointer",
+                                            border: scKeys[x.id] && dup.has(scKeys[x.id])
+                                              ? "1px solid var(--stat-emergency,#f87171)" : undefined }} />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </Group>
             )}
             {page === "monitor" && (

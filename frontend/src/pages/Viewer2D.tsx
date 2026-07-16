@@ -3,6 +3,7 @@
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, openViewer, type Anno, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from "../lib/annotations";
+import { SC_DEFAULTS } from "../lib/shortcutDefs";
 import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures } from "../lib/screens";
 import { onStudySync, postStudySync } from "../lib/sync";
@@ -512,6 +513,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [cross3d, setCross3d] = useState<Record<string, { sop: string; x: number; y: number }>>({});
   // 숫자키/상하 화살표 시리즈 선택 — thumbSeries 는 뒤에서 정의되므로 ref 로 최신 함수 참조
   const seriesKeyRef = useRef<{ sel: (n: number) => void; step: (d: 1 | -1) => void }>({ sel: () => {}, step: () => {} });
+  // 사용자 단축키(설정>단축키, 계정별) — 액션→키 맵 + 디스패처(함수는 렌더마다 최신화)
+  const scKeysRef = useRef<Record<string, string>>({ ...SC_DEFAULTS });
+  const scRunRef = useRef<(id: string) => void>(() => {});
 
   // 3D Cursor 홀드-드래그 — 버튼을 누른 채 움직이면 rAF 스로틀로 연속 재배치(모든 페인 동기 추적)
   const c3DragRef = useRef<{ pid: string } | null>(null);
@@ -1235,12 +1239,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         toggleOverlay();
         return;
       }
+      // ── 사용자 단축키(설정>단축키, 계정별) — 재바인딩 가능 액션 우선 조회 ──
+      if (!(e.ctrlKey || e.altKey || e.metaKey) && e.key !== "Escape" && !/^[1-9]$/.test(e.key)) {
+        const kk = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        const hit = Object.entries(scKeysRef.current).find(([, v]) =>
+          !!v && (v.length === 1 ? v.toLowerCase() === kk : v === e.key));
+        if (hit) { e.preventDefault(); scRunRef.current(hit[0]); return; }
+      }
       switch (e.key) {
-        case "ArrowRight": e.preventDefault(); step(activePane, 1); break;
-        case "ArrowLeft": e.preventDefault(); step(activePane, -1); break;
-        // ↑↓ = 시리즈 이동(썸네일 순서), ←→ = 이미지 이동
-        case "ArrowDown": e.preventDefault(); seriesKeyRef.current.step(1); break;
-        case "ArrowUp": e.preventDefault(); seriesKeyRef.current.step(-1); break;
         case "Escape":
           // 계층 초기화(§D): 진행중 그리기/이동/리사이즈 → 편집 선택(selAnno) → 도구 → 멀티선택 → 최대화 → 닫기.
           // annoDragRef 는 draft 유무와 무관하게 항상 취소 — move/resize(draft=null) 중 Esc 가 드래그를
@@ -1255,31 +1261,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           else if (maximized) setMaximized(null);   // 최대화 복원
           else requestCloseRef.current();
           break;
-        case "Delete": case "Backspace":   // 삭제(§C): 마퀴 다중 > 단일 선택 > 마지막 주석
+        case "Backspace":   // 삭제 보조키(고정) — Delete 는 재바인딩 가능(del_anno)
           e.preventDefault();
           if (selAnnos) deleteSelAnnos();
           else if (selAnno) deleteSelAnno();
           else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); }
           break;
-        case " ": e.preventDefault(); act("cine"); break;
-        // 숫자 1~9 = 시리즈 순번 선택(썸네일 순서) — 활성 페인에 해당 시리즈 표시
+        // 숫자 1~9 = 시리즈 순번 선택(고정) — 활성 페인에 해당 시리즈 표시
         case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": case "9":
           e.preventDefault(); seriesKeyRef.current.sel(Number(e.key) - 1); break;
-        default:
-          if (e.ctrlKey || e.altKey || e.metaKey) break;   // 브라우저 조합키(Ctrl+A 등) 보존
-          switch (e.key.toLowerCase()) {
-            case "i": act("invert"); break;
-            case "r": act("rotR"); break;
-            case "f": act("fit"); break;
-            case "l": setXmode((x) => (x === "off" ? "auto_sync" : "off")); break;  // Crosslink 토글 (In 'l' 등가)
-            case "g":   // 듀얼모드 Stack 동기 토글 — Spatial(좌표) ↔ Index(1:1)
-              setSpatialSync((s) => { setStatus(!s ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !s; });
-              break;
-            case "a":   // 전체 페인 선택 (In 'A' 동일)
-              e.preventDefault();
-              setSelPanes(new Set(PANE_IDS.slice(0, LAYOUTS[layout].count)));
-              break;
-          }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -1315,6 +1305,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const sc = (r.value as { shortcuts?: { rdrag?: "wl" | "zoom" | "pan"; shift_rclick?: "zoomout" | "none" } }).shortcuts;
       if (sc?.rdrag) { setRdragTool(sc.rdrag); rdragRef.current = sc.rdrag; }
       if (sc?.shift_rclick) shiftRClickRef.current = sc.shift_rclick;
+      const keys = (sc as { keys?: Record<string, string> } | undefined)?.keys;
+      if (keys) scKeysRef.current = { ...SC_DEFAULTS, ...keys };
     }).catch(() => {});
   }, []);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {
@@ -3026,6 +3018,38 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (ni < 0 || ni >= thumbSeries.length || ni === idx) return;
       seriesKeyRef.current.sel(ni);
     },
+  };
+  // 단축키 디스패처 — 렌더마다 최신 클로저로 갱신(설정>단축키 재바인딩 대상 전체)
+  scRunRef.current = (id: string) => {
+    switch (id) {
+      case "img_next": step(activePane, 1); break;
+      case "img_prev": step(activePane, -1); break;
+      case "series_next": seriesKeyRef.current.step(1); break;
+      case "series_prev": seriesKeyRef.current.step(-1); break;
+      case "cine": act("cine"); break;
+      case "invert": act("invert"); break;
+      case "rotate_r": act("rotR"); break;
+      case "fit": act("fit"); break;
+      case "crosslink": setXmode((x) => (x === "off" ? "auto_sync" : "off")); break;
+      case "spatial":
+        setSpatialSync((s0) => { setStatus(!s0 ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !s0; });
+        break;
+      case "all_panes": setSelPanes(new Set(PANE_IDS.slice(0, LAYOUTS[layout].count))); break;
+      case "del_anno":
+        if (selAnnos) deleteSelAnnos();
+        else if (selAnno) deleteSelAnno();
+        else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); }
+        break;
+      case "save": void saveAnnos(); break;
+      case "refresh": act("rfsh"); break;
+      case "m_select": setMouseMode("select"); break;
+      case "m_zoom": setMouseMode("zoom"); break;
+      case "m_pan": setMouseMode("pan"); break;
+      case "m_wl": setMouseMode("wl"); break;
+      case "t_mag": setMagOn((m) => { if (m) setMagPos(null); return !m; }); break;
+      default:
+        if (id.startsWith("t_")) pickTool(id.slice(2) as ToolKind);
+    }
   };
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
