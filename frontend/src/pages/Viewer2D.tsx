@@ -3553,6 +3553,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         </div>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
+        {/* 3D 뷰어(MPR/MIP) — 내장 Axial/Sagittal/Coronal + MIP 로 뷰포트 전환(재클릭 시 2D 복귀) */}
+        <button title="3D 뷰어 — MPR(Axial/Sagittal/Coronal) + MIP 재구성 (CT/MR 볼륨). 다시 누르면 2D 복귀"
+                onClick={() => setMprOn((m) => !m)}
+                style={{ fontWeight: 800, padding: "3px 10px", marginRight: 4,
+                         ...(mprOn ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
+          3D
+        </button>
         {/* TY-3(1): 작업 히스토리 — ◀ Undo · ◯ 초기 상태 · ▶ Redo (시각조정+주석 스냅샷 최대 50) */}
         {tbOn("hist") && (
           <span style={{ display: "flex", gap: 2, alignItems: "center" }} data-hist-tick={histTick}>
