@@ -1334,6 +1334,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false, shift: e.shiftKey };
   };
 
+  // Shift+우드래그 영역 W/L — 빨간 박스(페인 상대 px) + 진행 중 드래그 ref
+  const [wlBox, setWlBox] = useState<{ pid: string; left: number; top: number; w: number; h: number } | null>(null);
+  const wlRegionRef = useRef<{ pid: string; rect: DOMRect; sx: number; sy: number; cx: number; cy: number } | null>(null);
+
   // 우클릭 W/L 드래그 — window CAPTURE 단계에서 최우선 가로채기.
   // Linkclump 류 확장이 capture/document 어디에 리스너를 걸어도, window capture 가 가장 먼저 실행되고
   // 여기서 stopImmediatePropagation 하면 이벤트가 document/target 으로 전파되지 않아 빨간 박스가 시작되지 않는다.
@@ -1345,16 +1349,62 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (!el?.dataset.pid) return;   // 뷰어 페인 밖 우클릭은 관여 안 함
       // pointerdown preventDefault → 스펙상 브라우저가 호환(compat) mousedown/mousemove/mouseup 을
       // 아예 생성하지 않음 — mousedown 을 듣는 확장(Linkclump 류)은 이벤트가 존재하지 않아 무력화.
-      // 등록 순서 경쟁 무관(이벤트 미생성). 우리 드래그는 pointermove/pointerup 으로 구동(아래 리스너).
       e.preventDefault(); e.stopImmediatePropagation();
       const pid = el.dataset.pid;
       setActivePane(pid);
       setCtxMenu(null);
+      if (e.shiftKey) {
+        // Shift+우드래그 — 빨간 박스로 영역 지정 → 놓으면 그 영역 픽셀(min/max) 기준으로 W/L 조정
+        wlRegionRef.current = { pid, rect: el.getBoundingClientRect(), sx: e.clientX, sy: e.clientY,
+                                cx: e.clientX, cy: e.clientY };
+        return;
+      }
       dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
-                          btn: 2, moved: false, shift: e.shiftKey };
+                          btn: 2, moved: false, shift: false };
     };
-    window.addEventListener("pointerdown", cap, true);   // capture 단계
-    return () => window.removeEventListener("pointerdown", cap, true);
+    const regionMove = (e: PointerEvent) => {
+      const r = wlRegionRef.current;
+      if (!r) return;
+      r.cx = e.clientX; r.cy = e.clientY;
+      setWlBox({ pid: r.pid, left: Math.min(r.sx, r.cx) - r.rect.left, top: Math.min(r.sy, r.cy) - r.rect.top,
+                 w: Math.abs(r.cx - r.sx), h: Math.abs(r.cy - r.sy) });
+    };
+    const regionUp = () => {
+      const r = wlRegionRef.current;
+      if (!r) return;
+      wlRegionRef.current = null;
+      setWlBox(null);
+      const small = Math.abs(r.cx - r.sx) < 6 && Math.abs(r.cy - r.sy) < 6;
+      if (small) {   // 드래그 없는 Shift+우클릭 — 설정된 동작(기본 Zoom Out)
+        if (shiftRClickRef.current !== "none")
+          updMany(targetsOf(r.pid), (p) => ({ zoom: Math.max(0.2, p.zoom * 0.8) }));
+        return;
+      }
+      const p = panesRef.current[r.pid];
+      const inst = p?.series?.instances[p.index];
+      if (!p?.series || !inst) return;
+      const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
+      const a = screenToImage(Math.min(r.sx, r.cx), Math.min(r.sy, r.cy), r.rect, p, aspect);
+      const b = screenToImage(Math.max(r.sx, r.cx), Math.max(r.sy, r.cy), r.rect, p, aspect);
+      if (!a || !b) { setStatus("영역 W/L — 이미지 안에서 박스를 지정하세요"); return; }
+      const exId = openTabsRef.current.find((t) => t.uid === p.studyUid)?.id ?? detail.id;
+      void api.roiStats(exId, { sop_uid: inst.sop_uid, kind: "rect", points: [a, b] }).then((st) => {
+        if (st.min == null || st.max == null) { setStatus("영역 W/L — 픽셀 통계를 얻지 못했습니다"); return; }
+        const ww = Math.max(1, Math.round(st.max - st.min));
+        const wc = Math.round((st.max + st.min) / 2);
+        patch(r.pid, { wl: `${wc},${ww}` });
+        schedHist();
+        setStatus(`영역 W/L 적용 — C ${wc} / W ${ww} (박스 픽셀 ${st.min}~${st.max})`);
+      }).catch(() => setStatus("영역 W/L 실패"));
+    };
+    window.addEventListener("pointerdown", cap, true);   // capture 단계(확장 무력화)
+    window.addEventListener("pointermove", regionMove);
+    window.addEventListener("pointerup", regionUp);
+    return () => {
+      window.removeEventListener("pointerdown", cap, true);
+      window.removeEventListener("pointermove", regionMove);
+      window.removeEventListener("pointerup", regionUp);
+    };
   }, []);
 
   /* 드래그 그리기 시작 — 시작 이미지좌표 기록 + draft=[start,start] + annoDrag 세팅(dragRef 미사용) */
@@ -2418,6 +2468,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               `${80 - magPos.ny * (inst.rows || 1) * magPos.sc * 3}px`,
             filter: p.invert ? "invert(1)" : undefined,
           }} />
+        )}
+        {/* Shift+우드래그 영역 W/L — 빨간 박스 러버밴드 */}
+        {wlBox?.pid === pid && (
+          <div style={{ position: "absolute", left: wlBox.left, top: wlBox.top, width: wlBox.w, height: wlBox.h,
+                        border: "2px solid #ef4444", background: "rgba(239,68,68,0.10)", zIndex: 6,
+                        pointerEvents: "none" }} />
         )}
         {/* 키이미지 마크 — 현재 표시 이미지가 키이미지면 상단 중앙에 🔑 배지 (overlay 토글과 무관) */}
         {p.series?.instances[p.index] && keyMarks.has(p.series.instances[p.index].sop_uid) && (
