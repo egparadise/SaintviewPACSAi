@@ -27,10 +27,22 @@ export function DbSchemaPanel() {
   const [schema, setSchema] = useState<DbSchemaResp | null>(null);
   const [selTable, setSelTable] = useState<string | null>(null);
   const [toolPath, setToolPath] = useState("");
+  const [toolHint, setToolHint] = useState("");   // 기본값 제안 출처(자동 탐지된 도구명)
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [msg, setMsg] = useState("");
   const load = () => {
     api.insightsDbSchema().then((r) => { setSchema(r); setMsg(""); }).catch((e) => setMsg(pendMsg(e)));
-    api.getSetting("server.dbtool").then((r) => setToolPath(String((r.value as { path?: string }).path ?? ""))).catch(() => {});
+    // 항상 초기 기본 정보 표시 — 저장된 경로가 있으면 그 값, 없으면 서버에 설치된 DB 도구 자동 탐지 제안
+    api.getSetting("server.dbtool").then((r) => {
+      const saved = String((r.value as { path?: string }).path ?? "");
+      if (saved) { setToolPath(saved); return; }
+      api.insightsDbToolDetect().then((d) => {
+        if (d.items.length) {
+          setToolPath(d.items[0].path);
+          setToolHint(`자동 탐지 기본값: ${d.items[0].label} — [경로 저장]을 눌러 확정하세요`);
+        }
+      }).catch(() => {});
+    }).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 
@@ -84,18 +96,102 @@ export function DbSchemaPanel() {
         </div>
       )}
 
-      {/* DB 도구 열기 — server.dbtool(path) */}
+      {/* DB 도구 열기 — server.dbtool(path). 초기값=저장 경로 또는 자동 탐지 기본값, [찾기]=서버 파일 탐색 */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: "var(--text-secondary)", flexShrink: 0 }}>DB 도구 경로(서버측)</span>
-        <input style={{ ...inp, flex: 1, minWidth: 220 }} value={toolPath} onChange={(e) => setToolPath(e.target.value)}
+        <input style={{ ...inp, flex: 1, minWidth: 220 }} value={toolPath} onChange={(e) => { setToolPath(e.target.value); setToolHint(""); }}
                placeholder="예: C:\\Program Files\\DB Browser for SQLite\\DB Browser for SQLite.exe" />
+        <button onClick={() => setPickerOpen(true)} title="서버 컴퓨터의 파일 탐색기로 실행 파일(.exe)을 선택합니다">찾기…</button>
         <button onClick={saveTool}>경로 저장</button>
         <button className="primary" onClick={openTool}>DB 도구 열기</button>
       </div>
+      {toolHint && <div style={{ fontSize: 11, color: "var(--accent)" }}>{toolHint}</div>}
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         구조 조회는 읽기 전용(introspection)입니다. [DB 도구 열기]는 서버 컴퓨터에서 설정된 외부 프로그램을 실행합니다(원격 브라우저에는 표시되지 않음).
       </div>
       <Msg text={msg} />
+      {pickerOpen && (
+        <ExePickerModal
+          initial={toolPath}
+          onPick={(p) => { setToolPath(p); setToolHint(""); setPickerOpen(false); setMsg("경로 선택됨 — [경로 저장]을 눌러 확정하세요"); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** 서버측 실행 파일(.exe) 선택 모달 — /api/share/fs(files=exe) 기반 파일 탐색기.
+ *  폴더 클릭=진입, 파일 클릭=선택(입력 반영). 저장은 [경로 저장] 버튼으로 확정. */
+function ExePickerModal({ initial, onPick, onClose }: {
+  initial: string; onPick: (path: string) => void; onClose: () => void;
+}) {
+  const [path, setPath] = useState("");
+  const [parent, setParent] = useState<string | null>(null);
+  const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
+  const [files, setFiles] = useState<{ name: string; path: string }[]>([]);
+  const [picked, setPicked] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const nav = (p: string) => {
+    setLoading(true); setErr("");
+    api.shareFs(p, "exe").then((r) => {
+      setPath(r.path); setParent(r.parent); setDirs(r.dirs); setFiles(r.files ?? []); setLoading(false);
+      if (!r.exists) setErr("경로가 존재하지 않습니다");
+    }).catch((e) => { setErr(e instanceof Error ? e.message : "탐색 실패"); setLoading(false); });
+  };
+  useEffect(() => {
+    // 초기 경로: 입력값의 폴더 → 없으면 드라이브 목록
+    const dir = initial.includes("\\") ? initial.slice(0, initial.lastIndexOf("\\")) : "";
+    nav(dir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "grid", placeItems: "center", zIndex: 400 }}>
+      <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
+                    width: "min(520px, 92vw)", height: "min(480px, 82vh)", display: "flex",
+                    flexDirection: "column", padding: 12, gap: 8 }}>
+        <b style={{ fontSize: 13 }}>🗄️ DB 도구 실행 파일 선택 (서버 컴퓨터)</b>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button onClick={() => nav(parent ?? "")} disabled={!path}
+                  title={parent ? "상위 폴더로" : "드라이브 목록으로"} style={{ padding: "2px 8px", fontSize: 12 }}>⬆ 상위</button>
+          <code title={path} style={{ flex: 1, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {path || "(드라이브를 선택하세요)"}
+          </code>
+        </div>
+        {err && <div style={{ fontSize: 11.5, color: "var(--stat-emergency,#f87171)" }}>{err}</div>}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
+          {loading ? (
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>불러오는 중…</div>
+          ) : (
+            <>
+              {dirs.map((d) => (
+                <div key={d.path} onClick={() => nav(d.path)} title={d.path}
+                     style={{ padding: "4px 10px", fontSize: 12.5, cursor: "pointer", display: "flex", gap: 6 }}>
+                  📁 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                </div>
+              ))}
+              {files.map((f) => (
+                <div key={f.path} onClick={() => setPicked(f.path)} title={f.path}
+                     style={{ padding: "4px 10px", fontSize: 12.5, cursor: "pointer", display: "flex", gap: 6,
+                              background: picked === f.path ? "var(--accent-subtle)" : undefined }}>
+                  ⚙ <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                </div>
+              ))}
+              {dirs.length === 0 && files.length === 0 && (
+                <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>하위 폴더·실행 파일 없음</div>
+              )}
+            </>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
+            .exe 클릭으로 선택 — [이 파일 선택] 후 [경로 저장]으로 확정
+          </span>
+          <button onClick={onClose} style={{ fontSize: 12 }}>취소</button>
+          <button className="primary" disabled={!picked} onClick={() => onPick(picked)} style={{ fontSize: 12 }}>이 파일 선택</button>
+        </div>
+      </div>
     </div>
   );
 }

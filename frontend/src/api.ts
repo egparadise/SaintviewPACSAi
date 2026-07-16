@@ -484,11 +484,12 @@ export const api = {
   /** 현재 공유 디렉토리 설정 조회 — 미설정이어도 404 아님(설정 화면 초기 표시용) */
   shareConfig: () =>
     req<{ dir: string; exists: boolean }>("/api/share/config"),
-  /** 서버측 폴더 탐색(관리자 전용) — path 빈값=드라이브 목록+현재 공유 디렉토리 */
-  shareFs: (path?: string) =>
+  /** 서버측 폴더 탐색(관리자 전용) — path 빈값=드라이브 목록+현재 공유 디렉토리.
+   *  files 지정(확장자, 예 "exe") 시 해당 확장자 파일 목록도 반환(실행 파일 선택용). */
+  shareFs: (path?: string, files?: string) =>
     req<{ path: string; parent: string | null; dirs: { name: string; path: string }[];
-          exists: boolean; share_dir?: string }>(
-      `/api/share/fs?path=${encodeURIComponent(path ?? "")}`),
+          files: { name: string; path: string }[]; exists: boolean; share_dir?: string }>(
+      `/api/share/fs?path=${encodeURIComponent(path ?? "")}${files ? `&files=${encodeURIComponent(files)}` : ""}`),
   netPing: (ip: string, port?: number) =>
     req<{ ok: boolean; icmp: boolean; icmp_ms: number; tcp: boolean | null }>("/api/admin/net-test/ping", {
       method: "POST", body: JSON.stringify({ ip, port }),
@@ -634,6 +635,9 @@ export const api = {
   insightsDbSchema: () => req<DbSchemaResp>("/api/insights/db-schema"),
   /** 외부 DB 도구 서버측 실행 — 설정키 server.dbtool(path) */
   insightsDbToolOpen: () => req<{ ok: boolean; detail?: string }>("/api/insights/db-tool-open", { method: "POST" }),
+  /** 서버 PC 에 설치된 흔한 DB 도구 자동 탐지 — 경로 미설정 시 기본값 제안 */
+  insightsDbToolDetect: () =>
+    req<{ items: { label: string; path: string }[] }>("/api/insights/db-tool-detect"),
   /** 시스템 로그 — type=event|network|dicom, 날짜·검색·병원 필터 */
   insightsLogs: (params: Record<string, string>) =>
     req<{ items: LogItem[] }>(`/api/insights/logs?${new URLSearchParams(params)}`),

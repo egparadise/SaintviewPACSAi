@@ -49,43 +49,51 @@ def share_config(db: Session = Depends(get_db), user: dict = Depends(current_use
 
 
 @router.get("/fs")
-def share_fs(path: str = "", db: Session = Depends(get_db), user: dict = Depends(admin_user)):
-    """서버측 폴더 탐색(관리자 전용) — 설정>서버 네트워크의 [폴더 찾기]에서 사용.
+def share_fs(path: str = "", files: str = "",
+             db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """서버측 폴더 탐색(관리자 전용) — 설정>서버 네트워크 [폴더 찾기]·DB 도구 [찾기]에서 사용.
 
     path 빈 값 → Windows 드라이브 목록(C:\\ D:\\ … 존재하는 것만) + 현재 공유 디렉토리.
     path 지정 → 해당 폴더의 하위 폴더 목록(폴더만, 접근 불가 폴더는 건너뜀).
+    files 지정(확장자, 예 'exe') → 해당 확장자 파일 목록도 함께 반환(실행 파일 선택용).
     """
     raw = path.strip()
+    ext = files.strip().lstrip(".").lower()
     if not raw:
         drives = [f"{c}:\\" for c in string.ascii_uppercase if Path(f"{c}:\\").is_dir()]
         return {
             "path": "",
             "parent": None,
             "dirs": [{"name": d, "path": d} for d in drives],
+            "files": [],
             "exists": True,
             "share_dir": _share_dir_raw(db),
         }
     p = Path(raw).resolve()  # resolve — 심볼릭 링크 루프 방지·정규화
     if not p.is_dir():
-        return {"path": str(p), "parent": None, "dirs": [], "exists": False}
+        return {"path": str(p), "parent": None, "dirs": [], "files": [], "exists": False}
     parent = None if p.parent == p else str(p.parent)  # 드라이브 루트면 상위 없음
     dirs: list[dict] = []
+    file_items: list[dict] = []
     try:
         with os.scandir(p) as it:
             for entry in it:
-                if len(dirs) >= _MAX_ENTRIES:
+                if len(dirs) + len(file_items) >= _MAX_ENTRIES:
                     break
                 try:
                     # follow_symlinks=False — 심볼릭 루프·네트워크 지연 방지
-                    if not entry.is_dir(follow_symlinks=False):
-                        continue
-                    dirs.append({"name": entry.name, "path": str(Path(p, entry.name))})
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.append({"name": entry.name, "path": str(Path(p, entry.name))})
+                    elif ext and entry.is_file(follow_symlinks=False) \
+                            and entry.name.lower().endswith("." + ext):
+                        file_items.append({"name": entry.name, "path": str(Path(p, entry.name))})
                 except (PermissionError, OSError):
                     continue  # 접근 불가 항목은 건너뜀
     except (PermissionError, OSError):
         raise HTTPException(status_code=403, detail="폴더에 접근할 수 없습니다")
     dirs.sort(key=lambda d: d["name"].lower())
-    return {"path": str(p), "parent": parent, "dirs": dirs, "exists": True}
+    file_items.sort(key=lambda d: d["name"].lower())
+    return {"path": str(p), "parent": parent, "dirs": dirs, "files": file_items, "exists": True}
 
 
 @router.get("")

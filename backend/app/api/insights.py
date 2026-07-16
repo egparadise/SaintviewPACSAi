@@ -328,3 +328,37 @@ def db_tool_open(db: Session = Depends(get_db), user: dict = Depends(admin_user)
                     target_type="server", target_id=p.name, detail={"path": str(p)}))
     db.commit()
     return {"ok": True, "detail": f"실행됨: {p.name}"}
+
+
+@router.get("/db-tool-detect")
+def db_tool_detect(user: dict = Depends(admin_user)):
+    """서버 PC 에 설치된 흔한 DB 도구 자동 탐지 — 경로 미설정 시 기본값 제안용.
+
+    잘 알려진 설치 경로만 확인(디스크 전체 스캔 없음). 첫 항목이 기본 제안값.
+    """
+    import glob as _glob
+
+    candidates: list[tuple[str, str]] = []  # (label, glob pattern)
+    for base in (r"C:\Program Files", r"C:\Program Files (x86)"):
+        candidates += [
+            ("pgAdmin 4", rf"{base}\pgAdmin 4\runtime\pgAdmin4.exe"),
+            ("pgAdmin 4", rf"{base}\pgAdmin 4\v*\runtime\pgAdmin4.exe"),
+            ("DBeaver", rf"{base}\DBeaver\dbeaver.exe"),
+            ("HeidiSQL", rf"{base}\HeidiSQL\heidisql.exe"),
+            ("DB Browser for SQLite", rf"{base}\DB Browser for SQLite\DB Browser for SQLite.exe"),
+            ("TablePlus", rf"{base}\TablePlus\TablePlus.exe"),
+        ]
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        candidates += [
+            ("DBeaver", rf"{local}\DBeaver\dbeaver.exe"),
+            ("HeidiSQL", rf"{local}\Programs\HeidiSQL\heidisql.exe"),
+        ]
+    items: list[dict] = []
+    seen: set[str] = set()
+    for label, pat in candidates:
+        for hit in _glob.glob(pat):
+            if hit not in seen and Path(hit).is_file():
+                seen.add(hit)
+                items.append({"label": label, "path": hit})
+    return {"items": items}

@@ -43,7 +43,10 @@ function ServerDatabaseView() {
         <thead><tr><th>구성</th><th>주소</th><th>상태</th></tr></thead>
         <tbody>{dbs.map((s) => (
           <tr key={s.name}><td>{s.name}</td><td><code>{s.url}</code></td>
-            <td style={{ color: s.ok ? undefined : "var(--danger,#f87171)" }}>{s.ok ? "● " : "○ "}{s.detail}</td></tr>
+            {/* 연동 OK = 녹색 점등, 실패 = 빨간 점 */}
+            <td><span style={{ color: s.ok ? "#4ade80" : "var(--danger,#f87171)",
+                               textShadow: s.ok ? "0 0 6px rgba(74,222,128,0.7)" : undefined }}>● </span>
+              <span style={{ color: s.ok ? undefined : "var(--danger,#f87171)" }}>{s.detail}</span></td></tr>
         ))}</tbody>
       </table>
     </div>
