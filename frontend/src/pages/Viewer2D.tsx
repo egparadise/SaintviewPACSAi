@@ -134,7 +134,8 @@ interface PaneState {
   // TY-3: 페인별 독립 시네(재생 여부·간격 초 — 없으면 ty_cine_sec) + 로컬 미디어(jpg/png/avi/mp4)
   playing?: boolean;
   cineSec?: number;
-  media?: { url: string; kind: "image" | "video"; name: string } | null;
+  media?: { url: string; kind: "image" | "video"; name: string } | null;  /** 페인별 Image Layout(N×M 타일) — 활성 페인에만 적용, 기본 1×1 */
+  il?: { r: number; c: number };
 }
 const initPane = (studyUid: string): PaneState => ({
   studyUid, series: null, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
@@ -465,7 +466,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [series, setSeries] = useState<SeriesNode[]>([]);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
   // Image Layout — 페인 내부 이미지 분할(연속 이미지 N×M 타일, UBPACS)
-  const [imgLay, setImgLay] = useState({ r: 1, c: 1 });
+  const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 페인 최대화(더블클릭 토글) + 페인 경계 스플리터 분율 (In Viewer 이식)
   const [maximized, setMaximized] = useState<string | null>(null);
   const vpRef = useRef<HTMLDivElement>(null);
@@ -846,7 +847,6 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => {
     const t = window.setInterval(() => {
       const now = Date.now();
-      const stride = Math.max(1, imgLay.r * imgLay.c);
       const due: string[] = [];
       for (const pid of PANE_IDS) {
         const p = panesRef.current[pid];
@@ -862,13 +862,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         for (const pid of due) {
           const p = ps[pid];
           if (!p?.playing || !p.series?.instances.length || p.media) continue;
+          const stride = Math.max(1, (p.il?.r ?? 1) * (p.il?.c ?? 1));   // 페인별 Image Layout
           next[pid] = { ...p, index: (p.index + stride) % p.series.instances.length };
         }
         return next;
       });
     }, 100);
     return () => window.clearInterval(t);
-  }, [imgLay, tyCineSec]);
+  }, [tyCineSec]);
 
   /* HP 규칙 적용 — Series/Image layout + W/L 프리셋 + 옵션(Crosslink/스크롤 동기/Scout) */
   const applyHp = useCallback((rule: HpRule) => {
@@ -1268,7 +1269,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §B: 이미지 전환 시 편집·마퀴 선택 해제
     setPanes((prev) => {
       const next = { ...prev };
-      const stride = Math.max(1, imgLay.r * imgLay.c);  // Image Layout 분할 시 페이지 단위 이동
+      const stride = Math.max(1, (prev[pid]?.il?.r ?? 1) * (prev[pid]?.il?.c ?? 1));  // 페인별 Image Layout 페이지 단위 이동
       // 무한 순환 — 끝 다음은 처음, 처음 이전은 끝(스크롤·화살표·CINE 공통). 양방향 wrap.
       const clampI = (len: number, i: number) => (len > 0 ? ((i % len) + len) % len : 0);
       // 1) 마스터 이동 — 빈 페인이면 마스터는 안 움직이되 동기 타깃은 계속 스크롤(OLD 인덱스 동작 보존)
@@ -1305,7 +1306,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       });
       return next;
     });
-  }, [xmode, layout, imgLay]);
+  }, [xmode, layout]);
 
   /* 뷰어 단축키: ←→=이미지, I=반전, R=회전, F=Fit, L=Link, 1/2/4=분할, Space=Cine, Esc=닫기 */
   useEffect(() => {
@@ -2462,12 +2463,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const thumbHoriz = prefs.thumbSide === "bottom" || prefs.thumbSide === "top";
   const thumbRight = prefs.thumbSide === "right";
   const ts = prefs.thumbSize;
-  const tileCount = imgLay.r * imgLay.c;
+  // 활성 페인 전환 시 Image 콤보 표시를 그 페인의 il 로 동기
+  const apIl = panes[activePane]?.il;
+  useEffect(() => { setImgLay(apIl ?? { r: 1, c: 1 }); }, [activePane, apIl?.r, apIl?.c]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 페인 1개 렌더 — 경계 스플리터 뷰포트(행×열 flex) 안에서 사용.
      더블클릭=최대화/복원(spineCurve 드래프트 수집 중에는 종료 전용 — 최대화 금지), 확대경=마우스 추적 3배 렌즈 */
   const renderPane = (pid: string) => {
     const p = panes[pid];
+    // 페인별 Image Layout — 이 페인에 지정된 il 만 적용(다른 페인은 1×1 유지)
+    const pIl = p.il ?? { r: 1, c: 1 };
+    const tileCount = pIl.r * pIl.c;
     const url = renderedUrl(p);
     const isPrior = p.studyUid !== detail.study_uid;
     const inst = p.series?.instances[p.index];
@@ -2557,8 +2563,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               /* Image Layout — 연속 이미지 N×M 타일 (UBPACS p.14) */
               <div style={{
                 width: "100%", height: "100%", display: "grid", gap: 1,
-                gridTemplateColumns: `repeat(${imgLay.c}, 1fr)`,
-                gridTemplateRows: `repeat(${imgLay.r}, 1fr)`,
+                gridTemplateColumns: `repeat(${pIl.c}, 1fr)`,
+                gridTemplateRows: `repeat(${pIl.r}, 1fr)`,
               }}>
                 {Array.from({ length: tileCount }, (_, k) => {
                   const u = renderedUrlAt(p, p.index + k);
@@ -3527,7 +3533,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <GridPicker label="Srs" max={10}
                     value={{ r: LAYOUTS[layout].rows, c: LAYOUTS[layout].cols }}
                     onPick={(v) => setLayout(`${v.r}x${v.c}`)} />
-        <GridPicker label="Img" max={10} value={imgLay} onPick={setImgLay} />
+        <GridPicker label="Img" max={10} value={imgLay}
+                    onPick={(v) => { setImgLay(v); patch(activePane, { il: v }); }} />
         {/* 오픈 검사 탭 — 좌→우로 쌓임. 클릭=활성 페인에 표시, ✕=닫기(주 검사로 복귀) */}
         <div style={{ display: "flex", gap: 2, alignSelf: "flex-end", overflowX: "auto", maxWidth: "55%" }}>
           {openTabs.map((t) => {
@@ -3718,7 +3725,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             </span>
           );
         })()}
-        <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
+        <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {(panes[activePane]?.il ?? { r: 1, c: 1 }).r}×{(panes[activePane]?.il ?? { r: 1, c: 1 }).c} (활성 페인)</span>
       </div>
 
       {skin === "saint" && prefs.paletteSide === "top" && saintBar}
