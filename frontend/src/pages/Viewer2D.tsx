@@ -283,8 +283,8 @@ function renderedUrl(p: PaneState): string | null {
 }
 
 interface ViewerPrefs {
-  paletteSide: "left" | "top" | "right";   // Toolbar 위치 (Setting>Viewer)
-  thumbSide: "left" | "bottom" | "right";  // Thumbnail 위치
+  paletteSide: "left" | "top" | "right" | "bottom";   // Toolbar 위치 (Setting>Viewer·드래그 도킹)
+  thumbSide: "left" | "bottom" | "right" | "top";  // Thumbnail 위치 (Setting·드래그 도킹)
   thumbSize: number;        // px
   thumbMode: "series" | "all";
   hanging2d: Record<string, string>;  // modality → layout key
@@ -2383,9 +2383,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
 
   const L = LAYOUTS[layout];
-  const paletteHoriz = prefs.paletteSide === "top";
+  const paletteHoriz = prefs.paletteSide === "top" || prefs.paletteSide === "bottom";
   const paletteRight = prefs.paletteSide === "right";
-  const thumbHoriz = prefs.thumbSide === "bottom";
+  const thumbHoriz = prefs.thumbSide === "bottom" || prefs.thumbSide === "top";
   const thumbRight = prefs.thumbSide === "right";
   const ts = prefs.thumbSize;
   const tileCount = imgLay.r * imgLay.c;
@@ -2724,6 +2724,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
                                                     : { borderRight: "1px solid var(--border)" }) }),
     }}>
+      {/* 위치 그립 — 드래그해서 화면 가장자리(좌/우/상/하)에 도킹 */}
+      <div title="드래그로 툴 팔레트 위치 이동 — 화면 왼쪽/오른쪽/위/아래로 끌어 놓으세요 (설정>뷰어에서도 지정 가능)"
+           onPointerDown={(e) => { dockDragRef.current = { kind: "palette", sx: e.clientX, sy: e.clientY }; }}
+           style={{ cursor: "grab", textAlign: "center", fontSize: 10, color: "var(--text-secondary)",
+                    padding: "1px 4px", flexShrink: 0, userSelect: "none" }}>⠿</div>
       {/* ★ Quick — 사용 상위 6개 툴 자동 추천 (ty_quick_row·ty_usage, 팔레트 최상단) */}
       {quickIds.length > 0 && (
         <div style={paletteHoriz ? { display: "flex", gap: 3, alignItems: "center" } : undefined}>
@@ -3103,6 +3108,32 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
+  // 팔레트/썸네일 드래그 도킹 — 그립을 잡고 화면 가장자리 쪽으로 끌어 좌/우/상/하 위치 변경(계정 저장)
+  const dockDragRef = useRef<{ kind: "palette" | "thumb"; sx: number; sy: number } | null>(null);
+  const dockSide = (kind: "palette" | "thumb", side: "left" | "right" | "top" | "bottom") => {
+    const key = kind === "palette" ? "paletteSide" : "thumbSide";
+    setPrefs((p) => ({ ...p, [key]: side }));
+    api.getSetting("viewer.prefs").then((r) =>
+      api.putSetting("viewer.prefs", { ...r.value, [key]: side }, "user")).catch(() => {});
+    setStatus(`${kind === "palette" ? "툴 팔레트" : "썸네일"} 위치 → ${side === "left" ? "왼쪽" : side === "right" ? "오른쪽" : side === "top" ? "상단" : "하단"} (계정 저장)`);
+  };
+  useEffect(() => {
+    const up = (e: PointerEvent) => {
+      const d = dockDragRef.current;
+      if (!d) return;
+      dockDragRef.current = null;
+      if (Math.abs(e.clientX - d.sx) < 40 && Math.abs(e.clientY - d.sy) < 40) return;   // 실수 방지
+      const W = window.innerWidth, H = window.innerHeight;
+      const dist: [number, "left" | "right" | "top" | "bottom"][] = [
+        [e.clientX, "left"], [W - e.clientX, "right"], [e.clientY, "top"], [H - e.clientY, "bottom"]];
+      dist.sort((x, y) => x[0] - y[0]);
+      dockSide(d.kind, dist[0][1]);
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 레이아웃에 표시 중인 모든 페인의 원본 시리즈 — 썸네일에서 주황 테두리(활성 페인은 초록)
   const shownOriginUids = new Set(PANE_IDS.slice(0, LAYOUTS[layout].count).map((id0) => {
     const q = panes[id0]; const ii = q?.series?.instances[q.index];
@@ -3126,6 +3157,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: ts + 34, ...(thumbRight ? { borderLeft: "1px solid var(--border)" }
                                            : { borderRight: "1px solid var(--border)" }) }),
     }}>
+      {/* 위치 그립 — 드래그해서 화면 가장자리(좌/우/상/하)에 도킹 */}
+      <div title="드래그로 썸네일 위치 이동 — 화면 왼쪽/오른쪽/위/아래로 끌어 놓으세요 (설정>뷰어에서도 지정 가능)"
+           onPointerDown={(e) => { dockDragRef.current = { kind: "thumb", sx: e.clientX, sy: e.clientY }; }}
+           style={{ cursor: "grab", textAlign: "center", fontSize: 10, color: "var(--text-secondary)",
+                    padding: "1px 4px", flexShrink: 0, userSelect: "none",
+                    position: "sticky", ...(thumbHoriz ? { left: 0 } : { top: 0 }), zIndex: 3,
+                    background: "var(--bg-panel)" }}>⠿</div>
       {/* In-View 와 동일 위치 — 썸네일 열 맨 위 Combine 토글(결합 시 파란 강조 + ●) */}
       <button onClick={() => act("comb")}
               title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
@@ -3494,7 +3532,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                       navPrevDisabled={navTarget(-1) === undefined}
                       navNextDisabled={navTarget(1) === undefined} />
       )}
-      {paletteHoriz && palette}
+      {prefs.paletteSide === "top" && palette}
+      {prefs.thumbSide === "top" && thumbs}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
         {skin !== "saint" && prefs.paletteSide === "left" && paletteOpen && (
@@ -3592,7 +3631,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                            background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>◂ 판독</button>
         )}
       </div>
-      {thumbHoriz && thumbs}
+      {prefs.thumbSide === "bottom" && thumbs}
+      {prefs.paletteSide === "bottom" && palette}
       {/* ── Profile — 두 점 선의 픽셀값 그래프 모달 (In Viewer 이식, ≈근사값) ── */}
       {profileData && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 500,

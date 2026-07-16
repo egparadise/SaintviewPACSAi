@@ -174,8 +174,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [ohifOn, setOhifOn] = useState(false);         // OHIF 아이콘 표시·동작 (기본 꺼짐)
   const [defLay, setDefLay] = useState<Record<string, { s: string; i: string }>>({});
   // Viewer2D 레이아웃 — Toolbar/Thumbnail 위치 (left/top/right — UBPACS p.14)
-  const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right">("left");
-  const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right">("left");
+  const [paletteSide, setPaletteSide] = useState<"left" | "top" | "right" | "bottom">("left");
+  const [thumbSide, setThumbSide] = useState<"left" | "bottom" | "right" | "top">("left");
   const [thumbSize, setThumbSize] = useState(128);
   const [thumbMode, setThumbMode] = useState<"series" | "all">("series");
   const [h2dCT, setH2dCT] = useState("1x1");
@@ -272,7 +272,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     api.getSetting("viewer.prefs").then((r) => {
       const v = r.value as {
         hanging?: Record<string, string>; hanging2d?: Record<string, string>;
-        paletteSide?: "left" | "top" | "right"; thumbSide?: "left" | "bottom" | "right";
+        paletteSide?: "left" | "top" | "right" | "bottom"; thumbSide?: "left" | "bottom" | "right" | "top";
         thumbSize?: number; thumbMode?: "series" | "all"; reportDock?: boolean;
       };
       const h = v.hanging ?? {};
@@ -561,8 +561,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       const wlf = wl.find_fields as string[] | undefined;
                       if (wlf?.length) setFindFields(wlf.filter((c) => FIND_FIELDS[c]));
                       if (wl.dbl_action) setDblAction(wl.dbl_action as "viewer2d" | "ohif");
-                      if (vw.paletteSide) setPaletteSide(vw.paletteSide as "left" | "top" | "right");
-                      if (vw.thumbSide) setThumbSide(vw.thumbSide as "left" | "bottom" | "right");
+                      if (vw.paletteSide) setPaletteSide(vw.paletteSide as "left" | "top" | "right" | "bottom");
+                      if (vw.thumbSide) setThumbSide(vw.thumbSide as "left" | "bottom" | "right" | "top");
                       if (vw.thumbSize) setThumbSize(vw.thumbSize as number);
                       if (vw.thumbMode) setThumbMode(vw.thumbMode as "series" | "all");
                       const cvw = vw.client_viewer as string | undefined;
@@ -1480,13 +1480,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Row label="툴 팔레트 위치">
                     <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top" | "right")}>
                       <option value="left">세로 (좌측)</option><option value="top">가로 (상단)</option>
-                      <option value="right">세로 (우측)</option>
+                      <option value="right">세로 (우측)</option><option value="bottom">가로 (하단)</option>
                     </select>
                   </Row>
                   <Row label="썸네일 위치">
                     <select value={thumbSide} onChange={(e) => setThumbSide(e.target.value as "left" | "bottom" | "right")}>
                       <option value="left">세로 (좌측)</option><option value="bottom">가로 (하단)</option>
-                      <option value="right">세로 (우측)</option>
+                      <option value="right">세로 (우측)</option><option value="top">가로 (상단)</option>
                     </select>
                   </Row>
                   <Row label="썸네일 크기">
