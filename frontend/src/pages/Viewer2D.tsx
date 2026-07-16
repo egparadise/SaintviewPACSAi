@@ -2969,6 +2969,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         : { width: ts + 34, ...(thumbRight ? { borderLeft: "1px solid var(--border)" }
                                            : { borderRight: "1px solid var(--border)" }) }),
     }}>
+      {/* In-View 와 동일 위치 — 썸네일 열 맨 위 Combine 토글(결합 시 파란 강조 + ●) */}
+      <button onClick={() => act("comb")}
+              title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
+              style={{ fontSize: 10.5, flexShrink: 0, ...(isCombined(panes[activePane])
+                ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb", fontWeight: 700 } : {}) }}>
+        Combine{isCombined(panes[activePane]) ? " ●" : ""}
+      </button>
       {prefs.thumbMode === "series" ? thumbSeries.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
           <div draggable
