@@ -324,18 +324,24 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
   side?: "top" | "bottom" | "left" | "right";   // 도킹 위치(설정 툴 팔레트 위치와 연동)
   onGripDown?: (e: React.PointerEvent) => void; // ⠿ 그립 — 드래그 도킹 시작
 }) {
-  const [open, setOpen] = useState<string | null>(null);
   const vertical = side === "left" || side === "right";
+  // 세로(좌/우) = 모든 섹션 펼침이 기본, 상/하 = 닫힘이 기본. 항목은 헤더 '아래'로 펼쳐진다.
+  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set(vertical ? menus.map((m) => m.title) : []));
+  useEffect(() => { setOpenSet(new Set(vertical ? menus.map((m) => m.title) : [])); }, [vertical]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = (t: string) => setOpenSet((st) => {
+    if (vertical) { const n = new Set(st); if (n.has(t)) n.delete(t); else n.add(t); return n; }
+    return st.has(t) ? new Set() : new Set([t]);   // 상/하 = 한 번에 하나
+  });
   const activeLabel = menus.flatMap((m) => m.items).find((it) => it.id === activeId)?.label ?? activeId;
   return (
     <div style={{ display: "flex", flexDirection: vertical ? "column" : "row",
                   alignItems: vertical ? "stretch" : "center", gap: 2, padding: vertical ? "6px 4px" : "2px 8px",
                   background: "var(--bg-panel)", position: "relative", zIndex: 30, flexShrink: 0,
-                  ...(vertical ? { width: 148, ...(side === "right" ? { borderLeft: "1px solid var(--border)" }
+                  ...(vertical ? { width: 156, overflowY: "auto", minHeight: 0, ...(side === "right" ? { borderLeft: "1px solid var(--border)" }
                                                                      : { borderRight: "1px solid var(--border)" }) }
                                : side === "bottom" ? { borderTop: "1px solid var(--border)" }
                                : { borderBottom: "1px solid var(--border)" }) }}
-         onMouseLeave={() => setOpen(null)}>
+         onMouseLeave={() => { if (!vertical) setOpenSet(new Set()); }}>
       {/* 위치 그립 — 드래그해서 좌/우/상/하 도킹(설정 툴 팔레트 위치와 동일 저장) */}
       <div title="드래그로 툴 파레트(메뉴바) 위치 이동 — 화면 가장자리로 끌어 놓으세요"
            onPointerDown={onGripDown}
@@ -351,27 +357,29 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
                     borderRadius: 12, background: "var(--accent)", color: "#fff", whiteSpace: "nowrap" }}>
         ● {activeLabel}
       </span>
-      {menus.map((m) => (
-        <div key={m.title} style={{ position: "relative" }}
-             onMouseEnter={() => setOpen((o) => (o ? m.title : o))}>
-          <button onClick={() => setOpen((o) => (o === m.title ? null : m.title))}
-                  style={{ fontSize: 12.5, padding: "5px 14px", fontWeight: 600, borderRadius: 4,
-                           background: open === m.title ? "var(--bg-elevated)" : "transparent",
+      {menus.map((m) => {
+        const isOpen = openSet.has(m.title);
+        return (
+        <div key={m.title} style={{ position: vertical ? "static" : "relative" }}
+             onMouseEnter={() => { if (!vertical) setOpenSet((st) => (st.size ? new Set([m.title]) : st)); }}>
+          <button onClick={() => toggle(m.title)}
+                  style={{ fontSize: 12.5, padding: "5px 12px", fontWeight: 600, borderRadius: 4,
+                           width: vertical ? "100%" : undefined, textAlign: vertical ? "left" : "center",
+                           background: isOpen ? "var(--bg-elevated)" : "transparent",
                            color: "var(--text-primary)", border: "none", cursor: "pointer" }}>
-            {m.title} ▾
+            {m.title} {isOpen ? "▴" : "▾"}
           </button>
-          {open === m.title && (
-            <div style={{ position: "absolute", zIndex: 350, minWidth: 190,
-                          ...(side === "left" ? { left: "100%", top: 0 }
-                            : side === "right" ? { right: "100%", top: 0 }
-                            : side === "bottom" ? { bottom: "100%", left: 0 }
-                            : { top: "100%", left: 0 }),
-                          background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
-                          boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
+          {isOpen && (
+            <div style={vertical
+              ? { display: "flex", flexDirection: "column", gap: 1, padding: "1px 0 5px 6px" }
+              : { position: "absolute", zIndex: 350, minWidth: 190,
+                  ...(side === "bottom" ? { bottom: "100%", left: 0 } : { top: "100%", left: 0 }),
+                  background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
               {m.items.map((it) => {
                 const on = it.id === activeId;
                 return (
-                  <button key={it.id} onClick={() => { it.run(); setOpen(null); }}
+                  <button key={it.id} onClick={() => { it.run(); if (!vertical) setOpenSet(new Set()); }}
                           style={{ display: "flex", justifyContent: "space-between", gap: 10, width: "100%", textAlign: "left",
                                    padding: "6px 12px", fontSize: 12, borderRadius: 3, border: "none", cursor: "pointer",
                                    whiteSpace: "nowrap", background: on ? "var(--accent)" : "transparent",
@@ -388,7 +396,8 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
