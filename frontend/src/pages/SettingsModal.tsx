@@ -127,6 +127,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // 현재 스코프에서 보이는 탭만 (단계별 분리)
   const visibleTabs = TREE.filter((t) => t.scope === scope && (!t.admin || isAdmin));
   const [page, setPage] = useState<string>(visibleTabs[0]?.key ?? "");
+  // 설정 창 크기 — 기본(860×580) ↔ 전체 화면 토글, 우하단 드래그로 자유 조절(resize:both)
+  const [maxed, setMaxed] = useState(false);
+  const [treeW, setTreeW] = useState(190);   // 좌측 트리 폭 — 스플리터 드래그로 조절
   const [saved, setSaved] = useState("");
 
   // ── 상태 (페이지별) ──
@@ -503,18 +506,25 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       </button>
       <div style={{
         background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
-        width: "min(860px, 96vw)", height: "min(580px, 92vh)", display: "flex", flexDirection: "column", overflow: "hidden",
+        display: "flex", flexDirection: "column", overflow: "hidden",
+        ...(maxed
+          ? { width: "98vw", height: "95vh" }
+          : { width: "min(860px, 96vw)", height: "min(580px, 92vh)",
+              // 우하단 핸들 드래그로 좌우·상하 크기 자유 조절(네이티브 resize)
+              resize: "both" as const, minWidth: 640, minHeight: 420, maxWidth: "98vw", maxHeight: "95vh" }),
       }}>
         <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", background: "var(--bg-elevated)" }}>
           <b>{SCOPE_TITLE[scope]}</b>
           <span style={{ marginLeft: 8, fontSize: 11.5, color: "var(--text-secondary)" }}>
             {scope === "system" ? "서버 운영" : scope === "hospital" ? "병원별 배치 구성" : "사용자·판독 환경"}
           </span>
-          <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
+          <button style={{ marginLeft: "auto", marginRight: 6 }} title={maxed ? "기본 크기로 복원" : "전체 화면으로 크게 보기"}
+                  onClick={() => setMaxed((m) => !m)}>{maxed ? "❐ 복원" : "⬜ 최대화"}</button>
+          <button onClick={onClose}>닫기</button>
         </div>
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
           {/* 좌측 트리 (INFINITT 패턴) */}
-          <div style={{ width: 190, borderRight: "1px solid var(--border)", padding: 8, background: "var(--bg-canvas)", flexShrink: 0 }}>
+          <div style={{ width: treeW, borderRight: "1px solid var(--border)", padding: 8, background: "var(--bg-canvas)", flexShrink: 0, overflowY: "auto" }}>
             {visibleTabs.map((t) => (
               <div key={t.key} onClick={() => setPage(t.key)}
                    style={{
@@ -527,6 +537,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </div>
             ))}
           </div>
+          {/* 트리 폭 스플리터 — 드래그로 좌우 크기 조절 */}
+          <div style={{ width: 5, cursor: "col-resize", flexShrink: 0, background: "transparent" }}
+               onPointerDown={(e) => {
+                 const sx = e.clientX, sw = treeW;
+                 const mv = (ev: PointerEvent) => setTreeW(Math.min(340, Math.max(120, sw + ev.clientX - sx)));
+                 const up = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
+                 window.addEventListener("pointermove", mv);
+                 window.addEventListener("pointerup", up);
+               }} />
           {/* 우측 페이지 */}
           <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             {visibleTabs.length === 0 && (
@@ -2289,7 +2308,7 @@ function HpDisplayEditor({ displays, onChange }: {
         {displays.map((d) => {
           const viewer = d.role === "viewer";
           return (
-            <div key={d.id} style={{ minWidth: 300, flex: "1 1 300px",
+            <div key={d.id} style={{ minWidth: 300, flex: "0 0 300px",   // 축소 금지 — 좌우 스크롤로 우측 디스플레이 접근
                                      border: `2px solid ${viewer ? "#8b5cf6" : "#22c55e"}`, borderRadius: 6, overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                             padding: "6px 10px", background: viewer ? "#8b5cf6" : "#22c55e", color: "#fff", fontSize: 12, fontWeight: 700 }}>
