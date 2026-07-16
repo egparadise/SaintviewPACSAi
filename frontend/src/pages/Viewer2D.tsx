@@ -2967,9 +2967,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
+  // 썸네일 자동 스크롤 — 현재 이미지 타일(SOP 우선, 없으면 원본 시리즈 타일)이 항상 보이게 따라감
+  const thumbsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const box = thumbsRef.current;
+    if (!box) return;
+    const el = (curInstAP?.sop_uid ? box.querySelector(`[data-sop="${CSS.escape(curInstAP.sop_uid)}"]`) : null)
+      ?? (curOriginUid ? box.querySelector(`[data-suid="${CSS.escape(curOriginUid)}"]`) : null);
+    (el as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [curInstAP?.sop_uid, curOriginUid]);
 
   const thumbs = thumbOpen && (
-    <div style={{
+    <div ref={thumbsRef} style={{
       display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 4, padding: 4,
       background: "var(--bg-panel)", overflow: "auto", flexShrink: 0,
       ...(thumbHoriz ? { borderTop: "1px solid var(--border)", height: ts + 34 }
@@ -2985,7 +2994,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </button>
       {prefs.thumbMode === "series" ? thumbSeries.map((s) => (
         <div key={s.series_uid} style={{ flexShrink: 0 }}>
-          <div draggable
+          <div draggable data-suid={s.series_uid}
                onDragStart={(e) => {
                  // 시리즈를 페인으로 드래그 — 드롭 시 해당 페인에 로드
                  e.dataTransfer.setData("application/x-sv-series", s.series_uid);
@@ -3041,7 +3050,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           {selSeries === s.series_uid && (
             <div style={{ display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 2, padding: 2 }}>
               {s.instances.slice(0, 60).map((inst, idx) => (
-                <div key={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+                <div key={inst.sop_uid} data-sop={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
                   <img src={inst.preview_url} alt="" title={`Img ${inst.instance_number}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""}`}
                        onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                        style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
@@ -3061,7 +3070,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           )}
         </div>
       )) : allInstances.slice(0, 200).map(({ s, i, idx }) => (
-        <div key={i.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+        <div key={i.sop_uid} data-sop={i.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
           <img src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}${keyMarks.has(i.sop_uid) ? " · 🔑 KEY" : ""}`}
                onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",

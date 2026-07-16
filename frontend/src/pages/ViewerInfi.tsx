@@ -2191,6 +2191,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const _ap = panes[active];
   const _ai = _ap?.series?.instances[_ap.index];
   const activeUid = _ai?.series_uid ?? _ap?.series?.series_uid;
+  // 썸네일 자동 스크롤 — 현재 이미지(SOP 우선, 없으면 원본 시리즈 타일)가 항상 보이게 따라감
+  const thumbColRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const box = thumbColRef.current;
+    if (!box) return;
+    const el = (_ai?.sop_uid ? box.querySelector(`[data-sop="${CSS.escape(_ai.sop_uid)}"]`) : null)
+      ?? (activeUid ? box.querySelector(`[data-suid="${CSS.escape(activeUid)}"]`) : null);
+    (el as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [_ai?.sop_uid, activeUid]);
   const thumbBorder = (uid: string, fallback: string) =>
     selUids.has(uid) ? `2px solid ${selColor}`
       : uid === activeUid ? "2px solid #4ade80"
@@ -2199,7 +2208,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   // 좌측 세로 썸네일 열 (원본 이미지4 — 툴바 옆 세로 스택)
   const thumbCol = (
-    <div style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
+    <div ref={thumbColRef} style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
       <button onClick={combine} title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
               style={{ fontSize: 10.5, ...(isCombined(panes[active])
@@ -2220,7 +2229,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         .flatMap((s) => s.instances.map((inst, idx) => ({ s, inst, idx })))
         .slice(0, 200)
         .map(({ s, inst, idx }) => (
-          <div key={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+          <div key={inst.sop_uid} data-sop={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
             <img src={inst.preview_url} alt=""
                  title={`S${s.series_number} Img${inst.instance_number ?? idx + 1}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""} — 클릭=활성 페인 표시`}
                  onClick={() => upd(active, { series: s, index: idx, studyUid: curD.study_uid })}
@@ -2236,7 +2245,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         ))}
       {thumbMode === "series" && series.map((s, sIdx) => (
-        <div key={s.series_uid} draggable
+        <div key={s.series_uid} draggable data-suid={s.series_uid}
              onDragStart={(e) => { e.dataTransfer.setData("application/x-sv-series", s.series_uid); e.dataTransfer.effectAllowed = "copy"; }}
              onClick={(e) => {
                // 썸네일에서도 다중 선택: Ctrl=해당 시리즈가 표시된 페인 토글, Shift=처음~클릭 시리즈의 페인 범위
@@ -2286,7 +2295,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         </button>
       ))}
       {priorSeries.map((e) => (
-        <div key={`${e.uid}-${e.s.series_uid}`} draggable
+        <div key={`${e.uid}-${e.s.series_uid}`} draggable data-suid={e.s.series_uid}
              onDragStart={(ev) => { ev.dataTransfer.setData("application/x-sv-series", e.s.series_uid); ev.dataTransfer.effectAllowed = "copy"; }}
              onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
              title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}\n· 드래그 → 원하는 페인에 놓기`}
