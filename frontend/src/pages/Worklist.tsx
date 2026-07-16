@@ -509,6 +509,9 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
     <div style={{
       width, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
       padding: 6, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, minHeight: 0,
+      // 레일 전체 스크롤 — 섹션(기간·Search Filter·Favorites·검색 폴더)이 늘어나도 끝까지 보이게.
+      // unifiedScroll(In/SV 좌열)은 바깥 래퍼가 스크롤하므로 중복 방지.
+      ...(unifiedScroll ? {} : { overflowY: "auto" as const, maxHeight: "100%" }),
     }}>
       <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px",
                     display: "flex", alignItems: "center" }}>
