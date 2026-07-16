@@ -1180,6 +1180,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const clampI = (len: number, i: number) => (len > 0 ? ((i % len) + len) % len : 0);
       // 1) 마스터 이동 — 빈 페인이면 마스터는 안 움직이되 동기 타깃은 계속 스크롤(OLD 인덱스 동작 보존)
       const mp = prev[pid];
+      // 1장짜리(스크롤 불가) 페인에서의 스크롤은 전체 no-op — 자기는 못 움직이는데 동기 타깃(다른 검사)만
+      // 움직여 "선택은 Chest인데 MRI 가 스크롤" 되는 혼란 방지. (빈 페인은 기존대로 동기 타깃 스크롤 유지)
+      if (mp?.series && mp.series.instances.length <= 1) return prev;
       let mIdx = mp?.index ?? 0;
       let mInst: InstanceNode | undefined;
       let mSeriesUid: string | undefined;

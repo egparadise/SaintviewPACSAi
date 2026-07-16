@@ -702,7 +702,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   const scroll = useCallback((i: number, delta: number) => {
     setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §B: 이미지 전환 시 편집·마퀴 선택 해제
-    setPanes((ps) => ps.map((p, k) => {
+    setPanes((ps) => {
+      // 1장짜리(스크롤 불가) 페인에서의 스크롤은 전체 no-op — 동기 타깃만 움직이는 혼란 방지
+      const mp = ps[i];
+      if (mp?.series && mp.series.instances.length <= 1) return ps;
+      return ps.map((p, k) => {
       // §3.3: crosslink 마스터 ON 일 때 — auto_sync=같은 검사 페인, sync_other=다른 검사(과거) 페인 동기
       const sameExam = p.studyUid === ps[i]?.studyUid;
       const linked = xlink.crosslink && ((xlink.auto_sync && sameExam) || (xlink.sync_other && !sameExam));
@@ -710,7 +714,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       // 무한 순환 — 끝 다음은 처음, 처음 이전은 끝(스크롤·화살표 공통). 양방향 wrap.
       const len = p.series.instances.length;
       return { ...p, index: len > 0 ? (((p.index + delta) % len) + len) % len : 0 };
-    }));
+      });
+    });
   }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
 
   // ── 시네 엔진 — 페인별 독립 재생(playing/cineSec), 100ms 틱에서 각 페인의 간격 경과 시 전진 ──
