@@ -510,6 +510,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => { selPanesRef.current = selPanes; }, [selPanes]);
   // TY-3(4): 3D Cursor 십자 마커 — 페인별 {sop, 정규화 x/y} (In cross3d 이식)
   const [cross3d, setCross3d] = useState<Record<string, { sop: string; x: number; y: number }>>({});
+  // 숫자키/상하 화살표 시리즈 선택 — thumbSeries 는 뒤에서 정의되므로 ref 로 최신 함수 참조
+  const seriesKeyRef = useRef<{ sel: (n: number) => void; step: (d: 1 | -1) => void }>({ sel: () => {}, step: () => {} });
+
   // 3D Cursor 홀드-드래그 — 버튼을 누른 채 움직이면 rAF 스로틀로 연속 재배치(모든 페인 동기 추적)
   const c3DragRef = useRef<{ pid: string } | null>(null);
   const c3RafRef = useRef(0);
@@ -1233,8 +1236,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         return;
       }
       switch (e.key) {
-        case "ArrowRight": case "ArrowDown": e.preventDefault(); step(activePane, 1); break;
-        case "ArrowLeft": case "ArrowUp": e.preventDefault(); step(activePane, -1); break;
+        case "ArrowRight": e.preventDefault(); step(activePane, 1); break;
+        case "ArrowLeft": e.preventDefault(); step(activePane, -1); break;
+        // ↑↓ = 시리즈 이동(썸네일 순서), ←→ = 이미지 이동
+        case "ArrowDown": e.preventDefault(); seriesKeyRef.current.step(1); break;
+        case "ArrowUp": e.preventDefault(); seriesKeyRef.current.step(-1); break;
         case "Escape":
           // 계층 초기화(§D): 진행중 그리기/이동/리사이즈 → 편집 선택(selAnno) → 도구 → 멀티선택 → 최대화 → 닫기.
           // annoDragRef 는 draft 유무와 무관하게 항상 취소 — move/resize(draft=null) 중 Esc 가 드래그를
@@ -1256,9 +1262,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); }
           break;
         case " ": e.preventDefault(); act("cine"); break;
-        case "1": setLayout("1x1"); break;
-        case "2": setLayout("1x2"); break;
-        case "4": setLayout("2x2"); break;
+        // 숫자 1~9 = 시리즈 순번 선택(썸네일 순서) — 활성 페인에 해당 시리즈 표시
+        case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": case "9":
+          e.preventDefault(); seriesKeyRef.current.sel(Number(e.key) - 1); break;
         default:
           if (e.ctrlKey || e.altKey || e.metaKey) break;   // 브라우저 조합키(Ctrl+A 등) 보존
           switch (e.key.toLowerCase()) {
@@ -3004,6 +3010,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     () => thumbSeries.flatMap((s) => s.instances.map((i, idx) => ({ s, i, idx }))),
     [thumbSeries],
   );
+  // 숫자키(1~9)=시리즈 순번 선택 · ↑↓=이전/다음 시리즈 — 활성 페인에 표시(썸네일 순서 기준)
+  seriesKeyRef.current = {
+    sel: (n: number) => {
+      const sN = thumbSeries[n];
+      if (!sN) { setStatus(`Series ${n + 1} 없음 (총 ${thumbSeries.length}개)`); return; }
+      patch(activePane, { ...initPane(uidOfSeries(sN.series_uid)), series: sN, index: 0 });
+      setStatus(`Series ${n + 1} — S${sN.series_number} ${sN.series_desc || ""} (${sN.instances.length}장)`);
+    },
+    step: (d: 1 | -1) => {
+      const p = panes[activePane];
+      const curUid = p?.series?.instances[p.index]?.series_uid ?? p?.series?.series_uid;
+      const idx = thumbSeries.findIndex((x) => x.series_uid === curUid);
+      const ni = idx < 0 ? 0 : idx + d;
+      if (ni < 0 || ni >= thumbSeries.length || ni === idx) return;
+      seriesKeyRef.current.sel(ni);
+    },
+  };
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
