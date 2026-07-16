@@ -1334,6 +1334,26 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false, shift: e.shiftKey };
   };
 
+  // 우클릭 W/L 드래그 — window CAPTURE 단계에서 최우선 가로채기.
+  // Linkclump 류 확장이 capture/document 어디에 리스너를 걸어도, window capture 가 가장 먼저 실행되고
+  // 여기서 stopImmediatePropagation 하면 이벤트가 document/target 으로 전파되지 않아 빨간 박스가 시작되지 않는다.
+  // 대신 우리의 우클릭 드래그 시작(활성 페인 지정·dragRef 세팅)을 여기서 직접 수행(React 핸들러 미도달 보완).
+  useEffect(() => {
+    const cap = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      const el = (e.target as HTMLElement)?.closest?.("[data-pid]") as HTMLElement | null;
+      if (!el?.dataset.pid) return;   // 뷰어 페인 밖 우클릭은 관여 안 함
+      e.preventDefault(); e.stopImmediatePropagation();
+      const pid = el.dataset.pid;
+      setActivePane(pid);
+      setCtxMenu(null);
+      dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
+                          btn: 2, moved: false, shift: e.shiftKey };
+    };
+    window.addEventListener("mousedown", cap, true);   // capture 단계
+    return () => window.removeEventListener("mousedown", cap, true);
+  }, []);
+
   /* 드래그 그리기 시작 — 시작 이미지좌표 기록 + draft=[start,start] + annoDrag 세팅(dragRef 미사용) */
   const startAnnoDraw = (pid: string, e: React.MouseEvent) => {
     const p = panes[pid];
@@ -2302,7 +2322,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       );
     }
     return (
-      <div ref={getPaneRef(pid)}
+      <div ref={getPaneRef(pid)} data-pid={pid}
            onMouseDown={(e) => onPaneMouseDown(pid, e)}
            onMouseEnter={() => setHoverPane(pid)}
            onWheel={(e) => {
