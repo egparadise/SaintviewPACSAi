@@ -792,25 +792,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     };
   }, [vrOn, applyLiveSlab, vrLowRes]);
 
-  // 참조선 점선(슬랩 폭) 드래그 감지 — MPR 뷰포트의 slabThickness 가 2mm 를 넘으면 3D(VR) 페인 자동 추가
-  useEffect(() => {
-    const el = gridRef.current;
-    if (!el) return;
-    const check = () => {
-      const engine = engineRef.current;
-      if (!engine || vrOn) return;
-      for (const v of MPR_VIEWPORTS) {
-        try {
-          const vp = engine.getViewport(v.id) as Types.IVolumeViewport | undefined;
-          const t = vp?.getProperties?.()?.slabThickness;
-          if (t && t > 2) { setVrOn(true); return; }
-        } catch { /* 미준비 */ }
-      }
-    };
-    const up = () => window.setTimeout(check, 50);
-    el.addEventListener("pointerup", up);
-    return () => el.removeEventListener("pointerup", up);
-  }, [vrOn]);
+  // (변경) 슬랩 폭 조정만으로 3D 페인을 자동 추가하지 않음 — [🧊 3D 렌더링] 버튼으로만 표시
 
   // 3D 볼륨 렌더링(VR) 페인 — vrOn 시 동적 enable, 모달리티별 프리셋(CT=Bone, 그 외 MR 기본)
   useEffect(() => {
