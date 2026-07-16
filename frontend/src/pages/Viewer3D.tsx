@@ -430,6 +430,34 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
 
   useEffect(() => () => { resizeObserverRef.current?.disconnect(); }, []);
 
+  // Shift(=ROI 그리기) 홀드 중엔 크로스헤어를 Enabled(표시만)로 강등 — 라인이 끌리지 않고 ROI 만 동작.
+  // (Passive 는 기존 주석 드래그가 가능해 라인이 함께 움직이는 원인 — Enabled 는 렌더만 하고 조작 차단)
+  useEffect(() => {
+    const setCross = (interactive: boolean) => {
+      const g = ToolGroupManager.getToolGroup(TG_MPR);
+      if (!g || !modesRef.current.crosshair) return;
+      try {
+        if (interactive) {
+          g.setToolActive(CrosshairsTool.toolName, {
+            bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
+          });
+        } else {
+          g.setToolEnabled(CrosshairsTool.toolName);
+        }
+        engineRef.current?.render();
+      } catch { /* 그룹 미준비 */ }
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Shift" && modesRef.current.roi && modesRef.current.crosshair) setCross(false);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Shift" && modesRef.current.crosshair) setCross(true);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, []);
+
   // 두께(슬랩) 핸들 색 구분 — 회전 핸들(원형)은 참조선 색 유지, 두께 핸들(작은 정사각형)은 주황 고정.
   // CrosshairsTool 이 두 핸들을 같은 색으로 그리므로(설정 미지원) SVG 후처리로 재채색:
   // 두께 핸들만 rect(정사각·소형) 이라 폭=높이≤16px 휴리스틱으로 안전 선별(ROI 핸들은 원형이라 무영향).
