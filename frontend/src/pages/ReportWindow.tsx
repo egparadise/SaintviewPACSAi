@@ -61,6 +61,22 @@ export function ReportWindow() {
   const [rdOpts, setRdOpts] = useState<Record<string, unknown>>({});
   const [msg, setMsg] = useState("");
   // ── History(과거검사) 상호작용: 단일클릭=판독 표시, 더블클릭=1:2 Compare, 드래그·잡고 V=판독영역 복사 ──
+  // 과거검사 판독 미리보기 — 검사별 최종(없으면 최신) 판독문 lazy 로드(최대 12건 캐시)
+  const [pastTexts, setPastTexts] = useState<Record<number, string>>({});
+  useEffect(() => {
+    if (!detail) return;
+    let alive = true;
+    detail.related_exams.slice(0, 12).forEach((e) => {
+      if (pastTexts[e.id] !== undefined) return;
+      api.reports(e.id).then((rr) => {
+        const fin = rr.items.find((x) => x.status === "finalized") ?? rr.items[0];
+        if (alive) setPastTexts((m) => ({ ...m, [e.id]: fin?.narrative_text ?? "" }));
+      }).catch(() => { if (alive) setPastTexts((m) => ({ ...m, [e.id]: "" })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.id, detail?.related_exams.length]);
+
   const pasteReading = (text: string) => {
     if (!text || lockedRef.current || finalizedRef.current) return;
     const add = (prev: string) => (prev ? `${prev}\n${text}` : text);
@@ -523,16 +539,31 @@ export function ReportWindow() {
                   {histList.map((e) => (
                     <div key={e.id} onClick={() => pickPast(e)} onDoubleClick={() => openCompare(e)}
                          title="단일클릭=판독 표시 · 더블클릭=1:2 Compare(현재 옆) 열기"
-                         style={{ padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #24282d",
-                                  display: "flex", alignItems: "center", gap: 8,
+                         style={{ padding: "8px 10px", cursor: "pointer", borderBottom: "2px solid var(--border)",
                                   background: e.id === selPast ? "var(--bg-elevated)" : undefined }}>
-                      <HistThumb examId={e.id} />
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
-                        <div style={{ fontWeight: 600 }}>{e.modality} · {e.study_date}</div>
-                        <div style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.study_desc}</div>
-                        <div style={{ fontSize: 10, color: "var(--text-secondary)" }}>{e.status}</div>
+                      {/* 상단: 날짜 + 복사(과거 판독→현재 판독영역) */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 11.5, color: "var(--text-secondary)", flex: 1 }}>{e.study_date}</span>
+                        {pastTexts[e.id] ? (
+                          <button onClick={(ev) => { ev.stopPropagation(); pasteReading(pastTexts[e.id]); }}
+                                  title="이 과거 판독을 현재 판독영역에 복사"
+                                  className="primary" style={{ fontSize: 10.5, padding: "1px 10px" }}>복사</button>
+                        ) : null}
                       </div>
-                      <span style={{ flexShrink: 0, fontSize: 13, color: "var(--text-secondary)" }}>⇆</span>
+                      <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>{e.modality} · {e.study_desc || "-"}
+                        <span style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 400 }}>  {e.status}</span>
+                      </div>
+                      {/* 본문: 과거 영상 썸네일 + 판독 미리보기 */}
+                      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                        <HistThumb examId={e.id} />
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 1.5, color: "var(--text-primary)",
+                                      display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
+                                      overflow: "hidden", whiteSpace: "pre-wrap" }}>
+                          {pastTexts[e.id] === undefined ? "판독 불러오는 중…"
+                            : pastTexts[e.id] ? pastTexts[e.id] : "(판독 기록 없음)"}
+                        </div>
+                        <span style={{ flexShrink: 0, fontSize: 13, color: "var(--text-secondary)" }}>⇆</span>
+                      </div>
                     </div>
                   ))}
                   {relatedView && (
