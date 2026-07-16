@@ -430,6 +430,33 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
 
   useEffect(() => () => { resizeObserverRef.current?.disconnect(); }, []);
 
+  // 두께(슬랩) 핸들 색 구분 — 회전 핸들(원형)은 참조선 색 유지, 두께 핸들(작은 정사각형)은 주황 고정.
+  // CrosshairsTool 이 두 핸들을 같은 색으로 그리므로(설정 미지원) SVG 후처리로 재채색:
+  // 두께 핸들만 rect(정사각·소형) 이라 폭=높이≤16px 휴리스틱으로 안전 선별(ROI 핸들은 원형이라 무영향).
+  useEffect(() => {
+    const SLAB_COLOR = "#f97316";
+    const recolor = () => {
+      const grid = gridRef.current;
+      if (!grid) return;
+      grid.querySelectorAll("svg rect").forEach((el) => {
+        const w = parseFloat(el.getAttribute("width") ?? "0");
+        const h = parseFloat(el.getAttribute("height") ?? "0");
+        if (w > 0 && Math.abs(w - h) < 0.5 && w <= 16 && el.getAttribute("stroke") !== SLAB_COLOR) {
+          el.setAttribute("stroke", SLAB_COLOR);
+          el.setAttribute("fill", SLAB_COLOR);
+          el.setAttribute("fill-opacity", "0.9");
+        }
+      });
+    };
+    const evName = (ToolsEnums.Events as unknown as { ANNOTATION_RENDERED?: string }).ANNOTATION_RENDERED;
+    if (evName) eventTarget.addEventListener(evName, recolor);
+    const iv = window.setInterval(recolor, 400);   // 렌더 이벤트 미발화 대비 보조 폴링
+    return () => {
+      if (evName) eventTarget.removeEventListener(evName, recolor);
+      window.clearInterval(iv);
+    };
+  }, []);
+
   // Esc — MIP 1×1 확대 해제(1×3 복귀)
   useEffect(() => {
     if (!mipMax) return;
