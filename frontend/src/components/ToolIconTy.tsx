@@ -202,6 +202,70 @@ const TY2: Record<string, IconDef> = {
       </g>
     ),
   },
+  // ── Scroll — 스택 이미지 넘김: 상/하 화살촉 + 중앙 스크롤 바 (Pixel 틸) ──
+  scroll: {
+    g: "pixel",
+    body: (p) => (
+      <g>
+        <path d="M12 2.6 L16.4 7.6 H7.6 Z" fill={p} />
+        <path d="M12 21.4 L7.6 16.4 H16.4 Z" fill={p} />
+        <rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1.2" fill={p} />
+      </g>
+    ),
+    spec: [10.6, 5.4, 1.5, 0.8, -20],
+  },
+  // ── Cobb's Angle — 기울어진 두 종판선 + 사이 각 호 (Anno 앰버) ──
+  cobb: {
+    g: "anno",
+    body: (p) => (
+      <g {...LN} stroke={p}>
+        <line x1="4" y1="6.6" x2="20" y2="3.4" strokeWidth="2.6" />
+        <line x1="4" y1="17.4" x2="20" y2="20.6" strokeWidth="2.6" />
+        <path d="M7.4 9.4 A6.4 6.4 0 0 0 7.4 14.6" strokeWidth="2" fill="none" />
+      </g>
+    ),
+    spec: [8.2, 5.2, 2.2, 0.8, -8],
+  },
+  // ── LegLength — 골반 바 + 좌우 다리 길이선(끝 틱) (Anno 앰버) ──
+  leg: {
+    g: "anno",
+    body: (p) => (
+      <g {...LN} stroke={p}>
+        <line x1="5" y1="4.4" x2="19" y2="4.4" strokeWidth="2.6" />
+        <line x1="8" y1="7.2" x2="7" y2="20" strokeWidth="2.6" />
+        <line x1="16" y1="7.2" x2="17" y2="18" strokeWidth="2.6" />
+        <line x1="4.6" y1="20" x2="9.4" y2="20" strokeWidth="2" />
+        <line x1="14.6" y1="18" x2="19.4" y2="18" strokeWidth="2" />
+      </g>
+    ),
+    spec: [9.0, 4.0, 2.4, 0.8, 0],
+  },
+  // ── Report — 판독 문서: 페이지 + 본문 줄 (Shutter 슬레이트) ──
+  report: {
+    g: "shutter",
+    body: (p) => (
+      <path fill={p}
+            d="M6 2.6 h8.4 L19 7.2 V20 a1.4 1.4 0 0 1 -1.4 1.4 H6 A1.4 1.4 0 0 1 4.6 20 V4 A1.4 1.4 0 0 1 6 2.6 Z" />
+    ),
+    detail: (c) => (
+      <g {...LN} stroke={c} strokeWidth="1.5">
+        <path d="M14.2 2.9 V7.4 H18.7" fill="none" />
+        <line x1="7.4" y1="11" x2="16.2" y2="11" />
+        <line x1="7.4" y1="14.2" x2="16.2" y2="14.2" />
+        <line x1="7.4" y1="17.4" x2="13" y2="17.4" />
+      </g>
+    ),
+    spec: [8.4, 6.0, 2.0, 1.0, -18],
+    flat: (c) => (
+      <g {...LN} stroke={c} strokeWidth="1.7">
+        <path d="M6 3.4 h8.2 L18.4 7.6 V20.6 H6 V3.4 Z" fill="none" />
+        <path d="M14.2 3.6 V7.8 H18.2" fill="none" />
+        <line x1="8" y1="11.4" x2="16.4" y2="11.4" />
+        <line x1="8" y1="14.6" x2="16.4" y2="14.6" />
+        <line x1="8" y1="17.8" x2="13.4" y2="17.8" />
+      </g>
+    ),
+  },
   // ── 셔터 (Shutter 슬레이트) — 바깥 가림 프레임(evenodd 구멍) + 노출 영역 ──
   shutRect: {
     g: "shutter",
