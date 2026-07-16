@@ -2522,12 +2522,14 @@ export function Worklist() {
     if (!alwaysReadingRef.current) return;
     if (readingWinRef.current && !readingWinRef.current.closed) return;   // 이미 옆에 떠 있음
     void (async () => {
-      // 배치: 설정>모니터의 판독 모니터 우선, 없으면 워크리스트 창 오른쪽 옆
       const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
       const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
+      // 자동 오픈 게이트 — 설정>모니터에서 '판독' 모니터를 지정한 경우에만 더블클릭 자동 오픈.
+      // 미지정이면 자동으로 띄우지 않음(뷰어/워크리스트의 [Reading] 버튼으로만 수동 오픈).
+      if (mon == null || mon < 0) return;
       const beside = `left=${window.screenX + Math.max(360, window.outerWidth - 620)},` +
         `top=${window.screenY},width=980,height=${Math.max(600, window.outerHeight - 40)}`;
-      const features = await screenFeatures(mon != null && mon >= 0 ? [mon] : null, beside);
+      const features = await screenFeatures([mon], beside);
       readingWinRef.current = window.open(
         `${window.location.origin}${window.location.pathname}?report=1&study=${id}`, "sv_report", features);
     })();
