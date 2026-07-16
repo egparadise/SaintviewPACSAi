@@ -315,7 +315,7 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 // eslint-disable-next-line react-refresh/only-export-components
 /* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional)
    + 좌측 환자 ◀▶ 이동 + 활성 마우스모드/툴 칩. 항목 run 은 기존 툴 함수 그대로 호출(기능=TY 뷰어 동일). */
-function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled, side = "top", onGripDown }: {
+function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled, side = "top", onGripDown, quick }: {
   menus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[];
   activeId: string;                 // 현재 활성 마우스모드/툴 id (드롭다운·칩 하이라이트)
   onNav: (dir: 1 | -1) => void;     // 환자(검사) ◀▶ 이동
@@ -323,6 +323,7 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
   navNextDisabled: boolean;
   side?: "top" | "bottom" | "left" | "right";   // 도킹 위치(설정 툴 팔레트 위치와 연동)
   onGripDown?: (e: React.PointerEvent) => void; // ⠿ 그립 — 드래그 도킹 시작
+  quick?: { id: string; label: string; icon?: string; run: () => void }[];  // ★Quick — 세로 모드 2열 그리드(최대 6)
 }) {
   const vertical = side === "left" || side === "right";
   // 세로(좌/우) = 모든 섹션 펼침이 기본, 상/하 = 닫힘이 기본. 항목은 헤더 '아래'로 펼쳐진다.
@@ -347,16 +348,35 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
            onPointerDown={onGripDown}
            style={{ cursor: "grab", fontSize: 10, color: "var(--text-secondary)", userSelect: "none",
                     textAlign: "center", padding: vertical ? "0 0 2px" : "0 4px", flexShrink: 0 }}>⠿</div>
-      {/* 환자 ◀▶ 이동 */}
-      <button title="◀ 이전 검사" disabled={navPrevDisabled} onClick={() => onNav(-1)}
-              style={{ padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navPrevDisabled ? 0.35 : 1 }}>◀</button>
-      <button title="▶ 다음 검사" disabled={navNextDisabled} onClick={() => onNav(1)}
-              style={{ padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navNextDisabled ? 0.35 : 1 }}>▶</button>
-      {/* 활성 마우스모드/툴 칩 */}
-      <span title="현재 활성 도구" style={{ margin: "0 8px 0 4px", padding: "3px 10px", fontSize: 11, fontWeight: 700,
-                    borderRadius: 12, background: "var(--accent)", color: "#fff", whiteSpace: "nowrap" }}>
-        ● {activeLabel}
-      </span>
+      {/* 환자 ◀▶ 이동 — 한 줄 */}
+      <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+        <button title="◀ 이전 검사" disabled={navPrevDisabled} onClick={() => onNav(-1)}
+                style={{ flex: 1, padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navPrevDisabled ? 0.35 : 1 }}>◀</button>
+        <button title="▶ 다음 검사" disabled={navNextDisabled} onClick={() => onNav(1)}
+                style={{ flex: 1, padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navNextDisabled ? 0.35 : 1 }}>▶</button>
+      </div>
+      {vertical && quick && quick.length > 0 ? (
+        /* ★Quick — 2열 그리드, 최대 6개(Save·Rfsh 고정 + 사용 상위) */
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flexShrink: 0, padding: "3px 0",
+                      borderBottom: "1px solid var(--border)" }}>
+          {quick.slice(0, 6).map((q) => (
+            <button key={q.id} onClick={q.run} title={q.label}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                             padding: "5px 4px", fontSize: 10.5, borderRadius: 4, border: "none", cursor: "pointer",
+                             background: q.id === activeId ? "var(--accent)" : "var(--bg-elevated)",
+                             color: q.id === activeId ? "#fff" : "var(--text-primary)" }}>
+              <ToolIconTy id={q.icon ?? q.id} size={13} flat />{q.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        /* 활성 마우스모드/툴 칩 (상/하 가로 모드) */
+        <span title="현재 활성 도구" style={{ margin: "0 8px 0 4px", padding: "3px 10px", fontSize: 11, fontWeight: 700,
+                      borderRadius: 12, background: "var(--accent)", color: "#fff", whiteSpace: "nowrap",
+                      ...(vertical ? { textAlign: "center", margin: "2px 0" } : {}) }}>
+          ● {activeLabel}
+        </span>
+      )}
       {menus.map((m) => {
         const isOpen = openSet.has(m.title);
         return (
@@ -2746,6 +2766,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   /* SaintView 툴 파레트 = 메뉴바 — 설정 paletteSide(좌/우/상/하) 연동 + ⠿ 드래그 도킹 */
   const saintBar = skin === "saint" && (
     <SaintMenuBar menus={saintMenus} activeId={tool || mouseMode} side={prefs.paletteSide}
+                  quick={quickIds.slice(0, 6).filter((id) => quickDefs[id]).map((id) => ({
+                    id, label: quickDefs[id].label, icon: quickDefs[id].icon,
+                    run: () => { recordUse(id); quickDefs[id].run(); },
+                  }))}
                   onGripDown={(e) => { dockDragRef.current = { kind: "palette", sx: e.clientX, sy: e.clientY }; }}
                   onNav={navPatient}
                   navPrevDisabled={navTarget(-1) === undefined}
