@@ -14,6 +14,8 @@ _DEFAULT_COLUMNS = [
 ]
 _DEFAULT_FIND_FIELDS = ["pid", "pname", "sex", "modality", "date", "desc", "status", "finding", "emergency"]
 
+# 표기·순서 규약: SaintView → I-View → T-View (선택 뷰어 콤보·설정 트리와 동일).
+# 키(saintvidw/infi/ty)는 사용자 viewer.prefs.mode_key 에 저장돼 있으므로 변경 금지 — 라벨만 규약을 따른다.
 DEFAULT_MODE_PROFILES: dict = {
     "profiles": {
         "saintvidw": {
@@ -28,6 +30,23 @@ DEFAULT_MODE_PROFILES: dict = {
                 "thumbMode": "series", "reportDock": True,
             },
         },
+        # infi — 신규 개발 뷰어(I-View) 레이아웃 저장소. 새 뷰어의 레이아웃을
+        # 설정 화면 [현재 화면을 프로파일에 저장]으로 여기에 채워 넣는다.
+        "infi": {
+            "label": "I-View",
+            "worklist": {
+                "columns": ["status", "patient_name", "patient_key", "sex", "study_date",
+                            "accession_no", "modality", "series_count", "instance_count",
+                            "body_part", "impression"],
+                "find_fields": _DEFAULT_FIND_FIELDS,
+                "dbl_action": "viewer2d",
+            },
+            "viewer": {
+                "client_viewer": "infi",
+                "paletteSide": "top", "thumbSide": "bottom",
+                "thumbMode": "series", "reportDock": False,
+            },
+        },
         # TY — 현행 자체 뷰어(Viewer2D) 레이아웃. 선택+적용 시 이 레이아웃으로 전환된다.
         "ty": {
             "label": "T-View",
@@ -40,23 +59,6 @@ DEFAULT_MODE_PROFILES: dict = {
                 "client_viewer": "ty",
                 "paletteSide": "left", "thumbSide": "left",
                 "thumbMode": "series", "reportDock": True,
-            },
-        },
-        # infi — 신규 개발 뷰어(Infi Viewer) 레이아웃 저장소. 새 뷰어의 레이아웃을
-        # 설정 화면 [현재 화면을 프로파일에 저장]으로 여기에 채워 넣는다.
-        "infi": {
-            "label": "In-View",
-            "worklist": {
-                "columns": ["status", "patient_name", "patient_key", "sex", "study_date",
-                            "accession_no", "modality", "series_count", "instance_count",
-                            "body_part", "impression"],
-                "find_fields": _DEFAULT_FIND_FIELDS,
-                "dbl_action": "viewer2d",
-            },
-            "viewer": {
-                "client_viewer": "infi",
-                "paletteSide": "top", "thumbSide": "bottom",
-                "thumbMode": "series", "reportDock": False,
             },
         },
     },

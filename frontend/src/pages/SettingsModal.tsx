@@ -62,16 +62,17 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope;
   // 뷰어 — 사용자/판독 환경
   { key: "env", label: "환경 (Environment)", scope: "viewer" },
   { key: "worklist", label: "워크리스트", scope: "viewer" },
+  // 표기·순서 규약: SaintView → I-View → T-View (선택 뷰어·모드 프로파일 콤보와 동일)
   { key: "wlSaint", label: "SaintView", scope: "viewer", parent: "worklist" },
+  { key: "wlIn", label: "I-View", scope: "viewer", parent: "worklist" },
   { key: "wlTy", label: "T-View", scope: "viewer", parent: "worklist" },
-  { key: "wlIn", label: "In-View", scope: "viewer", parent: "worklist" },
   { key: "report", label: "리포트", scope: "viewer" },
   { key: "reading", label: "판독 (Reading)", scope: "viewer" },
   // 뷰어 설정 3분리 — 공통(선택/모드/OHIF) · TY Viewer 전용 · In Viewer 전용 (키 이름은 기존 유지 — 로밍 호환)
   { key: "viewer", label: "뷰어 공통", scope: "viewer" },
   { key: "viewerSv", label: "SaintView", scope: "viewer", parent: "viewer" },
+  { key: "viewerIn", label: "I-View", scope: "viewer", parent: "viewer" },
   { key: "viewerTy", label: "T-View", scope: "viewer", parent: "viewer" },
-  { key: "viewerIn", label: "In-View", scope: "viewer", parent: "viewer" },
   { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
   { key: "shortcuts", label: "단축키 (Mouse·Key)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
@@ -658,7 +659,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭·선택 뷰어)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
-                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>T-View</b>=자체 뷰어 레이아웃 · <b>In-View</b>=INFINITT 스타일 레이아웃 저장소.
+                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>I-View</b>=INFINITT 스타일 레이아웃 저장소 · <b>T-View</b>=자체 뷰어 레이아웃.
                   </div>
                   {isAdmin && (
                     <details>
@@ -1066,7 +1067,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
             {(["wlSaint", "wlTy", "wlIn"] as const).includes(page as never) && (() => {
               const vk = page === "wlSaint" ? "sv" : page === "wlTy" ? "ty" : "infi";
-              const vLabel = page === "wlSaint" ? "SaintView" : page === "wlTy" ? "T-View" : "In-View";
+              const vLabel = page === "wlSaint" ? "SaintView" : page === "wlTy" ? "T-View" : "I-View";
               const ov = wlBy[vk as "sv" | "ty" | "infi"];
               return (
                 <Group title={vLabel + " 워크리스트 — 뷰어별 그리드 컬럼 (계정별 저장)"}>

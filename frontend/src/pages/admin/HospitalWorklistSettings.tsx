@@ -17,10 +17,11 @@ import {
   type WorklistTab,
 } from "../WorklistTree";
 
+// 표기·순서 규약: SaintView → I-View → T-View (설정 모달과 동일)
 const VIEWERS = [
   { vk: "sv", label: "SaintView" },
+  { vk: "infi", label: "I-View" },
   { vk: "ty", label: "T-View" },
-  { vk: "infi", label: "In-View" },
 ] as const;
 
 export function HospitalWorklistSettings({ hid }: { hid: number }) {
