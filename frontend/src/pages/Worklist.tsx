@@ -2289,6 +2289,10 @@ export function Worklist() {
   const [searchFlash, setSearchFlash] = useState(0);
   const flashMountRef = useRef(false);
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  // 뷰어별 워크리스트 컬럼 오버라이드(settings>워크리스트>뷰어별) — 모드 전환 시 적용
+  const wlColsBaseRef = useRef<string[]>(DEFAULT_COLUMNS);
+  const wlByViewerRef = useRef<{ sv?: string[] | null; ty?: string[] | null; infi?: string[] | null }>({});
+  const [wlBvTick, setWlBvTick] = useState(0);
   const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [batchOpen, setBatchOpen] = useState(false);
@@ -2395,6 +2399,9 @@ export function Worklist() {
         // 맨 앞에 가산 보정한다 — 사용자 설정 무시가 아니라 추가만
         const cols = v.columns.filter((c) => COLUMN_DEFS[c]);
         if (!cols.includes("read_state")) cols.unshift("read_state");
+        wlColsBaseRef.current = cols;
+        wlByViewerRef.current = (v as { by_viewer?: { sv?: string[] | null; ty?: string[] | null; infi?: string[] | null } }).by_viewer ?? {};
+        setWlBvTick((t) => t + 1);
         setColumns(cols);
       }
       if (v.find_fields?.length) setFindFields(v.find_fields.filter((c) => FIND_FIELDS[c]));
@@ -2962,6 +2969,14 @@ export function Worklist() {
   const [infiMode, setInfiMode] = useState(false);
   // SAINT VIEW 모드 — client_viewer=sv 면 SAINT VIEW 워크리스트 스킨(상태 카운트 바 + SV 컬럼, infi 7구역 레이아웃 재사용)
   const [svMode, setSvMode] = useState(false);
+  // 뷰어별 컬럼 적용 — 현재 모드(sv/infi/ty)의 오버라이드가 있으면 공통 대신 사용
+  useEffect(() => {
+    const key = svMode ? "sv" : infiMode ? "infi" : "ty";
+    const ov = wlByViewerRef.current[key as "sv" | "ty" | "infi"];
+    const next = (ov?.length ? ov.filter((c) => COLUMN_DEFS[c]) : wlColsBaseRef.current);
+    if (next?.length) setColumns(next.includes("read_state") ? next : ["read_state", ...next]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svMode, infiMode, wlBvTick]);
   const [svPerf, setSvPerf] = useState(false);   // SAINT VIEW 상단 탭 — General/Performance 전환
   // OHIF 표시/동작 — 기본 숨김, 설정>뷰어>OHIF 에서 허용 (viewer.prefs.ohif_enabled)
   const [ohifOn, setOhifOn] = useState(false);

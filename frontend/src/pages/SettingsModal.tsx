@@ -44,7 +44,7 @@ function FolderIcon({ size = 15 }: { size?: number }) {
   );
 }
 
-const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope }[] = [
+const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope; parent?: string }[] = [
   // 시스템 — 서버 운영(시스템 관리자)
   { key: "server", label: "서버 (Server)", admin: true, scope: "system" },
   { key: "overview", label: "운영 현황 (감독)", admin: true, scope: "system" },
@@ -62,13 +62,16 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   // 뷰어 — 사용자/판독 환경
   { key: "env", label: "환경 (Environment)", scope: "viewer" },
   { key: "worklist", label: "워크리스트", scope: "viewer" },
+  { key: "wlSaint", label: "SaintView", scope: "viewer", parent: "worklist" },
+  { key: "wlTy", label: "T-View", scope: "viewer", parent: "worklist" },
+  { key: "wlIn", label: "In-View", scope: "viewer", parent: "worklist" },
   { key: "report", label: "리포트", scope: "viewer" },
   { key: "reading", label: "판독 (Reading)", scope: "viewer" },
   // 뷰어 설정 3분리 — 공통(선택/모드/OHIF) · TY Viewer 전용 · In Viewer 전용 (키 이름은 기존 유지 — 로밍 호환)
   { key: "viewer", label: "뷰어 공통", scope: "viewer" },
-  { key: "viewerSv", label: "뷰어 — SaintView", scope: "viewer" },
-  { key: "viewerTy", label: "뷰어 — T-View", scope: "viewer" },
-  { key: "viewerIn", label: "뷰어 — In-View", scope: "viewer" },
+  { key: "viewerSv", label: "SaintView", scope: "viewer", parent: "viewer" },
+  { key: "viewerTy", label: "T-View", scope: "viewer", parent: "viewer" },
+  { key: "viewerIn", label: "In-View", scope: "viewer", parent: "viewer" },
   { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
   { key: "shortcuts", label: "단축키 (Mouse·Key)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
@@ -136,6 +139,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [refreshSec, setRefreshSec] = useState(10);
   const [defaultStatus, setDefaultStatus] = useState("");
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
+  // 뷰어별 워크리스트 컬럼 오버라이드 — null/undefined = 공통(columns) 사용
+  const [wlBy, setWlBy] = useState<{ sv?: string[] | null; ty?: string[] | null; infi?: string[] | null }>({});
   const [findFields, setFindFields] = useState<string[]>(DEFAULT_FIND_FIELDS);
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [hangingCT, setHangingCT] = useState("default");
@@ -259,6 +264,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
   useEffect(() => {
     api.getSetting("worklist.prefs").then((r) => {
+      const bv = (r.value as { by_viewer?: { sv?: string[] | null; ty?: string[] | null; infi?: string[] | null } }).by_viewer;
+      if (bv) setWlBy(bv);
       const v = r.value as {
         auto_refresh_sec?: number; default_status?: string; columns?: string[];
         find_fields?: string[]; dbl_action?: "viewer2d" | "ohif";
@@ -430,6 +437,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     const cur = (await api.getSetting("worklist.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("worklist.prefs",
       { ...cur, auto_refresh_sec: refreshSec, default_status: defaultStatus, columns,
+        by_viewer: wlBy,
         find_fields: findFields, dbl_action: dblAction, panels: wlPanels, nav_left: polNavLeft }, "user");
     const curV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("viewer.prefs", {
@@ -525,15 +533,29 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
           {/* 좌측 트리 (INFINITT 패턴) */}
           <div style={{ width: treeW, borderRight: "1px solid var(--border)", padding: 8, background: "var(--bg-canvas)", flexShrink: 0, overflowY: "auto" }}>
-            {visibleTabs.map((t) => (
-              <div key={t.key} onClick={() => setPage(t.key)}
-                   style={{
-                     padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, marginBottom: 2,
-                     display: "flex", alignItems: "center", gap: 7,
-                     background: page === t.key ? "var(--accent-subtle)" : undefined,
-                     color: page === t.key ? "var(--text-primary)" : "var(--text-secondary)",
-                   }}>
-                <FolderIcon /> {t.label}
+            {visibleTabs.filter((t) => !(t as { parent?: string }).parent).map((t) => (
+              <div key={t.key}>
+                <div onClick={() => setPage(t.key)}
+                     style={{
+                       padding: "6px 10px", borderRadius: 4, cursor: "pointer", fontSize: 12.5, marginBottom: 2,
+                       display: "flex", alignItems: "center", gap: 7,
+                       background: page === t.key ? "var(--accent-subtle)" : undefined,
+                       color: page === t.key ? "var(--text-primary)" : "var(--text-secondary)",
+                     }}>
+                  <FolderIcon /> {t.label}
+                </div>
+                {/* 하위 항목 — 부모 아래 들여쓰기로 표시(워크리스트·뷰어 공통의 뷰어별 페이지) */}
+                {visibleTabs.filter((c) => (c as { parent?: string }).parent === t.key).map((c) => (
+                  <div key={c.key} onClick={() => setPage(c.key)}
+                       style={{
+                         padding: "5px 10px 5px 26px", borderRadius: 4, cursor: "pointer", fontSize: 12,
+                         marginBottom: 2, display: "flex", alignItems: "center", gap: 6,
+                         background: page === c.key ? "var(--accent-subtle)" : undefined,
+                         color: page === c.key ? "var(--text-primary)" : "var(--text-secondary)",
+                       }}>
+                    <span style={{ opacity: 0.6 }}>└</span> {c.label}
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -1011,6 +1033,31 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </>
             )}
 
+            {(["wlSaint", "wlTy", "wlIn"] as const).includes(page as never) && (() => {
+              const vk = page === "wlSaint" ? "sv" : page === "wlTy" ? "ty" : "infi";
+              const vLabel = page === "wlSaint" ? "SaintView" : page === "wlTy" ? "T-View" : "In-View";
+              const ov = wlBy[vk as "sv" | "ty" | "infi"];
+              return (
+                <Group title={vLabel + " 워크리스트 — 뷰어별 그리드 컬럼 (계정별 저장)"}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, marginBottom: 8 }}>
+                    <input type="checkbox" checked={!ov}
+                           onChange={(e) => setWlBy((p) => ({ ...p, [vk]: e.target.checked ? null : [...columns] }))} />
+                    공통 워크리스트 설정 사용 (기본) — 해제하면 이 뷰어 전용 컬럼 구성을 편집합니다
+                  </label>
+                  {ov && (
+                    <FilterSettingList
+                      all={Object.keys(COLUMN_DEFS)}
+                      selected={ov}
+                      labelOf={(k) => COLUMN_DEFS[k].label}
+                      onChange={(cols) => setWlBy((p) => ({ ...p, [vk]: cols }))}
+                    />
+                  )}
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    {vLabel} 모드로 워크리스트를 열면 이 구성이 공통 설정 대신 적용됩니다. OK(저장) 시 반영.
+                  </div>
+                </Group>
+              );
+            })()}
             {page === "worklist" && (
               <>
                 <Group title="그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)">
