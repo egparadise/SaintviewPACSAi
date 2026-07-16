@@ -415,6 +415,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [dragOverPane, setDragOverPane] = useState<number | null>(null);
   // 드롭 Circle Menu(INFINITT Circle Menu 등가) — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택
   const [circle, setCircle] = useState<{ pi: number; uid: string; x: number; y: number } | null>(null);
+  const dropMenuRef = useRef(false);   // 드롭 동작 메뉴(설정>뷰어 drop_menu, 기본 숨김=바로 Open)
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
   // 드래그로 그리기(§A) — 시작 이미지픽셀/현재 이미지픽셀을 추적, 놓을 때 3px 이상이면 finishTool.
   const annoDragRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement;
@@ -1807,6 +1808,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const persistTimer = useRef<number | null>(null);
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
+      dropMenuRef.current = !!(r.value as { drop_menu?: boolean }).drop_menu;
       const v = r.value as { infi_overlay_font?: number; infi_overlay_visible?: boolean;
                              infi_sel_color?: string; infi_toolbar?: Record<string, boolean> };
       if (v.infi_overlay_font) setOvlFont(v.infi_overlay_font);
@@ -2025,7 +2027,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
            // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
            onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pi) setDragOverPane(pi); } }}
            onDragLeave={() => setDragOverPane((d) => (d === pi ? null : d))}
-           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) setCircle({ pi, uid, x: e.clientX, y: e.clientY }); }}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (!uid) return; if (dropMenuRef.current) setCircle({ pi, uid, x: e.clientX, y: e.clientY }); else dropSeriesToPaneInfi(pi, uid); }}
            style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
                     // 멀티 선택(Crosslink)=설정 색(기본 자주색), 활성=초록, 드롭 대상=강조
                     outline: dragOverPane === pi ? "3px solid #38bdf8"

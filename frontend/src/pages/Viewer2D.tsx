@@ -526,6 +526,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [dragOverPane, setDragOverPane] = useState<string | null>(null);
   // 드롭 Circle Menu(INFINITT Circle Menu 등가) — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택
   const [circle, setCircle] = useState<{ pid: string; uid: string; x: number; y: number } | null>(null);
+  // 드롭 동작 메뉴 표시 여부(설정>뷰어 drop_menu, 기본 숨김=바로 Open) — 계정별
+  const dropMenuRef = useRef(false);
   // 드롭된 series_uid 로 시리즈 객체를 찾아 해당 페인에 로드
   const dropSeriesToPane = (pid: string, seriesUid: string) => {
     const s = thumbSeries.find((x) => x.series_uid === seriesUid) ?? series.find((x) => x.series_uid === seriesUid);
@@ -1307,6 +1309,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (sc?.shift_rclick) shiftRClickRef.current = sc.shift_rclick;
       const keys = (sc as { keys?: Record<string, string> } | undefined)?.keys;
       if (keys) scKeysRef.current = { ...SC_DEFAULTS, ...keys };
+      dropMenuRef.current = !!(r.value as { drop_menu?: boolean }).drop_menu;
     }).catch(() => {});
   }, []);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {
@@ -2443,7 +2446,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
            // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
            onDragOver={(e) => { if (e.dataTransfer.types.includes("application/x-sv-series")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; if (dragOverPane !== pid) setDragOverPane(pid); } }}
            onDragLeave={() => setDragOverPane((d) => (d === pid ? null : d))}
-           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (uid) setCircle({ pid, uid, x: e.clientX, y: e.clientY }); }}
+           onDrop={(e) => { e.preventDefault(); setDragOverPane(null); const uid = e.dataTransfer.getData("application/x-sv-series"); if (!uid) return; if (dropMenuRef.current) setCircle({ pid, uid, x: e.clientX, y: e.clientY }); else dropSeriesToPane(pid, uid); }}
            style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0, flex: 1,
                     background: "#000", cursor: tool ? "copy" : "crosshair",
                     outline: dragOverPane === pid ? "3px solid var(--accent)" : outline,
@@ -3011,12 +3014,24 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setStatus(`Series ${n + 1} — S${sN.series_number} ${sN.series_desc || ""} (${sN.instances.length}장)`);
     },
     step: (d: 1 | -1) => {
-      const p = panes[activePane];
-      const curUid = p?.series?.instances[p.index]?.series_uid ?? p?.series?.series_uid;
-      const idx = thumbSeries.findIndex((x) => x.series_uid === curUid);
-      const ni = idx < 0 ? 0 : idx + d;
-      if (ni < 0 || ni >= thumbSeries.length || ni === idx) return;
-      seriesKeyRef.current.sel(ni);
+      // 레이아웃 단위 그룹 이동 — 1×2 면 2개, 2×2 면 4개씩 다음/이전 시리즈 묶음을 페인들에 표시
+      const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+      const q0 = panes[vis[0]];
+      const refUid = q0?.series?.instances[q0.index]?.series_uid ?? q0?.series?.series_uid;
+      let idx = thumbSeries.findIndex((x) => x.series_uid === refUid);
+      if (idx < 0) idx = 0;
+      const base = idx + d * vis.length;
+      if (base < 0 || base >= thumbSeries.length) return;
+      setPanes((prev) => {
+        const next = { ...prev };
+        vis.forEach((id, k) => {
+          const sN = thumbSeries[base + k];
+          if (sN) next[id] = { ...prev[id], ...initPane(uidOfSeries(sN.series_uid)), series: sN, index: 0 };
+        });
+        return next;
+      });
+      const last = Math.min(base + vis.length, thumbSeries.length);
+      setStatus(`Series ${base + 1}${vis.length > 1 ? `~${last}` : ""} 표시 (↑↓ = ${vis.length}개씩 이동)`);
     },
   };
   // 단축키 디스패처 — 렌더마다 최신 클로저로 갱신(설정>단축키 재바인딩 대상 전체)
@@ -3054,6 +3069,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
+  // 레이아웃에 표시 중인 모든 페인의 원본 시리즈 — 썸네일에서 주황 테두리(활성 페인은 초록)
+  const shownOriginUids = new Set(PANE_IDS.slice(0, LAYOUTS[layout].count).map((id0) => {
+    const q = panes[id0]; const ii = q?.series?.instances[q.index];
+    return ii?.series_uid ?? q?.series?.series_uid;
+  }).filter(Boolean) as string[]);
   // 썸네일 자동 스크롤 — 현재 이미지 타일(SOP 우선, 없으면 원본 시리즈 타일)이 항상 보이게 따라감
   const thumbsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -3113,7 +3133,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
                title={`${s.series_desc || s.modality}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 더블클릭: 활성 페인 로드 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
                style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)"
-                          : s.series_uid === curOriginUid ? "2px solid #4ade80"   // 현재 표시 중(Combine 스크롤 추적)
+                          : s.series_uid === curOriginUid ? "2px solid #4ade80"   // 활성 페인 표시 중
+                          : shownOriginUids.has(s.series_uid) ? "2px solid #f97316"   // 다른 페인 표시 중
                           : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
             {s.instances[Math.floor(s.instances.length / 2)] && (

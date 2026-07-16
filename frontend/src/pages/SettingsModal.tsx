@@ -214,6 +214,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [scRdrag, setScRdrag] = useState<"wl" | "zoom" | "pan">("wl");
   const [scShiftR, setScShiftR] = useState<"zoomout" | "none">("zoomout");
   const [scKeys, setScKeys] = useState<Record<string, string>>({ ...SC_DEFAULTS });
+  const [dropMenu, setDropMenu] = useState(false);  // 시리즈 드롭 동작 메뉴(기본 숨김=바로 Open)
   // 정책 — ◀(왼쪽) 버튼이 시간상 어느 방향으로 갈지 (워크리스트는 최신이 위)
   const [polNavLeft, setPolNavLeft] = useState<"past" | "recent">("past");
   const [quality, setQuality] = useState<AiQuality | null>(null);
@@ -347,6 +348,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (sc?.shift_rclick) setScShiftR(sc.shift_rclick);
       const kk = (sc as { keys?: Record<string, string> } | undefined)?.keys;
       if (kk) setScKeys({ ...SC_DEFAULTS, ...kk });
+      setDropMenu(!!(v as { drop_menu?: boolean }).drop_menu);
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -457,6 +459,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
       shortcuts: { rdrag: scRdrag, shift_rclick: scShiftR, keys: scKeys },
+      drop_menu: dropMenu,
     }, "user");
     await api.putSetting("report.prefs",
       { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
@@ -1606,6 +1609,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     <option value="zoom">Zoom</option>
                     <option value="pan">Pan</option>
                   </select>
+                </label>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>시리즈 드롭 동작 메뉴</span>
+                  <input type="checkbox" checked={dropMenu} onChange={(e) => setDropMenu(e.target.checked)} />
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    체크 시 드롭할 때 Open/Combine/Combine all 메뉴 표시 — 해제(기본)는 바로 Open(교체)
+                  </span>
                 </label>
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
                   <span style={{ width: 170, color: "var(--text-secondary)" }}>Shift + 우클릭</span>
