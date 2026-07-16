@@ -26,6 +26,7 @@ TRANSFER_SYNTAX: dict[str, str] = {
     "jpegls_lossless": "1.2.840.10008.1.2.4.80",  # JPEG-LS 무손실 (16비트 권장)
     "jpeg_lossless": "1.2.840.10008.1.2.4.70",
     "jpeg": "1.2.840.10008.1.2.4.50",         # JPEG Baseline (손실, 8비트 전용)
+    "htj2k_lossless": "1.2.840.10008.1.2.4.201",  # HTJ2K 무손실 — Orthanc 미지원 → 자체 OpenJPH 인코딩
 }
 COMPRESSION_LABELS: dict[str, str] = {
     "none": "비압축 DICOM",
@@ -34,6 +35,7 @@ COMPRESSION_LABELS: dict[str, str] = {
     "jpegls_lossless": "JPEG-LS 무손실",
     "jpeg_lossless": "JPEG 무손실",
     "jpeg": "JPEG 베이스라인 (손실·8비트 전용)",
+    "htj2k_lossless": "HTJ2K 무손실 (OpenJPH 자체 인코딩·고속 디코딩)",
 }
 
 BACKUP_POLICY_KEY = "backup.policy"
@@ -140,6 +142,19 @@ def run_backup_job(db: Session, job_id: int, *, client=None) -> BackupJob:
                 continue
             sdir = root / _safe(study.study_date or "nodate") / _safe(study.study_uid)
             sdir.mkdir(parents=True, exist_ok=True)
+            if job.compression == "htj2k_lossless":
+                # HTJ2K — Orthanc 가 트랜스코딩하지 못하므로 자체 OpenJPH(WASM/Node) 배치 인코딩
+                from app.services.htj2k_service import encode_study_htj2k
+
+                try:
+                    b, n, fb = encode_study_htj2k(client, study, sdir)
+                    total_bytes += b
+                    inst_count += n
+                    fallbacks += fb
+                    done_studies += 1
+                except Exception:  # noqa: BLE001 — 검사 단위 실패는 건너뛰고 계속
+                    pass
+                continue
             for inst in instances:
                 oid = inst["orthanc_id"]
                 try:
