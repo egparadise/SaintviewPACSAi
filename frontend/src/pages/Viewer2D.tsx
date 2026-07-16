@@ -633,6 +633,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [tyLabels, setTyLabels] = useState(true);    // ty_tool_labels
   const [tyIcon3d, setTyIcon3d] = useState(true);    // ty_icon_3d — false 면 플랫(평면) 아이콘
   const [tyQuickRow, setTyQuickRow] = useState(true);  // ty_quick_row — ★ Quick 행 표시
+  const [tyToolCols, setTyToolCols] = useState(2);     // ty_tool_cols — 팔레트 툴 배열(열 수), 기본 2X2
   const [tyUsageRec, setTyUsageRec] = useState(true);  // ty_usage_rec — 사용 패턴 기록 on/off
   const [tyUsage, setTyUsage] = useState<Record<string, number>>({});  // ty_usage
   const tyUsageRef = useRef<Record<string, number>>({});
@@ -913,6 +914,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (t.ty_tool_labels !== undefined) setTyLabels(t.ty_tool_labels);
       if (t.ty_icon_3d !== undefined) setTyIcon3d(t.ty_icon_3d);
       if (t.ty_quick_row !== undefined) setTyQuickRow(t.ty_quick_row);
+      if ((t as { ty_tool_cols?: number }).ty_tool_cols) setTyToolCols((t as { ty_tool_cols?: number }).ty_tool_cols!);
       if (t.ty_usage_rec !== undefined) setTyUsageRec(t.ty_usage_rec);
       if (t.ty_usage) { tyUsageRef.current = t.ty_usage; setTyUsage(t.ty_usage); }
       if (t.ty_overlay_font) setTyOvFont(t.ty_overlay_font);
@@ -2835,7 +2837,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             ★ Quick
           </div>
           <div style={{ display: paletteHoriz ? "flex" : "grid", gap: 3,
-                        ...(paletteHoriz ? {} : { gridTemplateColumns: "1fr 1fr", padding: "3px 0" }) }}>
+                        ...(paletteHoriz ? {} : { gridTemplateColumns: `repeat(${tyToolCols}, 1fr)`, padding: "3px 0" }) }}>
             {quickIds.map((id) => {
               const q = quickDefs[id];
               return (
@@ -2899,7 +2901,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           {openSecs.has(k) && (
             <div style={{
               display: paletteHoriz ? "flex" : "grid", gap: 3,
-              ...(paletteHoriz ? {} : { gridTemplateColumns: "1fr 1fr", padding: "3px 0" }),
+              ...(paletteHoriz ? {} : { gridTemplateColumns: `repeat(${tyToolCols}, 1fr)`, padding: "3px 0" }),
             }}>
               {k === "common" && (<>
                 <ModeBtn k="select" label="Select" title="선택 모드 — 주석 클릭 편집 / 빈 공간 드래그=녹색 점선 마퀴 다중선택 → Del 삭제" />

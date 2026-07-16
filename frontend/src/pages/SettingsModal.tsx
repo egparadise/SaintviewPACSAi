@@ -159,6 +159,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [infScrollBar, setInfScrollBar] = useState(false);  // 페인 우측 이미지 위치 인디케이터(초록 바) — 기본 꺼짐
   // TY Viewer 신규 (viewer.prefs ty_* 키 계약) — 아이콘 크기/라벨/3D·★Quick·사용 패턴·오버레이 글자
   const [tyToolSize, setTyToolSize] = useState(51);   // 기본 3배 확대(구 17)
+  const [tyToolCols, setTyToolCols] = useState(2);     // 툴 배열(열 수) — 기본 2X2
   const [tyToolLabels, setTyToolLabels] = useState(true);
   const [tyIcon3d, setTyIcon3d] = useState(true);
   const [tyQuickRow, setTyQuickRow] = useState(true);
@@ -343,6 +344,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (mon?.screens) setMonitorSel(mon.screens);
       if (mon?.worklist !== undefined) setWlMon(mon.worklist);
       if (mon?.report !== undefined) setRptMon(mon.report);
+      const tc = v as { ty_tool_cols?: number };
+      if (tc.ty_tool_cols) setTyToolCols(tc.ty_tool_cols);
       const sc = (v as { shortcuts?: { rdrag?: "wl" | "zoom" | "pan"; shift_rclick?: "zoomout" | "none" } }).shortcuts;
       if (sc?.rdrag) setScRdrag(sc.rdrag);
       if (sc?.shift_rclick) setScShiftR(sc.shift_rclick);
@@ -439,6 +442,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       infi_scrollbar: infScrollBar,
       ty_tool_size: tyToolSize, ty_tool_labels: tyToolLabels, ty_icon_3d: tyIcon3d,
       ty_quick_row: tyQuickRow, ty_usage_rec: tyUsageRec, ty_overlay_font: tyOvlFont,
+      ty_tool_cols: tyToolCols,
       ty_sel_color: tySelColor, ty_cine_sec: tyCineSec,
       infi_close_mode: infCloseMode,
       // 사용 기록(ty_usage/infi_usage)은 [기록 초기화]를 누른 경우에만 빈 값으로 저장 —
@@ -1248,6 +1252,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <b>In Viewer 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.
               </div>
               <Group title="In Viewer 표시 (계정별 저장)">
+                <Row label="툴 배열 (열)">
+                  <select value={infToolCols} onChange={(e) => setInfToolCols(Number(e.target.value))}>
+                    <option value={1}>1X1 (한 줄 1개)</option>
+                    <option value={2}>2X2 (기본)</option>
+                    <option value={3}>3X3</option>
+                    <option value={4}>4X4</option>
+                  </select>
+                </Row>
                 <Row label="멀티선택 색">
                   <input type="color" value={infSelColor}
                          onChange={(e) => setInfSelColor(e.target.value)}
@@ -1416,6 +1428,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <b>T-View 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 세 뷰어 동일합니다.
                 </div>
                 <Group title="툴 아이콘·팔레트 (TY Viewer)">
+                  <Row label="툴 배열 (열)">
+                    <select value={tyToolCols} onChange={(e) => setTyToolCols(Number(e.target.value))}>
+                      <option value={1}>1X1 (한 줄 1개)</option>
+                      <option value={2}>2X2 (기본)</option>
+                      <option value={3}>3X3</option>
+                      <option value={4}>4X4</option>
+                    </select>
+                  </Row>
                   <Row label="아이콘 크기">
                     <input type="range" min={13} max={64} step={1} value={tyToolSize}
                            onChange={(e) => setTyToolSize(Number(e.target.value))} />
