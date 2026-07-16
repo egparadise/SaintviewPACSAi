@@ -59,18 +59,5 @@ DEFAULT_MODE_PROFILES: dict = {
                 "thumbMode": "series", "reportDock": False,
             },
         },
-        "sonic": {
-            "label": "SonicPACS 에뮬레이션",
-            "worklist": {
-                "columns": ["status", "patient_key", "patient_name", "study_date",
-                            "modality", "study_desc", "impression"],
-                "find_fields": ["pid", "pname", "modality", "date"],
-                "dbl_action": "ohif",
-            },
-            "viewer": {
-                "paletteSide": "top", "thumbSide": "bottom",
-                "thumbMode": "series", "reportDock": False,
-            },
-        },
     },
 }

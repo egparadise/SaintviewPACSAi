@@ -122,7 +122,7 @@ def test_mode_profiles_defaults_and_admin_edit(client, auth_headers):
     r = client.get("/api/settings/mode.profiles", headers=auth_headers)
     assert r.status_code == 200
     profs = r.json()["value"]["profiles"]
-    assert set(profs) >= {"saintvidw", "ty", "infi", "sonic"}
+    assert set(profs) >= {"saintvidw", "ty", "infi"}
     assert profs["ty"]["viewer"]["client_viewer"] == "ty"
     assert profs["infi"]["viewer"]["client_viewer"] == "infi"
 

@@ -2718,7 +2718,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   ];
 
   /* 팔레트(방향 전환 가능 — 요청 2). SAINT VIEW 스킨은 상단 가로 메뉴 툴바를 쓰므로 세로 팔레트 숨김 */
-  const palette = skin !== "saint" && paletteOpen && (
+  // SaintView 도 설정 위치대로 팔레트 표시(상단 메뉴바와 병행) — 드래그 도킹 그립 포함
+  const palette = paletteOpen && (
     <div style={{
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
       background: "var(--bg-panel)", flexShrink: 0, overflow: paletteHoriz ? "auto" : "hidden",
@@ -3561,11 +3562,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {prefs.thumbSide === "top" && thumbs}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
-        {skin !== "saint" && prefs.paletteSide === "left" && paletteOpen && (
+        {prefs.paletteSide === "left" && paletteOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW + dx, 64, 240) }))} />
         )}
-        {skin !== "saint" && !paletteOpen && prefs.paletteSide === "left" && (
+        {!paletteOpen && prefs.paletteSide === "left" && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
         )}
         {prefs.thumbSide === "left" && thumbs}
@@ -3630,7 +3631,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW - dx, 64, 240) }))} />
         )}
         {paletteRight && palette}
-        {skin !== "saint" && !paletteOpen && paletteRight && (
+        {!paletteOpen && paletteRight && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
         )}
         {prefs.reportDock && !reportCollapsed && (
