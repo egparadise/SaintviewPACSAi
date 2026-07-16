@@ -1404,24 +1404,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 ))}
               </Group>
             )}
-            {page === "viewerSv" && (
-              <Group title="SaintView 뷰어 (T-View 엔진 공유)">
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  <b>SaintView</b> 는 상단 가로 메뉴 툴바(Image Tool · Measurement · Reading Support · Additional) 스킨입니다.
-                  엔진·툴 기능·크로스링크·듀얼모드 Stack 동기(Spatial↔Index)·오버레이는 <b>T-View</b> 와 100% 동일합니다.
-                </div>
-                <Row label="툴 아이콘 크기 (T-View 공통)">
-                  <input type="range" min={13} max={64} step={1} value={tyToolSize}
-                         onChange={(e) => setTyToolSize(Number(e.target.value))} />
-                  <b style={{ marginLeft: 8 }}>{tyToolSize}px</b>
-                </Row>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  더 많은 표시 설정(오버레이·★Quick·사용 패턴)은 <b>뷰어 — T-View</b> 탭과 공유됩니다(계정 로밍).
-                </div>
-              </Group>
-            )}
-            {page === "viewerTy" && (
+            {(page === "viewerTy" || page === "viewerSv") && (
               <>
+                {page === "viewerSv" && (
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    <b>SaintView</b> — 상단 가로 메뉴(Image Tool·Measurement·Reading Support·Additional) 스킨.
+                    엔진은 T-View 공유 — 아래 설정(아이콘·오버레이·시네·썸네일·판독창 등)이 동일하게 적용됩니다.
+                  </div>
+                )}
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
                   <b>T-View 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 세 뷰어 동일합니다.
                 </div>

@@ -316,7 +316,7 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 /* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional)
    + 좌측 환자 ◀▶ 이동 + 활성 마우스모드/툴 칩. 항목 run 은 기존 툴 함수 그대로 호출(기능=TY 뷰어 동일). */
 function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled }: {
-  menus: { title: string; items: { id: string; label: string; run: () => void }[] }[];
+  menus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[];
   activeId: string;                 // 현재 활성 마우스모드/툴 id (드롭다운·칩 하이라이트)
   onNav: (dir: 1 | -1) => void;     // 환자(검사) ◀▶ 이동
   navPrevDisabled: boolean;
@@ -361,7 +361,10 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
                                    color: on ? "#fff" : "var(--text-primary)", fontWeight: on ? 700 : 400 }}
                           onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--bg-panel)"; }}
                           onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                    <span>{it.label}</span>{on && <span>●</span>}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ width: 15, display: "inline-flex" }}><ToolIconTy id={it.icon ?? it.id} size={13} flat /></span>
+                      {it.label}
+                    </span>{on && <span>●</span>}
                   </button>
                 );
               })}
@@ -489,7 +492,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
   );
   const [selSeries, setSelSeries] = useState<string | null>(null);
-  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan" | "select">("zoom");
+  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan" | "select" | "scroll">("zoom");
   // 팔레트 섹션 — 기본 전체 펼침(헤더 클릭으로 개별 접기)
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(["common", "anno", "anatomy", "px", "shut", "2d", "etc"]));
   const toggleSec = (k: string) => setOpenSecs((p) => {
@@ -1290,7 +1293,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => { setSelAnno(null); setSelAnnos(null); setMarquee(null); }, [tool]);
 
   /* 마우스 상호작용 — TY-3(2): Shift=범위 선택/Ctrl=토글, 선택 밖 일반 클릭=해제 (In 이식) */
-  const dragRef = useRef<{ pid: string; x: number; y: number; sx: number; sy: number; btn: number; moved: boolean; shift: boolean } | null>(null);
+  const dragRef = useRef<{ pid: string; x: number; y: number; sx: number; sy: number; btn: number; moved: boolean; shift: boolean; acc?: number } | null>(null);
   // 주석 드래그(그리기/이동/리사이즈) — window mousemove/up 엔진이 참조(스테일 방지 ref)
   const annoDragRef = useRef<AnnoDrag | null>(null);
   // 우클릭 컨텍스트 메뉴 + 우드래그 기본 도구(초기 분석 §7: 우드래그=기본 지정 도구, 기본 W/L)
@@ -1961,7 +1964,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 좌=선택 모드, 우=기본 지정 도구(rdragTool, 기본 W/L), 중=Pan 고정. 멀티 선택 페인이면 함께 조작 (TY-3)
       const mode = d.btn === 2 ? rdragRef.current : d.btn === 1 ? "pan" : mouseMode;
       const tg = targetsOf(d.pid);
-      if (mode === "zoom") updMany(tg, (p) => ({ zoom: Math.max(0.2, p.zoom * (1 - dy * 0.005)) }));
+      if (mode === "scroll") {   // Scroll 모드 — 세로 드래그로 이미지 넘김(24px/장)
+        d.acc = (d.acc ?? 0) + dy;
+        while (Math.abs(d.acc) >= 24) { step(d.pid, d.acc > 0 ? 1 : -1); d.acc -= Math.sign(d.acc) * 24; }
+      }
+      else if (mode === "zoom") updMany(tg, (p) => ({ zoom: Math.max(0.2, p.zoom * (1 - dy * 0.005)) }));
       else if (mode === "pan") updMany(tg, (p) => ({ tx: p.tx + dx, ty: p.ty + dy }));
       else if (mode === "wl") {
         // 드래그 W/L — 서버 /rendered?window=C,W 라운드트립(가로=Width, 세로=Center)
@@ -2653,30 +2660,57 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   /* SAINT VIEW 스킨 상단 메뉴 — 기존 툴 함수(quickDefs/act/pickTool/setMouseMode 등) 재사용, 아이콘 기능 동일 */
   const mkItem = (id: string, label?: string, run?: () => void) => ({
     id, label: label ?? quickDefs[id]?.label ?? id,
+    icon: quickDefs[id]?.icon ?? id,
     run: run ?? (() => { recordUse(id); quickDefs[id]?.run(); }),
   });
-  const saintMenus: { title: string; items: { id: string; label: string; run: () => void }[] }[] = [
+  const saintMenus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[] = [
     { title: "Image Tool", items: [
-      mkItem("wl", "W/L"), mkItem("zoom", "Zoom"), mkItem("pan", "Pan"), mkItem("fit", "Fit (화면맞춤)"),
-      mkItem("invert", "Invert (반전)"), mkItem("rotL", "회전 ⟲90°"), mkItem("rotR", "회전 ⟳90°"), mkItem("rot180", "회전 180°"),
-      mkItem("flipH", "좌우 반전"), mkItem("flipV", "상하 반전"),
-      mkItem("sharpen", "Sharpen"), mkItem("average", "Smooth"), mkItem("pseudo", "Pseudo Color"),
-      mkItem("mag", "Magnify (확대경)"), mkItem("reset", "Reset"), mkItem("cine", "Cine (재생)"),
+      mkItem("select", "Select", () => setMouseMode("select")),
+      mkItem("pan", "Pan", () => setMouseMode("pan")),
+      mkItem("zoom", "Zoom", () => setMouseMode("zoom")),
+      mkItem("wl", "Window/level", () => setMouseMode("wl")),
+      mkItem("scroll", "Scroll", () => setMouseMode("scroll")),
+      mkItem("mag", "Magnification"),
+      mkItem("fit", "Fit"),
+      mkItem("reset", "Reset"),
+      mkItem("lens", "Probe", () => pickTool("lens")),
     ] },
     { title: "Measurement", items: [
-      ...[...TOOL_DEFS, ...ANATOMY_TOOL_DEFS, ...PIXEL_TOOL_DEFS].map(([tk, label]) => mkItem(tk, label)),
-      mkItem("calib", "Calibrate (기준선)"),
+      mkItem("length", "Measure", () => pickTool("length")),
+      mkItem("arrow", "Arrow", () => pickTool("arrow")),
+      mkItem("angle", "Angle", () => pickTool("angle")),
+      mkItem("text", "Text", () => pickTool("text")),
+      mkItem("ellipse", "Oval ROI", () => pickTool("ellipse")),
+      mkItem("rect", "Rectangle ROI", () => pickTool("rect")),
+      mkItem("poly", "Free ROI", () => pickTool("poly")),
+      mkItem("cobb", "Cobb's Angle", () => pickTool("cobb")),
+      mkItem("mctr", "CT Ratio", () => pickTool("mctr")),
+      mkItem("leg", "LegLength", () => pickTool("leg")),
+      mkItem("centerline", "Bidirectional", () => pickTool("centerline")),
+      mkItem("key2d", "Key Image", () => toggleKeyImage()),
+      mkItem("shutEl", "Circle Shutter", () => pickTool("shutEl")),
+      mkItem("calib", "Calibrate"),
     ] },
     { title: "Reading Support", items: [
-      mkItem("key2d", "키 이미지 등록/해제", () => toggleKeyImage()),
-      mkItem("comb", "Combine all (시리즈 결합)"),
-      mkItem("scout", "Scout / 교차선", () => setXmode((x) => (x === "scout" ? "off" : "scout"))),
-      mkItem("compare", "Compare (과거검사 비교)", () => setCmpOpen(true)),
-      mkItem("gsps", "GSPS 저장", () => void doGsps()),
-      ...SHUTTER_TOOL_DEFS.map(([tk, label]) => mkItem(tk, label)),
+      mkItem("flipH", "Flip Horizontal"),
+      mkItem("flipV", "Flip Vertical"),
+      mkItem("rot180", "Rotate 180"),
+      mkItem("rotR", "Rotate Right90"),
+      mkItem("rotL", "Rotate Left90"),
+      mkItem("invert", "Inverse"),
     ] },
     { title: "Additional", items: [
-      mkItem("capture", "Capture (캡처)"), mkItem("print", "Print"), mkItem("rfsh", "Refresh Exam"),
+      mkItem("clr", "Delete All Tools", () => { setAnnos([]); setSelAnno(null); setSelAnnos(null); setTool(null); schedHist(); setStatus("주석 전체 삭제 (◀ 이전으로 복원)"); }),
+      mkItem("del", "Delete Tool", () => { if (selAnnos) deleteSelAnnos(); else if (selAnno) deleteSelAnno(); else { setAnnos((pp) => pp.slice(0, -1)); schedHist(); } }),
+      mkItem("save", "Save All Tools", () => { void saveAnnos(); }),
+      mkItem("print", "Print"),
+      mkItem("gsps", "Dicom (GSPS 저장)", () => void doGsps()),
+      mkItem("report", "Report", () => { void (async () => {
+        const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
+        const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
+        const features = await screenFeatures(mon != null && mon >= 0 ? [mon] : null, "width=980,height=800");
+        window.open(`${window.location.origin}${window.location.pathname}?report=1&study=${detail.id}`, "sv_report", features);
+      })(); }),
     ] },
   ];
 
