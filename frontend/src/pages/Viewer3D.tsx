@@ -149,7 +149,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const engineRef = useRef<RenderingEngine | null>(null);
   const [status, setStatus] = useState("초기화 중…");
   const [error, setError] = useState("");
-  const [slabMm, setSlabMm] = useState(10);
+  const [slabMm, setSlabMm] = useState(30);
   const [blend, setBlend] = useState<"mip" | "minip" | "avip" | "off">("mip");   // 강도 투영 모드
   const [mipSetOpen, setMipSetOpen] = useState(false);                            // MIP Settings 패널
   const [vrOn, setVrOn] = useState(false);                                        // 3D 볼륨 렌더링 페인(슬랩 조정 시 자동)
@@ -179,19 +179,32 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     const engine = engineRef.current;
     if (!engine) return;
     const m = mode ?? "mip";
+    const BM = Enums.BlendModes;
+    const want = m === "mip" ? BM.MAXIMUM_INTENSITY_BLEND
+               : m === "minip" ? BM.MINIMUM_INTENSITY_BLEND
+               : m === "avip" ? BM.AVERAGE_INTENSITY_BLEND
+               : BM.COMPOSITE;
+    let applied = 0;
     for (const mv of MIP_VPS) {
-    const vp = engine.getViewport(mv.id) as Types.IVolumeViewport | undefined;
-    if (!vp) continue;
-    try {
-      // 강도 투영 모드 — MIP(최대)/MinIP(최소)/AvIP(평균)/끄기(일반 컴포지트 렌더링)
-      const BM = Enums.BlendModes;
-      vp.setBlendMode(m === "mip" ? BM.MAXIMUM_INTENSITY_BLEND
-                    : m === "minip" ? BM.MINIMUM_INTENSITY_BLEND
-                    : m === "avip" ? BM.AVERAGE_INTENSITY_BLEND
-                    : BM.COMPOSITE);
-      vp.setProperties({ slabThickness: m === "off" ? 0.1 : mm });
-      vp.render();
-    } catch { /* 뷰포트 미준비 */ }
+      const vp = engine.getViewport(mv.id) as Types.IVolumeViewport | undefined;
+      if (!vp) continue;
+      try {
+        // 강도 투영 모드 — MIP(최대)/MinIP(최소)/AvIP(평균)/끄기(일반 컴포지트 렌더링)
+        vp.setBlendMode(want);
+        if (m === "off") {
+          (vp as unknown as { resetSlabThickness?: () => void }).resetSlabThickness?.();
+        } else {
+          vp.setSlabThickness(mm);
+        }
+        vp.render();
+        // readback 검증 — 실제 적용된 블렌드 모드 확인(미적용이면 카운트 제외)
+        const got = (vp as unknown as { getBlendMode?: () => number }).getBlendMode?.();
+        if (got === undefined || got === want) applied++;
+      } catch { /* 뷰포트 미준비 */ }
+    }
+    if (applied > 0) {
+      setStatus(m === "off" ? "MIP 끄기 — 일반 렌더링 ×" + applied
+        : (m === "mip" ? "MIP" : m === "minip" ? "MinIP" : "AvIP") + " " + mm + "mm 적용 ×" + applied + " (Axial/Sagittal/Coronal)");
     }
   }, []);
 
