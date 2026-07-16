@@ -2679,7 +2679,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const palette = skin !== "saint" && paletteOpen && (
     <div style={{
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
-      background: "var(--bg-panel)", flexShrink: 0, overflow: "auto", alignItems: paletteHoriz ? "center" : undefined,
+      background: "var(--bg-panel)", flexShrink: 0, overflow: paletteHoriz ? "auto" : "hidden",
+      minHeight: 0, alignItems: paletteHoriz ? "center" : undefined,
       ...(paletteHoriz ? { borderBottom: "1px solid var(--border)" }
         : { width: prefs.paletteW, ...(paletteRight ? { borderLeft: "1px solid var(--border)" }
                                                     : { borderRight: "1px solid var(--border)" }) }),
@@ -2742,6 +2743,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       )}
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setThumbOpen((t) => !t)}>Thumb</button>
       <button style={{ padding: "6px 6px", fontSize: 12 }} onClick={() => setPaletteOpen(false)}>Hide</button>
+      {/* Common 이하만 스크롤 — ★Quick·이동·레이아웃·Sync·Thumb/Hide 상단 블록은 고정 */}
+      <div style={paletteHoriz ? { display: "flex", gap: 3, alignItems: "center" }
+                               : { flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
       {([["common", "Common"], ["anno", "Anno"], ["anatomy", "Anatomy(해부)"], ["px", "Pixel"], ["shut", "Shutter"], ["2d", "2D"], ["etc", "ETC"]] as const).map(([k, label]) => (
         <div key={k} style={paletteHoriz ? { display: "flex", gap: 3, alignItems: "center" } : undefined}>
           <div onClick={() => toggleSec(k)}
@@ -2977,6 +2981,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           )}
         </div>
       ))}
+      </div>
     </div>
   );
 

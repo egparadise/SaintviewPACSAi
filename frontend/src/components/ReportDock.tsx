@@ -383,14 +383,14 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
           </div>
           {relExams.map((e) => (
             <div key={e.id} onClick={() => onLoadPrior(e.id)}
-                 style={{ padding: "3px 8px", fontSize: 11, cursor: "pointer", borderBottom: "1px solid #24282d",
+                 style={{ padding: "4px 8px", fontSize: 11.5, cursor: "pointer", borderBottom: "1px solid #24282d",
                           display: "flex", alignItems: "center", gap: 7 }}
                  onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                  onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
               {priorThumbs[e.id]
-                ? <img src={priorThumbs[e.id]} alt="" style={{ width: 34, height: 26, objectFit: "cover",
+                ? <img src={priorThumbs[e.id]} alt="" style={{ width: 58, height: 44, objectFit: "cover",
                         borderRadius: 2, border: "1px solid var(--border)", background: "#000", flexShrink: 0 }} />
-                : <span style={{ width: 34, height: 26, borderRadius: 2, background: "#000",
+                : <span style={{ width: 58, height: 44, borderRadius: 2, background: "#000",
                         border: "1px solid var(--border)", flexShrink: 0 }} />}
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
