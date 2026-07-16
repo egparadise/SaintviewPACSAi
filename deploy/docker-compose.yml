@@ -17,7 +17,7 @@ services:
       retries: 10
 
   orthanc:
-    image: orthancteam/orthanc:24.10.1
+    image: orthancteam/orthanc:latest  # HTJ2K 트랜스코딩 지원 버전(1.12.4→최신 업그레이드)
     container_name: saintview-orthanc
     environment:
       ORTHANC__NAME: "SaintviewOrthanc"
