@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Enums,
   RenderingEngine,
+  cache,
   eventTarget,
   init as csInit,
   setVolumesForViewports,
@@ -16,8 +17,10 @@ import {
 import vtkPlane from "@kitware/vtk.js/Common/DataModel/Plane";
 import {
   CrosshairsTool,
+  EllipticalROITool,
   Enums as ToolsEnums,
   PanTool,
+  PlanarFreehandROITool,
   RectangleROITool,
   StackScrollTool,
   ToolGroupManager,
@@ -25,6 +28,7 @@ import {
   WindowLevelTool,
   ZoomTool,
   addTool,
+  annotation as csAnnotation,
   init as toolsInit,
 } from "@cornerstonejs/tools";
 import { init as dicomImageLoaderInit, wadors } from "@cornerstonejs/dicom-image-loader";
@@ -61,6 +65,8 @@ async function ensureInit() {
   addTool(StackScrollTool);
   addTool(CrosshairsTool);
   addTool(RectangleROITool);
+  addTool(EllipticalROITool);
+  addTool(PlanarFreehandROITool);
   addTool(TrackballRotateTool);
   initialized = true;
 }
@@ -149,6 +155,9 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const [vrCam, setVrCam] = useState("");                       // VR 좌하단 좌표(회전각·카메라 위치)
   const [cropOn, setCropOn] = useState(false);                  // ROI 크롭 적용 여부
   const cropRef = useRef<{ mins: number[]; maxs: number[] } | null>(null);
+  const [roiShape, setRoiShape] = useState<"rect" | "oval" | "free">("rect");   // ROI 모양(콤보)
+  const [roiEffect, setRoiEffect] = useState<"focus" | "remove">("focus");      // Focus=영역만 / 제거=영역 빼고
+  const voxBackupRef = useRef<{ vals: Float32Array; idx: Uint32Array } | null>(null);   // 제거 모드 복셀 백업(복원용)
   const [mipOrient, setMipOrient] = useState<"AXIAL" | "SAGITTAL" | "CORONAL">("AXIAL");
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -170,8 +179,13 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     } catch { /* 뷰포트 미준비 */ }
   }, []);
 
+  const ROI_TOOLS = [RectangleROITool.toolName, EllipticalROITool.toolName, PlanarFreehandROITool.toolName];
+  const roiToolOf = (shape: "rect" | "oval" | "free") =>
+    shape === "rect" ? RectangleROITool.toolName
+    : shape === "oval" ? EllipticalROITool.toolName : PlanarFreehandROITool.toolName;
+
   // 도구 모드 전환 — Crosshair(십자선 연동) ↔ W/L (MPR 3면 좌클릭)
-  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi") => {
+  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi", shape?: "rect" | "oval" | "free") => {
     const g = ToolGroupManager.getToolGroup(TG_MPR);
     if (!g) return;
     try {
@@ -182,22 +196,24 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
       } else if (mode === "roi") {
-        // ROI — MPR 에 사각 영역을 그리면 그 영역만 3D 볼륨 렌더링(크롭)
+        // ROI — 선택 모양(Rect/Oval/Free)으로 영역을 그리면 Focus(영역만)/제거(영역 빼고) 3D 렌더링
         g.setToolDisabled(CrosshairsTool.toolName);
         g.setToolPassive(WindowLevelTool.toolName);
-        g.setToolActive(RectangleROITool.toolName, {
+        for (const t of ROI_TOOLS) g.setToolPassive(t);
+        g.setToolActive(roiToolOf(shape ?? roiShape), {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
       } else {
         g.setToolDisabled(CrosshairsTool.toolName);
-        g.setToolPassive(RectangleROITool.toolName);
+        for (const t of ROI_TOOLS) g.setToolPassive(t);
         g.setToolActive(WindowLevelTool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
       }
       engineRef.current?.render();
     } catch { /* 그룹 미준비 */ }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roiShape]);
 
   // MIP 방향 전환
   const applyMipOrient = useCallback((o: "AXIAL" | "SAGITTAL" | "CORONAL") => {
@@ -399,6 +415,93 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
       setCropOn(true);
     } catch { /* VR 미준비 — vrOn 효과에서 재시도 */ }
   }, []);
+  // 좌측 썸네일 드롭 — 특정 MPR 페인만 다른 시리즈 볼륨으로 교체(개별 소스 지정)
+  const loadVolumeToViewport = useCallback(async (uid: string, vpId: string) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    try {
+      setStatus("페인 볼륨 로딩…");
+      const ids = await buildImageIds(studyUid, uid);
+      if (ids.length < 3) { setStatus("슬라이스가 부족해 볼륨을 만들 수 없습니다"); return; }
+      const vid = `cornerstoneStreamingImageVolume:sv-${uid.slice(-24)}`;
+      const vol = cache.getVolume(vid) ?? await volumeLoader.createAndCacheVolume(vid, { imageIds: ids });
+      await (vol as { load?: () => Promise<unknown> | unknown }).load?.();
+      await setVolumesForViewports(engine, [{ volumeId: vid }], [vpId]);
+      engine.getViewport(vpId)?.render();
+      setStatus(`${vpId.replace("vp-", "").toUpperCase()} 페인 볼륨 교체 완료`);
+    } catch (e) { setStatus(e instanceof Error ? e.message : "페인 볼륨 교체 실패"); }
+  }, [studyUid]);
+
+  // 제거 모드 — ROI 박스 복셀을 최소값으로 마스킹(백업 후), MPR 에도 반영(공유 볼륨)
+  const maskVoxels = useCallback((mins: number[], maxs: number[]) => {
+    try {
+      const vol = cache.getVolume(volumeIdRef.current) as unknown as {
+        imageData?: { worldToIndex: (p: number[]) => number[]; getDimensions: () => number[];
+                      getPointData: () => { getScalars: () => { getRange: () => number[] } }; modified: () => void };
+        getScalarData?: () => Float32Array | Int16Array | Uint16Array | Uint8Array;
+        voxelManager?: { getCompleteScalarDataArray?: () => Float32Array | Int16Array | Uint16Array | Uint8Array };
+      } | undefined;
+      const img = vol?.imageData;
+      const data = vol?.getScalarData?.() ?? vol?.voxelManager?.getCompleteScalarDataArray?.();
+      if (!img || !data) return false;
+      const dim = img.getDimensions();
+      const lo = img.worldToIndex(mins).map((v) => Math.floor(v));
+      const hi = img.worldToIndex(maxs).map((v) => Math.ceil(v));
+      const a = [0, 1, 2].map((i) => Math.max(0, Math.min(lo[i], hi[i])));
+      const b = [0, 1, 2].map((i) => Math.min(dim[i] - 1, Math.max(lo[i], hi[i])));
+      const count = (b[0] - a[0] + 1) * (b[1] - a[1] + 1) * (b[2] - a[2] + 1);
+      if (count <= 0 || count > 40_000_000) return false;   // 과대 영역 방어
+      const minVal = img.getPointData().getScalars().getRange()[0];
+      const idx = new Uint32Array(count);
+      const vals = new Float32Array(count);   // 백업 — 16비트 정수도 float32 로 무손실
+      let k = 0;
+      for (let z = a[2]; z <= b[2]; z++) {
+        for (let y = a[1]; y <= b[1]; y++) {
+          const base = z * dim[0] * dim[1] + y * dim[0];
+          for (let x = a[0]; x <= b[0]; x++) {
+            const o = base + x;
+            idx[k] = o; vals[k] = data[o]; data[o] = minVal; k++;
+          }
+        }
+      }
+      voxBackupRef.current = { vals, idx };
+      img.modified();
+      engineRef.current?.render();
+      return true;
+    } catch { return false; }
+  }, []);
+  const restoreVoxels = useCallback(() => {
+    const bk = voxBackupRef.current;
+    if (!bk) return;
+    try {
+      const vol = cache.getVolume(volumeIdRef.current) as unknown as {
+        imageData?: { modified: () => void };
+        getScalarData?: () => Float32Array | Int16Array | Uint16Array | Uint8Array;
+        voxelManager?: { getCompleteScalarDataArray?: () => Float32Array | Int16Array | Uint16Array | Uint8Array };
+      } | undefined;
+      const data = vol?.getScalarData?.() ?? vol?.voxelManager?.getCompleteScalarDataArray?.();
+      if (!data) return;
+      for (let k = 0; k < bk.idx.length; k++) data[bk.idx[k]] = bk.vals[k];
+      vol?.imageData?.modified();
+      engineRef.current?.render();
+    } catch { /* 무시 */ } finally { voxBackupRef.current = null; }
+  }, []);
+  // ROI 전체 정리 — 주석(측정값 라벨) 삭제 + 크롭 해제 + 제거 복원 (ROI Off 시 다른 툴처럼 사라짐)
+  const clearRoiAll = useCallback(() => {
+    try {
+      for (const an of csAnnotation.state.getAllAnnotations()) {
+        if (ROI_TOOLS.includes(an.metadata?.toolName ?? "") && an.annotationUID) {
+          csAnnotation.state.removeAnnotation(an.annotationUID);
+        }
+      }
+    } catch { /* 무시 */ }
+    restoreVoxels();
+    clearCropRef.current?.();
+    engineRef.current?.render();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreVoxels]);
+  const clearCropRef = useRef<(() => void) | null>(null);
+
   const clearCrop = useCallback(() => {
     cropRef.current = null;
     setCropOn(false);
@@ -410,23 +513,38 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
       vp?.render();
     } catch { /* 무시 */ }
   }, []);
+  clearCropRef.current = clearCrop;
   useEffect(() => {
     const onDone = (evt: Event) => {
       const anno = (evt as CustomEvent).detail?.annotation as
-        { metadata?: { toolName?: string }; data?: { handles?: { points?: number[][] } } } | undefined;
-      if (anno?.metadata?.toolName !== RectangleROITool.toolName) return;
-      const pts = anno.data?.handles?.points;
-      if (!pts || pts.length < 4) return;
+        { metadata?: { toolName?: string };
+          data?: { handles?: { points?: number[][] }; contour?: { polyline?: number[][] }; polyline?: number[][] } } | undefined;
+      if (!ROI_TOOLS.includes(anno?.metadata?.toolName ?? "")) return;
+      const pts = anno?.data?.handles?.points?.length ? anno.data.handles.points
+        : (anno?.data?.contour?.polyline ?? anno?.data?.polyline);
+      if (!pts || pts.length < 3) return;
       const mins = [0, 1, 2].map((i) => Math.min(...pts.map((p) => p[i])));
       const maxs = [0, 1, 2].map((i) => Math.max(...pts.map((p) => p[i])));
       cropRef.current = { mins, maxs };
       setVrOn(true);        // 영역 선택 → 3D 렌더링 페인 자동 표시
-      setStatus("ROI 영역 3D 렌더링 — 선택 영역만 볼륨 표시(ROI 해제로 복원)");
-      window.setTimeout(applyCrop, 300);   // VR 이 이미 켜져 있으면 즉시, 새로 켜지면 vrOn 효과 후 재적용
+      if (roiEffectRef.current === "remove") {
+        // 제거(Saturation) — ROI 복셀을 마스킹하고 나머지만 렌더링
+        restoreVoxels();   // 이전 제거 영역 복원 후 새 영역 적용
+        const ok = maskVoxels(mins, maxs);
+        setStatus(ok ? "ROI 제거 렌더링 — 선택 영역을 제외한 볼륨 표시(ROI Off 로 복원)"
+                     : "이 볼륨에선 제거 모드를 적용하지 못했습니다");
+        if (ok) setCropOn(true);
+      } else {
+        setStatus("ROI Focus 렌더링 — 선택 영역만 볼륨 표시(ROI Off 로 복원)");
+        window.setTimeout(applyCrop, 300);   // VR 이 이미 켜져 있으면 즉시, 새로 켜지면 vrOn 효과 후 재적용
+      }
     };
     eventTarget.addEventListener(ToolsEnums.Events.ANNOTATION_COMPLETED, onDone);
     return () => eventTarget.removeEventListener(ToolsEnums.Events.ANNOTATION_COMPLETED, onDone);
-  }, [applyCrop]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyCrop, maskVoxels, restoreVoxels]);
+  const roiEffectRef = useRef(roiEffect);
+  roiEffectRef.current = roiEffect;
 
   // 참조선 점선(슬랩 폭) 드래그 감지 — MPR 뷰포트의 slabThickness 가 2mm 를 넘으면 3D(VR) 페인 자동 추가
   useEffect(() => {
@@ -544,14 +662,36 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
                   style={{ fontSize: 11.5, padding: "2px 10px",
                            background: toolMode === "crosshair" ? "var(--accent)" : undefined,
                            color: toolMode === "crosshair" ? "#fff" : undefined }}>✛ Crosshair</button>
-          <button onClick={() => { setToolMode("roi"); applyToolMode("roi"); }}
-                  title="ROI — MPR 에 사각 영역을 그리면 그 영역만 3D 볼륨 렌더링(크롭)"
+          <button onClick={() => {
+                    if (toolMode === "roi") {   // Off — 다른 툴처럼 ROI 주석·렌더링 효과 전부 제거
+                      clearRoiAll();
+                      setToolMode("crosshair"); applyToolMode("crosshair");
+                      setStatus("ROI Off — 측정값·크롭 해제");
+                    } else { setToolMode("roi"); applyToolMode("roi"); }
+                  }}
+                  title="ROI — 영역을 그리면 Focus(영역만)/제거(영역 빼고) 3D 렌더링. 다시 누르면 Off(측정값·효과 삭제)"
                   style={{ fontSize: 11.5, padding: "2px 10px",
                            background: toolMode === "roi" ? "var(--accent)" : undefined,
-                           color: toolMode === "roi" ? "#fff" : undefined }}>▭ ROI</button>
-          {cropOn && (
-            <button onClick={clearCrop} title="ROI 크롭 해제 — 전체 볼륨 렌더링으로 복원"
-                    style={{ fontSize: 11.5, padding: "2px 10px", color: "var(--stat-emergency)" }}>✕ ROI 해제</button>
+                           color: toolMode === "roi" ? "#fff" : undefined }}>▭ ROI{cropOn ? " ●" : ""}</button>
+          {toolMode === "roi" && (
+            <>
+              <select value={roiShape} title="ROI 모양"
+                      style={{ fontSize: 11.5 }}
+                      onChange={(e) => {
+                        const v = e.target.value as "rect" | "oval" | "free";
+                        setRoiShape(v); applyToolMode("roi", v);
+                      }}>
+                <option value="oval">Oval ROI</option>
+                <option value="rect">Rectangle ROI</option>
+                <option value="free">Free ROI</option>
+              </select>
+              <select value={roiEffect} title="Focus=선택 영역만 렌더링 · 제거=선택 영역을 빼고 렌더링"
+                      style={{ fontSize: 11.5 }}
+                      onChange={(e) => setRoiEffect(e.target.value as "focus" | "remove")}>
+                <option value="focus">Focus (영역만)</option>
+                <option value="remove">제거 (영역 빼고)</option>
+              </select>
+            </>
           )}
           <button onClick={() => { setToolMode("wl"); applyToolMode("wl"); }}
                   title="W/L — 좌드래그로 밝기/대조 조절"
@@ -660,6 +800,14 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
           <div
             key={v.id}
             onMouseDown={() => setActiveVp(v.id)}
+            onDragOver={(e) => { if (!v.mip) e.preventDefault(); }}
+            onDrop={(e) => {
+              // 좌측 썸네일 드래그 → 이 MPR 페인만 해당 시리즈 볼륨으로 교체(AX/SAG/COR 소스 개별 지정)
+              if (v.mip) return;
+              e.preventDefault();
+              const uid = e.dataTransfer.getData("application/x-sv-series");
+              if (uid) void loadVolumeToViewport(uid, v.id);
+            }}
             style={{
               position: "relative", minHeight: 0,
               outline: activeVp === v.id ? "1px solid var(--accent)" : "1px solid var(--border)",
