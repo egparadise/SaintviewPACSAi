@@ -3095,7 +3095,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {/* In-View 와 동일 위치 — 썸네일 열 맨 위 Combine 토글(결합 시 파란 강조 + ●) */}
       <button onClick={() => act("comb")}
               title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
-              style={{ fontSize: 10.5, flexShrink: 0, ...(isCombined(panes[activePane])
+              style={{ fontSize: 10.5, flexShrink: 0,
+                       // 썸네일 스크롤과 무관하게 항상 상단(세로)/좌측(가로) 고정
+                       position: "sticky", ...(thumbHoriz ? { left: 0 } : { top: 0 }), zIndex: 3,
+                       background: "var(--bg-panel)",
+                       ...(isCombined(panes[activePane])
                 ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb", fontWeight: 700 } : {}) }}>
         Combine{isCombined(panes[activePane]) ? " ●" : ""}
       </button>
