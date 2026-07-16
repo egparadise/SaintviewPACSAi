@@ -16,6 +16,7 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { IN_MOUSE_OPS } from "../lib/infiConfig";
 import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
+import { onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
 import { rawAt, samplePixels } from "../lib/pixelTools";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
@@ -247,6 +248,9 @@ function renderedUrlAt(p: PaneState, idx: number): string | null {
   const wl = p.wl ? `?window=${p.wl},linear` : "";
   const su = inst.series_uid ?? p.series.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID
   const stu = inst.study_uid ?? p.studyUid;
+  // WASM 파이프라인(베타) — 준비된 로컬 디코딩 프레임이 있으면 우선, 없으면 서버 렌더링 폴백
+  const wasm = wasmFrameUrl(stu, su, inst.sop_uid, p.wl || "");
+  if (wasm) return wasm;
   return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${wl}${renderedParams(!!wl)}`;
 }
 // Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙임(서버 병합 아님, 표시 결합).
@@ -1393,6 +1397,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const keys = (sc as { keys?: Record<string, string> } | undefined)?.keys;
       if (keys) scKeysRef.current = { ...SC_DEFAULTS, ...keys };
       dropMenuRef.current = !!(r.value as { drop_menu?: boolean }).drop_menu;
+      setWasmPipeline(!!(r.value as { wasm_pipeline?: boolean }).wasm_pipeline);
     }).catch(() => {});
   }, []);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {
@@ -3250,6 +3255,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
   // 휴대폰 촬영(QR) — 다이얼로그 + 업로드 폴링(완료 시 refreshExam → 새 시리즈 표시)
   const [qrCap, setQrCap] = useState<{ token: string; url: string; qr: string } | null>(null);
+  // WASM 프레임 준비 알림 — 디코딩 완료 시 재렌더(blob URL 교체 반영)
+  const [, setWasmTick] = useState(0);
+  useEffect(() => onWasmFrame(() => setWasmTick((t) => t + 1)), []);
   useEffect(() => {
     if (!qrCap) return;
     const iv = setInterval(() => {

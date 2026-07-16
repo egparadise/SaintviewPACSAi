@@ -16,6 +16,7 @@ const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewe
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
+import { onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { GridPicker } from "../lib/GridPicker";
 import { ReportDock } from "../components/ReportDock";
@@ -158,6 +159,8 @@ function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string
   const q = wl ? `?window=${wl},linear` : "";
   const su = inst.series_uid ?? s.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID 로 요청
   const stu = inst.study_uid ?? studyUid;
+  const wasm = wasmFrameUrl(stu, su, inst.sop_uid, wl || "");
+  if (wasm) return wasm;
   return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${q}${renderedParams(!!q)}`;
 }
 // Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙인다(서버 병합 아님, 표시 결합).
@@ -421,6 +424,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 드롭 Circle Menu(INFINITT Circle Menu 등가) — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택
   const [circle, setCircle] = useState<{ pi: number; uid: string; x: number; y: number } | null>(null);
   const dropMenuRef = useRef(false);   // 드롭 동작 메뉴(설정>뷰어 drop_menu, 기본 숨김=바로 Open)
+  const [, setWasmTick] = useState(0);
+  useEffect(() => onWasmFrame(() => setWasmTick((t) => t + 1)), []);   // WASM 프레임 준비 시 재렌더
   const drag = useRef<{ x: number; y: number; sx: number; sy: number; btn: number; pane: number; moved: boolean; shift: boolean } | null>(null);
   // 드래그로 그리기(§A) — 시작 이미지픽셀/현재 이미지픽셀을 추적, 놓을 때 3px 이상이면 finishTool.
   const annoDragRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement;
@@ -1814,6 +1819,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   useEffect(() => {
     api.getSetting("viewer.prefs").then((r) => {
       dropMenuRef.current = !!(r.value as { drop_menu?: boolean }).drop_menu;
+      setWasmPipeline(!!(r.value as { wasm_pipeline?: boolean }).wasm_pipeline);
       const v = r.value as { infi_overlay_font?: number; infi_overlay_visible?: boolean;
                              infi_sel_color?: string; infi_toolbar?: Record<string, boolean> };
       if (v.infi_overlay_font) setOvlFont(v.infi_overlay_font);

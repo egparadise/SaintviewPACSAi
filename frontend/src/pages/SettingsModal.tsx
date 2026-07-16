@@ -224,6 +224,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [scShiftR, setScShiftR] = useState<"zoomout" | "none">("zoomout");
   const [scKeys, setScKeys] = useState<Record<string, string>>({ ...SC_DEFAULTS });
   const [dropMenu, setDropMenu] = useState(false);  // 시리즈 드롭 동작 메뉴(기본 숨김=바로 Open)
+  const [wasmPipe, setWasmPipe] = useState(false);  // WASM 디코딩 파이프라인(베타)
   // 정책 — ◀(왼쪽) 버튼이 시간상 어느 방향으로 갈지 (워크리스트는 최신이 위)
   const [polNavLeft, setPolNavLeft] = useState<"past" | "recent">("past");
   const [quality, setQuality] = useState<AiQuality | null>(null);
@@ -332,6 +333,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       const icm = (v as { infi_close_mode?: "ask" | "save_current" | "save_all" | "none" }).infi_close_mode;
       if (icm && ["ask", "save_current", "save_all", "none"].includes(icm)) setInfCloseMode(icm);
       setOhifOn(!!(v as { ohif_enabled?: boolean }).ohif_enabled);
+      setWasmPipe(!!(v as { wasm_pipeline?: boolean }).wasm_pipeline);
       if (iv.infi_default_layout) {
         const toStr = (l?: { r: number; c: number } | null) => (l ? `${l.r} x ${l.c}` : "");
         setDefLay(Object.fromEntries(Object.entries(iv.infi_default_layout)
@@ -461,6 +463,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       ...(tyUsageReset ? { ty_usage: {} } : {}),
       ...(infUsageReset ? { infi_usage: {} } : {}),
       ohif_enabled: ohifOn,
+      wasm_pipeline: wasmPipe,
       infi_default_layout: Object.fromEntries(Object.entries(defLay)
         .map(([k, v]) => {
           const parse = (s: string) => {
@@ -581,6 +584,17 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   뷰어 선택·모드·OHIF 등 <b>공통 설정</b>입니다. 표시·아이콘·사용 패턴은 좌측
                   [뷰어 — TY Viewer]/[뷰어 — In Viewer] 탭에서 뷰어별로 설정하며, 기능은 두 뷰어 동일합니다.
                 </div>
+                <Group title="영상 파이프라인">
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
+                    <input type="checkbox" checked={wasmPipe} onChange={(e) => setWasmPipe(e.target.checked)} />
+                    WASM 디코딩 파이프라인 (베타) — 원본 픽셀(WADO-RS bulkdata)을 브라우저에서 직접 디코딩
+                  </label>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                    켜면 2D 뷰어가 서버 렌더링(JPEG) 대신 원본 16bit 프레임을 받아 WASM 코덱으로 디코딩합니다.
+                    W/L 조정이 서버 왕복 없이 즉시 반영되고, 병원 설정의 전송구문(JPEG2000/JPEG-LS)으로 수신합니다.
+                    디코딩 전에는 서버 렌더링으로 표시(자동 폴백).
+                  </div>
+                </Group>
                 <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <select id="sv-mode" value={modeSel} onChange={(e) => setModeSel(e.target.value)}>
