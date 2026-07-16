@@ -592,7 +592,8 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
       seg.imageData?.modified();
       setFillOn(true);
       setVrOn(true);   // 분할 결과를 컬러로 3D 렌더링
-      await ensureSegOn([...MPR_VIEWPORTS.map((v) => v.id)]);
+      // 분할 색을 Axial/Sagittal/Coronal(MPR)과 MIP 3면 모두에 표시 — 위치가 전 평면에서 보임
+      await ensureSegOn([...MPR_VIEWPORTS.map((v) => v.id), ...MIP_VPS.map((mv) => mv.id)]);
       window.setTimeout(() => { void ensureSegOn(["vp-vr"]); }, 400);   // VR 준비 후 세그 추가
       engine.render();
       setStatus("채우기 완료 — " + painted.toLocaleString() + " 복셀 분할(색 표시 + 3D 컬러 렌더링)");
@@ -1120,6 +1121,20 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
                  onDoubleClick={() => {
                    setMipMax((cur) => (cur === mv.id ? null : mv.id));
                    window.setTimeout(() => { engineRef.current?.resize(true, true); engineRef.current?.render(); }, 50);
+                 }}
+                 onMouseDown={(e) => {
+                   // 채우기 ON — MIP 클릭 지점(슬랩 중심 평면의 월드 좌표)에서 같은 농도 영역 성장
+                   if (modes.fill && e.button === 0) {
+                     try {
+                       const vp = engineRef.current?.getViewport(mv.id) as Types.IVolumeViewport | undefined;
+                       const canvas = (e.currentTarget as HTMLElement).querySelector("canvas");
+                       if (vp && canvas) {
+                         const r = canvas.getBoundingClientRect();
+                         const world = vp.canvasToWorld([e.clientX - r.left, e.clientY - r.top]);
+                         void regionGrow(world as unknown as number[]);
+                       }
+                     } catch { /* 미준비 */ }
+                   }
                  }}
                  style={{ position: "relative", minHeight: 0, minWidth: 0,
                           display: mipMax && mipMax !== mv.id ? "none" : "block",
