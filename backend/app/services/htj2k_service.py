@@ -41,6 +41,71 @@ def encoder_available() -> bool:
     return shutil.which("node") is not None
 
 
+def _run_node(jobs: list[dict]) -> dict[str, dict]:
+    """Node OpenJPH 배치 실행 — out 경로 → 결과 dict."""
+    tmp = Path(tempfile.mkdtemp(prefix="htj2k_j_"))
+    try:
+        jobp = tmp / "jobs.json"
+        jobp.write_text(json.dumps(jobs), encoding="utf-8")
+        r = subprocess.run(["node", str(_ENCODER), str(jobp)],
+                           capture_output=True, text=True, timeout=1800)
+        return {x["out"]: x for x in json.loads(r.stdout or "[]")}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _frame_jobs(ds, tmp: Path, tag: str, frames: list[int]) -> list[dict]:
+    frame_bytes = ds.Rows * ds.Columns * (ds.BitsAllocated // 8) * ds.SamplesPerPixel
+    jobs = []
+    for f in frames:
+        rawp = tmp / f"{tag}_{f}.raw"
+        rawp.write_bytes(ds.PixelData[f * frame_bytes:(f + 1) * frame_bytes])
+        jobs.append({"raw": str(rawp), "out": str(tmp / f"{tag}_{f}.j2c"),
+                     "width": int(ds.Columns), "height": int(ds.Rows),
+                     "bitsPerSample": int(ds.BitsAllocated),
+                     "isSigned": bool(ds.PixelRepresentation),
+                     "componentCount": int(ds.SamplesPerPixel)})
+    return jobs
+
+
+def encode_frame(ds, frame_idx: int) -> bytes | None:
+    """단일 프레임 온디맨드 인코딩 — 스트리밍 프록시용."""
+    tmp = Path(tempfile.mkdtemp(prefix="htj2k_f_"))
+    try:
+        jobs = _frame_jobs(ds, tmp, "f", [frame_idx])
+        res = _run_node(jobs)
+        r = res.get(jobs[0]["out"])
+        return Path(jobs[0]["out"]).read_bytes() if r and r.get("ok") else None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def encode_frames_batch(specs: list[tuple[str, "pydicom.Dataset"]], cache_dir: Path) -> int:
+    """시리즈 프리인코딩 — (sop, ds) 목록의 전 프레임을 한 번의 Node 실행으로 캐시에 기록."""
+    tmp = Path(tempfile.mkdtemp(prefix="htj2k_b_"))
+    done = 0
+    try:
+        jobs = []
+        index = []  # (out, cache path)
+        for sop, ds in specs:
+            n = int(getattr(ds, "NumberOfFrames", 1) or 1)
+            js = _frame_jobs(ds, tmp, sop[:32], list(range(n)))
+            for f, j in enumerate(js):
+                jobs.append(j)
+                index.append((j["out"], cache_dir / f"{sop}_{f + 1}.j2c"))
+        if not jobs:
+            return 0
+        res = _run_node(jobs)
+        for out, dest in index:
+            r = res.get(out)
+            if r and r.get("ok"):
+                dest.write_bytes(Path(out).read_bytes())
+                done += 1
+        return done
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def encode_study_htj2k(client, study, sdir: Path) -> tuple[int, int, int]:
     """검사 1건의 인스턴스들을 HTJ2K 무손실 DICOM 으로 기록.
 

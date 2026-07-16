@@ -16,6 +16,7 @@ from app.api import (
     examctl,
     hospital_admin,
     hospital_storage,
+    htj2k_stream,
     hospitals,
     localpacs,
     maintenance,
@@ -108,6 +109,7 @@ app.include_router(hospital_admin.router)
 app.include_router(backup.router)
 app.include_router(hospital_storage.router)  # 병원별 Storage(백업 정책·수동 백업·이력·보존)
 app.include_router(hospital_storage.fmt_router)  # 병원별 뷰어 영상 전송 형식(JPEG 품질/PNG)
+app.include_router(htj2k_stream.router)  # HTJ2K 스트리밍 프록시(자체 OpenJPH 인코딩)
 app.include_router(mobile.router)  # 휴대폰 사진 촬영(QR) — 검사 새 시리즈 등록  # 병원·계정 설정 백업/복원(/api/hospitals/{hid}/backup·restore)
 app.include_router(settings_api.router)
 app.include_router(orders.router)

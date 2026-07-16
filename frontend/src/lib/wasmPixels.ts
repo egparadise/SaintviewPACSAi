@@ -2,7 +2,7 @@
 // WADO-RS 원본 프레임(bulkdata) + 브라우저 WASM 디코딩(openjph/charls/openjpeg)으로 교체.
 // 기존 <img> 요소·CSS 변환·주석 수학은 그대로 — blob URL 만 갈아끼운다.
 // 핵심 이득: W/L 조정이 서버 왕복 없이 로컬 LUT 재계산(픽셀 원본은 1회만 수신·캐시).
-import { DICOMWEB_ROOT, getWadoTs } from "./cornerstone";
+import { authHeader, framesBase, getWadoTs } from "./cornerstone";
 // ⚠ cornerstone 코어/로더는 무겁다(수 MB) — WASM 모드가 실제로 켜졌을 때만 동적 로드(번들 분리)
 type CsImage = {
   columns: number; rows: number; color?: boolean; invert?: boolean;
@@ -35,6 +35,8 @@ async function ensureCs(): Promise<void> {
   await core.init({ rendering: { useNorm16Texture: true } } as unknown as Parameters<typeof core.init>[0]);
   loader.init({
     beforeSend: (_xhr: XMLHttpRequest, imageId: string) => {
+      // HTJ2K 프록시(백엔드) — JWT 필요. 그 외 Orthanc 직결은 전송구문 Accept 지정
+      if (imageId.includes("/api/htj2k/")) return authHeader();
       const ts = getWadoTs();
       if (ts && imageId.includes("/frames/")) {
         return { Accept: `multipart/related; type="application/octet-stream"; transfer-syntax=${ts}` };
@@ -115,7 +117,7 @@ export function wasmFrameUrl(studyUid: string, seriesUid: string, sopUid: string
   void (async () => {
     try {
       await ensureCs();
-      const imageId = `wadors:${DICOMWEB_ROOT}/studies/${studyUid}/series/${seriesUid}/instances/${sopUid}/frames/1`;
+      const imageId = `wadors:${framesBase()}/studies/${studyUid}/series/${seriesUid}/instances/${sopUid}/frames/1`;
       // 픽셀 원본은 cornerstone 캐시가 보관 — W/L 변경 시 재수신 없이 LUT 만 재계산
       const image = await csLoadImage!(imageId);
       renderToBlobUrl(image, wl, key);

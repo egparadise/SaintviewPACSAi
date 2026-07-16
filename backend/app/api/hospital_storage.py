@@ -31,7 +31,7 @@ WADO_TS_OPTIONS = [
     {"uid": "1.2.840.10008.1.2.4.91", "label": "JPEG2000 (손실)"},
     {"uid": "1.2.840.10008.1.2.4.80", "label": "JPEG-LS 무손실"},
     {"uid": "1.2.840.10008.1.2.4.70", "label": "JPEG 무손실"},
-    {"uid": "1.2.840.10008.1.2.4.201", "label": "HTJ2K 무손실 (고속 디코딩·16bit)"},
+    {"uid": "1.2.840.10008.1.2.4.201", "label": "HTJ2K 무손실 (고속 디코딩·16bit·서버 자체 인코딩)"},
     {"uid": "1.2.840.10008.1.2.4.202", "label": "HTJ2K RPCL (Progressive)"},
 ]
 _TS_SUPPORT: dict[str, bool] = {}   # 프로브 캐시(서버 기동 단위)
@@ -92,9 +92,15 @@ def imgfmt_ts_support(hid: int, user: dict = Depends(current_user)):
                     ser = d["0020000E"]["Value"][0]
                     sop = d["00080018"]["Value"][0]
                     url = f"/dicom-web/studies/{stu}/series/{ser}/instances/{sop}/frames/1"
+                    from app.services.htj2k_service import encoder_available
+                    _htj2k_ok = encoder_available()
                     for o in WADO_TS_OPTIONS:
                         if not o["uid"]:
                             _TS_SUPPORT[""] = True
+                            continue
+                        if o["uid"].startswith("1.2.840.10008.1.2.4.20"):
+                            # HTJ2K — Orthanc 미지원이어도 백엔드 스트리밍 프록시(자체 OpenJPH)로 제공
+                            _TS_SUPPORT[o["uid"]] = _htj2k_ok
                             continue
                         try:
                             pr = client._client.get(url, headers={  # noqa: SLF001

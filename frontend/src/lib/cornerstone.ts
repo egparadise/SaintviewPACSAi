@@ -97,3 +97,14 @@ export function renderedParams(hasQuery: boolean): string {
   if (IMG_FMT.format === "jpeg") return sep + "accept=image/jpeg&quality=" + IMG_FMT.quality;
   return "";
 }
+
+
+// HTJ2K 전송구문 — Orthanc 미지원이라 백엔드 스트리밍 프록시(/api/htj2k)로 프레임을 받는다
+const HTJ2K_UIDS = ["1.2.840.10008.1.2.4.201", "1.2.840.10008.1.2.4.202", "1.2.840.10008.1.2.4.203"];
+export function isHtj2kTs(): boolean { return HTJ2K_UIDS.includes(IMG_FMT.wado_ts ?? ""); }
+/** 프레임 요청 베이스 — HTJ2K 설정 시 백엔드 프록시, 그 외 Orthanc DICOMweb */
+export function framesBase(): string { return isHtj2kTs() ? "/api/htj2k" : DICOMWEB_ROOT; }
+export function authHeader(): Record<string, string> {
+  const t = localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
+  return t ? { Authorization: "Bearer " + t } : {};
+}

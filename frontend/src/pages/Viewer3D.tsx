@@ -33,7 +33,7 @@ import {
   init as toolsInit,
 } from "@cornerstonejs/tools";
 import { init as dicomImageLoaderInit, wadors } from "@cornerstonejs/dicom-image-loader";
-import { getWadoTs } from "../lib/cornerstone";
+import { authHeader, framesBase, getWadoTs } from "../lib/cornerstone";
 
 const DICOMWEB_ROOT = import.meta.env.VITE_DICOMWEB_ROOT ?? "http://localhost:3000/dicom-web";
 
@@ -66,6 +66,7 @@ async function ensureInit() {
   dicomImageLoaderInit({
     // 병원 설정(wado_ts)이 있으면 프레임 요청 Accept 에 해당 전송구문 지정 — Orthanc 가 트랜스코딩해 전달
     beforeSend: (_xhr: XMLHttpRequest, imageId: string) => {
+      if (imageId.includes("/api/htj2k/")) return authHeader();   // 백엔드 HTJ2K 프록시 — JWT
       const ts = getWadoTs();
       if (ts && imageId.includes("/frames/")) {
         return { Accept: `multipart/related; type="application/octet-stream"; transfer-syntax=${ts}` };
@@ -134,7 +135,7 @@ async function buildImageIds(studyUid: string, seriesUid: string): Promise<strin
       const sop = String(meta["00080018"]?.Value?.[0] ?? "");
       const num = Number(meta["00200013"]?.Value?.[0] ?? 0);
       const imageId =
-        `wadors:${DICOMWEB_ROOT}/studies/${studyUid}/series/${seriesUid}` +
+        `wadors:${framesBase()}/studies/${studyUid}/series/${seriesUid}` +
         `/instances/${sop}/frames/1`;
       return { imageId, num, sop, meta };
     })
