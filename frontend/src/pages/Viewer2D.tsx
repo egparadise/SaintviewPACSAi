@@ -3673,6 +3673,37 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {/* SaintView — In-View 크로스링크 바(체크박스)를 상태바에 통합. xmode 5모드 매핑 */}
+        {skin === "saint" && (() => {
+          const XB: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4, fontSize: 11.5,
+                                            whiteSpace: "nowrap", cursor: "pointer" };
+          const linkOn = xmode !== "off";
+          const syncSub = xmode === "auto_sync" || xmode === "sync_other";
+          return (
+            <span style={{ display: "flex", alignItems: "center", gap: 14, marginRight: 16 }}>
+              <label style={XB} title="Crosslink — 페인 간 스크롤 동기 마스터(켜면 Auto Sync 기본)">
+                <input type="checkbox" checked={linkOn}
+                       onChange={(e) => setXmode(e.target.checked ? "auto_sync" : "off")} />Crosslink
+              </label>
+              <label style={{ ...XB, opacity: linkOn ? 1 : 0.45 }} title="같은 검사 페인끼리 스크롤 동기">
+                <input type="checkbox" checked={xmode === "auto_sync"} disabled={!linkOn && !syncSub}
+                       onChange={(e) => setXmode(e.target.checked ? "auto_sync" : "off")} />Auto Sync
+              </label>
+              <label style={{ ...XB, opacity: linkOn ? 1 : 0.45 }} title="다른 검사(과거검사 포함) 페인까지 스크롤 동기">
+                <input type="checkbox" checked={xmode === "sync_other"} disabled={!linkOn && !syncSub}
+                       onChange={(e) => setXmode(e.target.checked ? "sync_other" : "auto_sync")} />Sync With Other Exams
+              </label>
+              <label style={XB} title="Scout Line — 활성 페인 현재 이미지의 교차선을 다른 페인에 표시">
+                <input type="checkbox" checked={xmode === "scout"}
+                       onChange={(e) => setXmode(e.target.checked ? "scout" : "off")} />Scout Line
+              </label>
+              <label style={XB} title="All Lines — 활성 시리즈 전체 이미지의 교차선 표시(현재 이미지는 진하게)">
+                <input type="checkbox" checked={xmode === "all_lines"}
+                       onChange={(e) => setXmode(e.target.checked ? "all_lines" : "off")} />All Lines
+              </label>
+            </span>
+          );
+        })()}
         <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
       </div>
 
