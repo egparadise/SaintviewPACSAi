@@ -79,23 +79,43 @@ export function hasToken() {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // FormData(파일 업로드)는 브라우저가 multipart boundary 를 직접 설정 — Content-Type 강제 금지
   const isForm = init?.body instanceof FormData;
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      ...(isForm ? {} : { "Content-Type": "application/json" }),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (res.status === 401) {
-    setToken(null);
-    window.location.reload();
+  // 일시 장애 자동 재시도 — 백엔드 재시작/프록시 순단(502/503/504, 네트워크 오류) 시
+  // 멱등한 GET 만 1s→3s 백오프로 2회 재시도. 패널에 'HTTP 502'가 남는 문제 방지.
+  const isGet = !init?.method || init.method.toUpperCase() === "GET";
+  const RETRY_DELAYS = [1000, 3000];
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          ...(isForm ? {} : { "Content-Type": "application/json" }),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch (e) {
+      // fetch 자체 실패(네트워크/프록시 다운) — GET 이면 재시도
+      if (isGet && attempt < RETRY_DELAYS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw e;
+    }
+    if (isGet && attempt < RETRY_DELAYS.length && [502, 503, 504].includes(res.status)) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+    if (res.status === 401) {
+      setToken(null);
+      window.location.reload();
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail ?? `HTTP ${res.status}`);
+    }
+    return res.json();
   }
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 /** 레인 패널(HL7·인프라·보안) 공용 인증 fetch — 각 패널의 중복 로컬 헬퍼를 승격(동작 무변경).
@@ -109,20 +129,38 @@ export async function panelFetch<T>(
 ): Promise<T> {
   // 토큰: 메모리 우선(새 창 인계 커버), 없으면 저장소(sv_token) 조회 — 기존 패널 동작과 동일
   const t = token ?? localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(t ? { Authorization: `Bearer ${t}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    let detail: string | undefined;
-    try { detail = ((await res.json()) as { detail?: string }).detail; } catch { /* 본문 없음 */ }
-    throw new Error(fmtErr(res.status, res.statusText, detail));
+  // req() 와 동일한 일시 장애 재시도 — 멱등한 GET 만 502/503/504·네트워크 오류 시 1s→3s 2회
+  const isGet = !init?.method || init.method.toUpperCase() === "GET";
+  const RETRY_DELAYS = [1000, 3000];
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch (e) {
+      if (isGet && attempt < RETRY_DELAYS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw e;
+    }
+    if (isGet && attempt < RETRY_DELAYS.length && [502, 503, 504].includes(res.status)) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+    if (!res.ok) {
+      let detail: string | undefined;
+      try { detail = ((await res.json()) as { detail?: string }).detail; } catch { /* 본문 없음 */ }
+      throw new Error(fmtErr(res.status, res.statusText, detail));
+    }
+    return res.json() as Promise<T>;
   }
-  return res.json() as Promise<T>;
 }
 
 // ---- 타입 (백엔드 응답 1:1) ----
