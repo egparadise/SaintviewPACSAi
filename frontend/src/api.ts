@@ -271,6 +271,30 @@ export const api = {
       `/api/studies/${studyId}/mobile-capture`, { method: "POST", body: JSON.stringify({ origin }) }),
   mobileCaptureStatus: (token: string) =>
     req<{ uploaded: number; done: boolean; series_uid: string }>(`/api/mobile-capture/${token}/status`),
+  // 병원별 Storage — 현황/정책/수동백업/이력/보존
+  hospStorageSummary: (hid: number) =>
+    req<{ studies: number; series: number; instances: number;
+          disk: { path: string; free_gb: number | null; total_gb: number | null };
+          retention_days: number; retention_over: number }>(`/api/hospitals/${hid}/storage/summary`),
+  hospStoragePolicy: (hid: number) =>
+    req<{ enabled: boolean; schedule_time: string; retention_days: number; compression: string; target_dir: string }>(
+      `/api/hospitals/${hid}/storage/policy`),
+  hospStoragePolicyPut: (hid: number, body: { enabled: boolean; schedule_time: string; retention_days: number; compression: string; target_dir: string }) =>
+    req(`/api/hospitals/${hid}/storage/policy`, { method: "PUT", body: JSON.stringify(body) }),
+  hospStorageCompressions: (hid: number) =>
+    req<{ items: { key: string; label: string }[] }>(`/api/hospitals/${hid}/storage/compressions`),
+  hospStorageBackup: (hid: number, body: { compression?: string; date_from?: string; date_to?: string }) =>
+    req(`/api/hospitals/${hid}/storage/backup`, { method: "POST", body: JSON.stringify(body) }),
+  hospStorageJobs: (hid: number) =>
+    req<{ items: { id: number; kind: string; status: string; compression: string; study_count: number | null;
+                   instance_count: number | null; total_bytes: number | null; error: string | null;
+                   finished_at: string | null }[] }>(`/api/hospitals/${hid}/storage/jobs`),
+  hospStoragePurgePreview: (hid: number, retention_days: number) =>
+    req<{ count: number; items: { id: number; study_date: string; modality: string; study_desc: string }[] }>(
+      `/api/hospitals/${hid}/storage/purge-preview`, { method: "POST", body: JSON.stringify({ retention_days }) }),
+  hospStoragePurge: (hid: number, retention_days: number) =>
+    req<{ ok: boolean; deleted: number; orthanc_removed: number }>(
+      `/api/hospitals/${hid}/storage/purge`, { method: "POST", body: JSON.stringify({ retention_days, confirm: true }) }),
   // 병원·계정 설정 백업/복원 — 항목 선택 → JSON export/import
   backupHospital: (hid: number, items: string[]) =>
     req<{ meta: { hospital: string; hospital_id: number; code: string; generated_at: string; version: number; items: string[] }; data: Record<string, unknown> }>(

@@ -1,7 +1,7 @@
 // 병원별 관리 탭(레인 F) — 등록 병원 선택 시 하위 관리 7종
 // ① 계정(등급) ② 권한 매트릭스 ③ Modality(SCP) ④ 병원 설정(SCU) ⑤ 사용량 ⑥ 연결 대시보드 ⑦ DB·영상 관리
 // 백엔드 계약(usage/perm-matrix/modalities/scu/admin-action)은 레인 B가 병렬 구현 — 계약 기준 코딩.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   api, type ClientRow, type HospitalRow, type HospitalScu, type HospitalUsage,
   type ModalityNode, type PermMatrixResp, type StudyAdminActionKind, type StudyRow,
@@ -766,6 +766,176 @@ export function BackupTab({ hid, hospitalName }: { hid: number; hospitalName: st
         ⚠ '계정·좌석' 항목은 로그인 자격증명(비번 해시·복원 평문)을 포함합니다. 백업 파일은 안전한 곳에 보관하세요.
       </div>
       <Msg text={msg} />
+    </div>
+  );
+}
+
+
+/* ── ⑮ 병원별 Storage — 서버 Storage 페이지의 병원 스코프 버전 ──
+   현황(그 병원 검사·시리즈·인스턴스·백업 디스크) · 백업 정책(병원별 저장) · 수동 백업(그 병원만) ·
+   백업 이력 · 보존 정책(미리보기 → confirm 삭제). */
+export function HospitalStorageTab({ hid }: { hid: number }) {
+  const [sum, setSum] = useState<Awaited<ReturnType<typeof api.hospStorageSummary>> | null>(null);
+  const [pol, setPol] = useState({ enabled: false, schedule_time: "02:00", retention_days: 0,
+                                   compression: "none", target_dir: "" });
+  const [comps, setComps] = useState<{ key: string; label: string }[]>([]);
+  const [jobs, setJobs] = useState<Awaited<ReturnType<typeof api.hospStorageJobs>>["items"]>([]);
+  const [runComp, setRunComp] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const reload = useCallback(() => {
+    api.hospStorageSummary(hid).then(setSum).catch(() => {});
+    api.hospStorageJobs(hid).then((r) => setJobs(r.items)).catch(() => {});
+  }, [hid]);
+  useEffect(() => {
+    reload();
+    api.hospStoragePolicy(hid).then((p) => setPol(p)).catch(() => {});
+    api.hospStorageCompressions(hid).then((r) => setComps(r.items)).catch(() => {});
+  }, [hid, reload]);
+
+  const F: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 6, padding: 12, marginBottom: 14 };
+  const L: React.CSSProperties = { width: 110, color: "var(--text-secondary)", fontSize: 12.5, flexShrink: 0 };
+  const SRow = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+      <span style={L}>{label}</span>{children}
+    </div>
+  );
+  const gb = (b: number | null) => (b == null ? "-" : (b / 1e9).toFixed(2) + " GB");
+
+  return (
+    <div style={{ maxWidth: 860 }}>
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>저장공간 현황
+          <button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>새로고침</button>
+        </legend>
+        {sum ? (
+          <>
+            <SRow label="이 병원 검사">검사 {sum.studies} · 시리즈 {sum.series} · 인스턴스 {sum.instances}</SRow>
+            <SRow label="백업 대상 디스크">
+              {(sum.disk.path || "-") + (sum.disk.free_gb != null ? " — 여유 " + sum.disk.free_gb + " GB / 전체 " + sum.disk.total_gb + " GB" : "")}
+            </SRow>
+            <SRow label="보존 정책">
+              {sum.retention_days > 0
+                ? sum.retention_days + "일 — 초과 " + sum.retention_over + "건(수동 삭제 대상)"
+                : "미적용 (보존 기간 0)"}
+            </SRow>
+          </>
+        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>로딩…</div>}
+      </fieldset>
+
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>백업 정책 (병원별 — 스케줄·보존·압축)</legend>
+        <SRow label="자동 백업">
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+            <input type="checkbox" checked={pol.enabled}
+                   onChange={(e) => setPol((p) => ({ ...p, enabled: e.target.checked }))} />
+            매일 예정 시각에 스케줄 백업
+          </label>
+        </SRow>
+        <SRow label="예정 시각">
+          <input type="time" value={pol.schedule_time}
+                 onChange={(e) => setPol((p) => ({ ...p, schedule_time: e.target.value }))} />
+        </SRow>
+        <SRow label="보존 기간">
+          <input type="number" min={0} value={pol.retention_days} style={{ width: 90 }}
+                 onChange={(e) => setPol((p) => ({ ...p, retention_days: Number(e.target.value) || 0 }))} />
+          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>일 (0=무제한, 초과분은 수동 삭제 대상)</span>
+        </SRow>
+        <SRow label="압축 포맷">
+          <select value={pol.compression} onChange={(e) => setPol((p) => ({ ...p, compression: e.target.value }))}>
+            {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </SRow>
+        <SRow label="백업 경로">
+          <input value={pol.target_dir} placeholder="비우면 backend/backup" style={{ flex: 1 }}
+                 onChange={(e) => setPol((p) => ({ ...p, target_dir: e.target.value }))} />
+        </SRow>
+        <button className="primary" style={{ fontSize: 12 }}
+                onClick={async () => {
+                  try { await api.hospStoragePolicyPut(hid, pol); setMsg("정책 저장됨"); reload(); }
+                  catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
+                }}>정책 저장</button>
+      </fieldset>
+
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>수동 백업 실행 (이 병원 검사만)</legend>
+        <SRow label="압축">
+          <select value={runComp} onChange={(e) => setRunComp(e.target.value)}>
+            <option value="">(정책값)</option>
+            {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </SRow>
+        <SRow label="검사일 범위">
+          <input placeholder="YYYYMMDD" value={from} style={{ width: 110 }} onChange={(e) => setFrom(e.target.value)} />
+          <span>~</span>
+          <input placeholder="YYYYMMDD" value={to} style={{ width: 110 }} onChange={(e) => setTo(e.target.value)} />
+          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>비우면 전체</span>
+        </SRow>
+        <button className="primary" style={{ fontSize: 12 }}
+                onClick={async () => {
+                  try {
+                    await api.hospStorageBackup(hid, { compression: runComp, date_from: from, date_to: to });
+                    setMsg("백업 시작됨 — 이력에서 진행 상태 확인");
+                    window.setTimeout(reload, 1500);
+                  } catch (e) { setMsg(e instanceof Error ? e.message : "백업 실패"); }
+                }}>백업 시작</button>
+      </fieldset>
+
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>백업 이력
+          <button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>새로고침</button>
+        </legend>
+        <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--text-secondary)", textAlign: "left" }}>
+              <th style={{ padding: 4 }}>#</th><th>상태</th><th>압축</th><th>검사</th><th>인스턴스</th><th>용량</th><th>완료</th>
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.length === 0 && <tr><td colSpan={7} style={{ padding: 8, color: "var(--text-secondary)" }}>백업 이력이 없습니다.</td></tr>}
+            {jobs.map((j) => (
+              <tr key={j.id} style={{ borderTop: "1px solid var(--border)" }}>
+                <td style={{ padding: 4 }}>{j.id}</td>
+                <td style={{ color: j.status === "done" ? "#4ade80" : j.status === "error" ? "var(--stat-emergency)" : undefined }}>
+                  {j.status}{j.error ? " (" + j.error.slice(0, 40) + ")" : ""}</td>
+                <td>{j.compression}</td>
+                <td>{j.study_count ?? "-"}</td>
+                <td>{j.instance_count ?? "-"}</td>
+                <td>{gb(j.total_bytes)}</td>
+                <td>{j.finished_at ? j.finished_at.slice(0, 16).replace("T", " ") : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </fieldset>
+
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>보존 정책 — 기간 초과 검사 삭제 (파괴적 · 이 병원만)</legend>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 8 }}>
+          보존 기간({pol.retention_days}일)을 초과한 이 병원 검사를 Orthanc·DB에서 영구 삭제합니다. 미리보기 후 확인 절차를 거치며, 자동 삭제는 하지 않습니다.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={{ fontSize: 12 }}
+                  onClick={async () => {
+                    try {
+                      const r = await api.hospStoragePurgePreview(hid, pol.retention_days);
+                      setMsg("초과 " + r.count + "건 — " + r.items.slice(0, 5).map((x) => x.study_date + " " + x.modality).join(", ") + (r.count > 5 ? " …" : ""));
+                    } catch (e) { setMsg(e instanceof Error ? e.message : "미리보기 실패"); }
+                  }}>미리보기</button>
+          <button style={{ fontSize: 12, color: "var(--stat-emergency)" }}
+                  onClick={async () => {
+                    if (!window.confirm("보존 " + pol.retention_days + "일 초과 검사를 영구 삭제할까요? (되돌릴 수 없음 — 백업 먼저 권장)")) return;
+                    try {
+                      const r = await api.hospStoragePurge(hid, pol.retention_days);
+                      setMsg("삭제 완료 — DB " + r.deleted + "건 · Orthanc " + r.orthanc_removed + "건");
+                      reload();
+                    } catch (e) { setMsg(e instanceof Error ? e.message : "삭제 실패"); }
+                  }}>초과분 삭제…</button>
+        </div>
+      </fieldset>
+      {msg && <div style={{ fontSize: 12, color: "var(--ai)", marginTop: 4 }}>{msg}</div>}
     </div>
   );
 }

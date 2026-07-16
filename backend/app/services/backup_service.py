@@ -123,6 +123,13 @@ def run_backup_job(db: Session, job_id: int, *, client=None) -> BackupJob:
         if not client.alive():
             raise RuntimeError("Orthanc에 연결할 수 없습니다")
         studies = _studies_in_range(db, job.date_from, job.date_to)
+        # 병원 스코프 백업 — kind="hospital:{hid}" 작업은 해당 병원 검사만
+        if (job.kind or "").startswith("hospital:"):
+            try:
+                _hid = int(job.kind.split(":", 1)[1])
+                studies = [st for st in studies if st.hospital_id == _hid]
+            except ValueError:
+                pass
         total_bytes = 0
         inst_count = 0
         done_studies = 0

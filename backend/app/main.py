@@ -15,6 +15,7 @@ from app.api import (
     backup,
     examctl,
     hospital_admin,
+    hospital_storage,
     hospitals,
     localpacs,
     maintenance,
@@ -105,6 +106,7 @@ app.include_router(signup.router)
 app.include_router(hospitals.router)
 app.include_router(hospital_admin.router)
 app.include_router(backup.router)
+app.include_router(hospital_storage.router)  # 병원별 Storage(백업 정책·수동 백업·이력·보존)
 app.include_router(mobile.router)  # 휴대폰 사진 촬영(QR) — 검사 새 시리즈 등록  # 병원·계정 설정 백업/복원(/api/hospitals/{hid}/backup·restore)
 app.include_router(settings_api.router)
 app.include_router(orders.router)
