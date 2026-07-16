@@ -232,6 +232,26 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   const relExams = detail.related_exams ?? [];
   // Prior Studies 미니 썸네일 — 검사당 대표 1장(첫 영상 시리즈 중간 인스턴스), 캐시
   const [priorThumbs, setPriorThumbs] = useState<Record<number, string>>({});
+  // 과거검사 판독 펼침 — 행 클릭 시 그 검사의 최신 판독(Reading/Conclusion)을 아래로 표시(1건 캐시)
+  const [priorOpen, setPriorOpen] = useState<number | null>(null);
+  const [priorRpt, setPriorRpt] = useState<Record<number, { reading: string; conclusion: string } | "none" | "loading">>({});
+  const togglePriorReport = (examId: number) => {
+    setPriorOpen((cur) => (cur === examId ? null : examId));
+    if (priorRpt[examId] !== undefined) return;
+    setPriorRpt((m) => ({ ...m, [examId]: "loading" }));
+    api.reports(examId).then((r) => {
+      const rp = r.items[0];
+      if (!rp) { setPriorRpt((m) => ({ ...m, [examId]: "none" })); return; }
+      const sr = rp.sr_json;
+      const lines: string[] = [];
+      if (sr.comparison?.summary) lines.push(`[비교] ${sr.comparison.summary}`);
+      for (const f of sr.findings ?? []) lines.push(`${f.organ ? f.organ + ": " : ""}${f.observation}`);
+      setPriorRpt((m) => ({ ...m, [examId]: {
+        reading: lines.join("\n"),
+        conclusion: (sr.impression ?? []).map((i) => i.statement).join("\n"),
+      } }));
+    }).catch(() => setPriorRpt((m) => ({ ...m, [examId]: "none" })));
+  };
   useEffect(() => {
     let alive = true;
     (relExams.slice(0, 12)).forEach((e) => {
@@ -381,22 +401,45 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
           )}
           <div style={{ padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
                         background: "var(--bg-elevated)", borderTop: "1px solid var(--border)" }}>
-            Prior Studies (click=compare in active pane)
+            Prior Studies (클릭=판독 펼침 · 썸네일 클릭=비교 로드)
           </div>
           {relExams.map((e) => (
-            <div key={e.id} onClick={() => onLoadPrior(e.id)}
-                 style={{ padding: "4px 8px", fontSize: 11.5, cursor: "pointer", borderBottom: "1px solid #24282d",
-                          display: "flex", alignItems: "center", gap: 7 }}
-                 onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
-                 onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-              {priorThumbs[e.id]
-                ? <img src={priorThumbs[e.id]} alt="" style={{ width: 58, height: 44, objectFit: "cover",
-                        borderRadius: 2, border: "1px solid var(--border)", background: "#000", flexShrink: 0 }} />
-                : <span style={{ width: 58, height: 44, borderRadius: 2, background: "#000",
-                        border: "1px solid var(--border)", flexShrink: 0 }} />}
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
-              </span>
+            <div key={e.id}>
+              <div onClick={() => togglePriorReport(e.id)}
+                   title="클릭=이 검사의 판독 내용 펼침/접기 · 썸네일 클릭=활성 페인에 비교 로드"
+                   style={{ padding: "4px 8px", fontSize: 11.5, cursor: "pointer", borderBottom: "1px solid #24282d",
+                            display: "flex", alignItems: "center", gap: 7 }}
+                   onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
+                   onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
+                {priorThumbs[e.id]
+                  ? <img src={priorThumbs[e.id]} alt="" title="비교 로드 — 활성 페인에 표시"
+                         onClick={(ev) => { ev.stopPropagation(); onLoadPrior(e.id); }}
+                         style={{ width: 58, height: 44, objectFit: "cover",
+                          borderRadius: 2, border: "1px solid var(--border)", background: "#000", flexShrink: 0 }} />
+                  : <span onClick={(ev) => { ev.stopPropagation(); onLoadPrior(e.id); }}
+                          style={{ width: 58, height: 44, borderRadius: 2, background: "#000",
+                          border: "1px solid var(--border)", flexShrink: 0 }} />}
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                  {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+                </span>
+                <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{priorOpen === e.id ? "▴" : "▾"}</span>
+              </div>
+              {/* 판독 내용 펼침 — 행 1회 클릭 */}
+              {priorOpen === e.id && (
+                <div style={{ padding: "6px 10px 8px 14px", fontSize: 11, lineHeight: 1.55, background: "var(--bg-canvas)",
+                              borderBottom: "1px solid #24282d", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {priorRpt[e.id] === "loading" && <span style={{ color: "var(--text-secondary)" }}>판독 불러오는 중…</span>}
+                  {priorRpt[e.id] === "none" && <span style={{ color: "var(--text-secondary)" }}>이 검사의 판독이 없습니다</span>}
+                  {typeof priorRpt[e.id] === "object" && (
+                    <>
+                      <div style={{ color: "var(--text-secondary)", fontWeight: 700, marginBottom: 2 }}>Reading</div>
+                      <div>{(priorRpt[e.id] as { reading: string }).reading || "-"}</div>
+                      <div style={{ color: "var(--text-secondary)", fontWeight: 700, margin: "6px 0 2px" }}>Conclusion</div>
+                      <div>{(priorRpt[e.id] as { conclusion: string }).conclusion || "-"}</div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           ))}
           {relExams.length === 0 && (
