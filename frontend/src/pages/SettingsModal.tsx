@@ -69,6 +69,7 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope 
   { key: "viewerTy", label: "뷰어 — T-View", scope: "viewer" },
   { key: "viewerIn", label: "뷰어 — In-View", scope: "viewer" },
   { key: "monitor", label: "모니터 (Display)", scope: "viewer" },
+  { key: "shortcuts", label: "단축키 (Mouse·Key)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
   { key: "hp", label: "행잉 (HP)", scope: "viewer" },
 ];
@@ -208,6 +209,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [wlMon, setWlMon] = useState<number | null>(null);      // 워크리스트 창
   const [rptMon, setRptMon] = useState<number | null>(null);    // 판독(Reading) 창
   const [monitorMsg, setMonitorMsg] = useState("");
+  // 단축키(마우스·키) — 계정별 저장(viewer.prefs.shortcuts)
+  const [scRdrag, setScRdrag] = useState<"wl" | "zoom" | "pan">("wl");
+  const [scShiftR, setScShiftR] = useState<"zoomout" | "none">("zoomout");
   // 정책 — ◀(왼쪽) 버튼이 시간상 어느 방향으로 갈지 (워크리스트는 최신이 위)
   const [polNavLeft, setPolNavLeft] = useState<"past" | "recent">("past");
   const [quality, setQuality] = useState<AiQuality | null>(null);
@@ -336,6 +340,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (mon?.screens) setMonitorSel(mon.screens);
       if (mon?.worklist !== undefined) setWlMon(mon.worklist);
       if (mon?.report !== undefined) setRptMon(mon.report);
+      const sc = (v as { shortcuts?: { rdrag?: "wl" | "zoom" | "pan"; shift_rclick?: "zoomout" | "none" } }).shortcuts;
+      if (sc?.rdrag) setScRdrag(sc.rdrag);
+      if (sc?.shift_rclick) setScShiftR(sc.shift_rclick);
     }).catch(() => {});
     api.getSetting("viewer.hp").then((r) => {
       setHpRules(((r.value as { rules?: HpRule[] }).rules) ?? []);
@@ -445,6 +452,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       paletteSide, thumbSide, thumbSize, thumbMode, reportDock,
       toolbar: tbConfig, wl_presets: wlPresets, close_mode: closeMode,
       monitor: { screens: monitorSel, worklist: wlMon, report: rptMon },
+      shortcuts: { rdrag: scRdrag, shift_rclick: scShiftR },
     }, "user");
     await api.putSetting("report.prefs",
       { ...rdOpts, ai_panel: rptAiPanel, auto_apply: rptAutoApply }, "user");
@@ -1582,6 +1590,31 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </>
             )}
 
+            {page === "shortcuts" && (
+              <Group title="단축키 (Mouse·Key) — 계정별 저장">
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  뷰어 마우스/키 동작을 계정별로 설정합니다(모든 뷰어 공통). 하단 OK(저장) 시 내 계정에만 적용.
+                </div>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>우클릭 드래그 도구</span>
+                  <select value={scRdrag} onChange={(e) => setScRdrag(e.target.value as "wl" | "zoom" | "pan")}>
+                    <option value="wl">W/L 조정 (기본)</option>
+                    <option value="zoom">Zoom</option>
+                    <option value="pan">Pan</option>
+                  </select>
+                </label>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>Shift + 우클릭</span>
+                  <select value={scShiftR} onChange={(e) => setScShiftR(e.target.value as "zoomout" | "none")}>
+                    <option value="zoomout">Zoom Out 한 단계 (기본)</option>
+                    <option value="none">동작 없음</option>
+                  </select>
+                </label>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                  · 우클릭(클릭만)=컨텍스트 메뉴 · 중클릭 드래그=Pan 고정 · 향후 단축키 항목은 이 페이지에 추가됩니다.
+                </div>
+              </Group>
+            )}
             {page === "monitor" && (
               <>
                 <Group title="모니터 감지 · 뷰어 배치" right={

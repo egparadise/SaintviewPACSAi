@@ -1292,6 +1292,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const rdragRef = useRef(rdragTool);
   rdragRef.current = rdragTool;
   const setRdrag = (t: "wl" | "zoom" | "pan") => { setRdragTool(t); try { localStorage.setItem("ty_rdrag", t); } catch { /* 저장 불가 무시 */ } };
+  // 설정>단축키(계정별 viewer.prefs.shortcuts) — 우드래그 도구·Shift+우클릭 동작
+  const shiftRClickRef = useRef<"zoomout" | "none">("zoomout");
+  useEffect(() => {
+    api.getSetting("viewer.prefs").then((r) => {
+      const sc = (r.value as { shortcuts?: { rdrag?: "wl" | "zoom" | "pan"; shift_rclick?: "zoomout" | "none" } }).shortcuts;
+      if (sc?.rdrag) { setRdragTool(sc.rdrag); rdragRef.current = sc.rdrag; }
+      if (sc?.shift_rclick) shiftRClickRef.current = sc.shift_rclick;
+    }).catch(() => {});
+  }, []);
   const onPaneMouseDown = (pid: string, e: React.MouseEvent) => {
     const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
     if (e.shiftKey) {
@@ -1897,7 +1906,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (d?.moved) schedHist();   // 드래그 종료 시점에 히스토리 기록 (In 동일)
       // 우클릭(이동 없음): Shift+우클릭=Zoom Out 한 단계 / 그 외=컨텍스트 메뉴 (초기 분석 §7)
       if (d && d.btn === 2 && !d.moved) {
-        if (d.shift) updMany(targetsOf(d.pid), (p) => ({ zoom: Math.max(0.2, p.zoom * 0.8) }));
+        if (d.shift) { if (shiftRClickRef.current !== "none") updMany(targetsOf(d.pid), (p) => ({ zoom: Math.max(0.2, p.zoom * 0.8) })); }
         else setCtxMenu({ x: e.clientX, y: e.clientY, pid: d.pid });
       }
       dragRef.current = null;
@@ -2917,12 +2926,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                    style={{ width: ts, height: ts * 0.78, objectFit: "cover", display: "block" }} />
             )}
             {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 페인 KEY 마크와 동기) */}
-            {s.instances.some((i2) => keyMarks.has(i2.sop_uid)) && (
-              <div style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6,
+            {(() => { const kn = s.instances.filter((i2) => keyMarks.has(i2.sop_uid)).length; return kn > 0 && (
+              <div title={`키 이미지 ${kn}장`}
+                   style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6,
                             background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>
-                🔑
+                🔑{kn > 1 ? kn : ""}
               </div>
-            )}
+            ); })()}
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 9,
                           background: "rgba(0,0,0,0.65)", padding: "1px 3px" }}>
               {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}

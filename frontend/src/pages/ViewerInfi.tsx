@@ -2256,10 +2256,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
           )}
           {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 KEY 마크와 동기) */}
-          {s.instances.some((i2) => keyMarks.has(i2.sop_uid)) && (
-            <div style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6, pointerEvents: "none",
-                          background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>🔑</div>
-          )}
+          {(() => { const kn = s.instances.filter((i2) => keyMarks.has(i2.sop_uid)).length; return kn > 0 && (
+            <div title={`키 이미지 ${kn}장`}
+                 style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6, pointerEvents: "none",
+                          background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>🔑{kn > 1 ? kn : ""}</div>
+          ); })()}
           {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}
           <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
             {s.series_number}/{s.instances.length}
