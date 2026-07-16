@@ -1,6 +1,6 @@
 // Import DICOM Files — USB/CD 등에서 .dcm 파일을 골라 Orthanc(자체 저장소)+로컬 DB 에 등록.
 // 원본 PiViewSTAR 'Import DICOM Files' 다이얼로그 대응 (폴더 선택·확장자 필터·결과표).
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
 type Row = { filename: string; size: number; status: string };   // size<0 = 표시 생략("-")
@@ -23,6 +23,31 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
   const [done, setDone] = useState(false);   // 업로드 완료 — Start→완료 표시
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState("Total 0 files processed, 0 DICOM files imported");
+  // 비차단 플로팅 창 — 드래그 이동 위치(초기 중앙 상단). 업로드 중에도 다른 화면 조작 가능.
+  const [pos, setPos] = useState<{ x: number; y: number }>(() => ({
+    x: Math.max(8, (window.innerWidth - Math.min(680, window.innerWidth * 0.96)) / 2), y: 60 }));
+  const dragPos = useRef<{ dx: number; dy: number } | null>(null);
+  const onHeadDown = (e: React.PointerEvent) => {
+    dragPos.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    const mv = (ev: PointerEvent) => {
+      if (!dragPos.current) return;
+      setPos({ x: Math.max(0, ev.clientX - dragPos.current.dx), y: Math.max(0, ev.clientY - dragPos.current.dy) });
+    };
+    const up = () => { dragPos.current = null; window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", up);
+  };
+  // 업로드 중 닫기 금지 + 탭 이탈(새로고침/닫기) 경고 — 완료 전 작업 유실 방지
+  const guardedClose = () => {
+    if (busy) { setSummary("업로드 진행 중 — 완료 전에는 닫을 수 없습니다 (백그라운드에서 계속 진행됩니다)"); return; }
+    onClose();
+  };
+  useEffect(() => {
+    if (!busy) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [busy]);
 
   // DICOM 판별 — 확장자 무관: 프리앰블 128바이트 뒤 'DICM' 시그니처(Part 10),
   // 시그니처 없는 구형 raw 파일은 그룹 0008 리틀엔디언 시작으로 감지 (PA000000/IM000000 류 CD 대응)
@@ -125,21 +150,23 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
 
   const B: React.CSSProperties = { padding: "4px 14px", minWidth: 74 };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid",
-                  placeItems: "center", zIndex: 300 }}
-         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 300 }}>
+      {/* 비차단 플로팅 창 — 백드롭 없음: 업로드 중에도 뒤의 워크리스트/뷰어 조작 가능, 창은 완료까지 유지 */}
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
                     width: "min(680px, 96vw)", maxHeight: "92vh", overflow: "auto",
-                    padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center" }}>
+                    padding: 16, display: "flex", flexDirection: "column", gap: 12,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.55)" }}>
+        <div style={{ display: "flex", alignItems: "center", cursor: "move", userSelect: "none" }}
+             onPointerDown={onHeadDown} title="드래그로 이동 — 업로드는 백그라운드에서 계속됩니다">
           <b style={{ fontSize: 13 }}>📥 Import DICOM Files{localMode ? " — LOCAL" : ""}</b>
+          {busy && <span style={{ marginLeft: 8, fontSize: 11, color: "#4ade80" }}>● 백그라운드 진행 중 — 다른 화면을 사용해도 계속됩니다</span>}
           {localMode && (
             <span style={{ marginLeft: 8, fontSize: 11, color: "#f59e0b" }}
                   title={localRoot ? `저장 위치: ${localRoot}\\Image` : undefined}>
               로컬 Image 폴더에 저장됩니다 (서버 업로드 아님)
             </span>
           )}
-          <button style={{ marginLeft: "auto" }} onClick={onClose}>✕</button>
+          <button style={{ marginLeft: "auto" }} onClick={guardedClose} title={busy ? "업로드 완료 후 닫을 수 있습니다" : "닫기"} disabled={busy}>✕</button>
         </div>
 
         {/* Import Parameters */}
@@ -210,7 +237,7 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
                   disabled={busy || done || !picked.length} onClick={start}>
             {busy ? "진행 중…" : done ? "완료 ✓" : "Start"}
           </button>
-          <button style={B} onClick={() => { onDone(); onClose(); }}>Close</button>
+          <button style={B} disabled={busy} title={busy ? "업로드 완료 후 닫을 수 있습니다" : "닫기"} onClick={() => { if (busy) return; onDone(); onClose(); }}>Close</button>
         </div>
       </div>
     </div>
