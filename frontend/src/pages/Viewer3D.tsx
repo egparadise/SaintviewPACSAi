@@ -157,7 +157,11 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const [activeVp, setActiveVp] = useState("vp-axial");
   const [seriesList, setSeriesList] = useState<SeriesCand[]>([]);
   const [selSeries, setSelSeries] = useState("");
-  const [toolMode, setToolMode] = useState<"crosshair" | "wl" | "roi" | "fill">("crosshair");
+  // 기능 믹스 — 각 도구를 독립 토글로 동시 사용. 무수정자 좌클릭 우선순위: Crosshair > ROI > W/L,
+  // 우선순위에 밀린 도구는 자동으로 수정자 바인딩: ROI=Shift+좌, W/L=Ctrl+좌, 채우기=Alt+클릭.
+  const [modes, setModes] = useState({ crosshair: true, wl: false, roi: false, fill: false });
+  const modesRef = useRef(modes);
+  modesRef.current = modes;
   const [fillColor, setFillColor] = useState("#22d3ee");   // 채우기(분할) 색 — 컬러 피커
   const [fillOn, setFillOn] = useState(false);             // 분할 결과 존재 여부
   const segIdRef = useRef("");                             // 라벨맵(파생) 볼륨 ID
@@ -198,41 +202,50 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     : shape === "oval" ? EllipticalROITool.toolName
     : SplineROITool.toolName;   // Free — 클릭할 때마다 포인트, 시작점과 만나면 영역 확정
 
-  // 도구 모드 전환 — Crosshair(십자선 연동) ↔ W/L (MPR 3면 좌클릭)
-  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi" | "fill", shape?: "rect" | "oval" | "free") => {
+  // 도구 믹스 적용 — ON 인 도구 전부 활성(바인딩 분배), OFF 는 비활성
+  const applyMix = useCallback((mm?: { crosshair: boolean; wl: boolean; roi: boolean; fill: boolean },
+                                shape?: "rect" | "oval" | "free") => {
     const g = ToolGroupManager.getToolGroup(TG_MPR);
     if (!g) return;
+    const md = mm ?? modesRef.current;
     try {
-      if (mode === "crosshair") {
-        g.setToolPassive(WindowLevelTool.toolName);
-        g.setToolPassive(RectangleROITool.toolName);
+      // 초기화 후 ON 도구만 바인딩 부여
+      g.setToolDisabled(CrosshairsTool.toolName);
+      for (const t of ROI_TOOLS) g.setToolPassive(t);
+      g.setToolPassive(WindowLevelTool.toolName);
+      const prim = md.crosshair ? "crosshair" : md.roi ? "roi" : md.wl ? "wl" : null;
+      if (md.crosshair) {
         g.setToolActive(CrosshairsTool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
-      } else if (mode === "roi") {
-        // ROI — 선택 모양(Rect/Oval/Free)으로 영역을 그리면 Focus(영역만)/제거(영역 빼고) 3D 렌더링
-        g.setToolDisabled(CrosshairsTool.toolName);
-        g.setToolPassive(WindowLevelTool.toolName);
-        for (const t of ROI_TOOLS) g.setToolPassive(t);
+      }
+      if (md.roi) {
         g.setToolActive(roiToolOf(shape ?? roiShape), {
-          bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
+          bindings: [prim === "roi"
+            ? { mouseButton: ToolsEnums.MouseBindings.Primary }
+            : { mouseButton: ToolsEnums.MouseBindings.Primary, modifierKey: ToolsEnums.KeyboardBindings.Shift }],
         });
-      } else if (mode === "fill") {
-        // 채우기(영역 성장) — 좌클릭은 자체 핸들러 처리(같은 농도 영역 분할)
-        g.setToolDisabled(CrosshairsTool.toolName);
-        for (const t of ROI_TOOLS) g.setToolPassive(t);
-        g.setToolPassive(WindowLevelTool.toolName);
-      } else {
-        g.setToolDisabled(CrosshairsTool.toolName);
-        for (const t of ROI_TOOLS) g.setToolPassive(t);
+      }
+      if (md.wl) {
         g.setToolActive(WindowLevelTool.toolName, {
-          bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
+          bindings: [prim === "wl"
+            ? { mouseButton: ToolsEnums.MouseBindings.Primary }
+            : { mouseButton: ToolsEnums.MouseBindings.Primary, modifierKey: ToolsEnums.KeyboardBindings.Ctrl }],
         });
       }
       engineRef.current?.render();
     } catch { /* 그룹 미준비 */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roiShape]);
+  const toggleMode = (k: "crosshair" | "wl" | "roi" | "fill") => {
+    const next = { ...modesRef.current, [k]: !modesRef.current[k] };
+    if (k === "roi" && !next.roi) clearRoiAllRef.current?.();   // ROI Off — 주석·효과 정리
+    if (k === "fill" && !next.fill) clearFillRef.current?.();   // 채우기 Off — 분할 삭제
+    setModes(next);
+    applyMix(next);
+  };
+  const clearRoiAllRef = useRef<(() => void) | null>(null);
+  const clearFillRef = useRef<(() => void) | null>(null);
 
 
   // 좌측 썸네일 클릭 → 볼륨 시리즈 전환(목록에 있는 시리즈만) — 3D 를 원하는 시리즈로 재구성
@@ -351,7 +364,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         applySlab(slabMm, blend);
         window.setTimeout(() => applySlab(slabMm, blend), 300);   // MIP 블렌드 재적용(뷰포트 준비 타이밍)
         window.setTimeout(() => applySlab(slabMm, blend), 900);
-        applyToolMode(toolMode);   // 기본 Crosshair — 십자선 연동
+        applyMix();   // 도구 믹스 — ON 인 도구 전부 활성(기본 Crosshair)
         engine.render();
         requestAnimationFrame(() => {
           engine.resize(true, true);
@@ -560,6 +573,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     } catch { /* 무시 */ }
     setFillOn(false);
   }, []);
+  clearFillRef.current = clearFill;
   // 색 변경 — 이미 추가된 세그 액터의 전달함수 갱신
   useEffect(() => {
     const engine = engineRef.current;
@@ -660,6 +674,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreVoxels]);
   const clearCropRef = useRef<(() => void) | null>(null);
+  clearRoiAllRef.current = clearRoiAll;
 
   const clearCrop = useCallback(() => {
     cropRef.current = null;
@@ -887,29 +902,23 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         </select>
         {/* 도구 모드 — Crosshair(십자선 연동) / W/L */}
         <span style={{ display: "flex", gap: 2 }}>
-          <button onClick={() => { setToolMode("crosshair"); applyToolMode("crosshair"); }}
-                  title="십자선 — 한 평면의 라인을 끌면 다른 평면 중심이 그 위치로 이동(비교)"
+          <button onClick={() => toggleMode("crosshair")}
+                  title="십자선 토글 — 다른 기능과 동시 사용(Mix). ON 이면 무수정자 좌클릭 우선"
                   style={{ fontSize: 11.5, padding: "2px 10px",
-                           background: toolMode === "crosshair" ? "var(--accent)" : undefined,
-                           color: toolMode === "crosshair" ? "#fff" : undefined }}>✛ Crosshair</button>
-          <button onClick={() => {
-                    if (toolMode === "roi") {   // Off — 다른 툴처럼 ROI 주석·렌더링 효과 전부 제거
-                      clearRoiAll();
-                      setToolMode("crosshair"); applyToolMode("crosshair");
-                      setStatus("ROI Off — 측정값·크롭 해제");
-                    } else { setToolMode("roi"); applyToolMode("roi"); }
-                  }}
-                  title="ROI — 영역을 그리면 Focus(영역만)/제거(영역 빼고) 3D 렌더링. 다시 누르면 Off(측정값·효과 삭제)"
+                           background: modes.crosshair ? "var(--accent)" : undefined,
+                           color: modes.crosshair ? "#fff" : undefined }}>✛ Crosshair</button>
+          <button onClick={() => toggleMode("roi")}
+                  title="ROI 토글 — Crosshair 와 동시 사용 시 Shift+드래그로 그리기. Off 시 측정값·효과 삭제"
                   style={{ fontSize: 11.5, padding: "2px 10px",
-                           background: toolMode === "roi" ? "var(--accent)" : undefined,
-                           color: toolMode === "roi" ? "#fff" : undefined }}>▭ ROI{cropOn ? " ●" : ""}</button>
-          {toolMode === "roi" && (
+                           background: modes.roi ? "var(--accent)" : undefined,
+                           color: modes.roi ? "#fff" : undefined }}>▭ ROI{cropOn ? " ●" : ""}</button>
+          {modes.roi && (
             <>
               <select value={roiShape} title="ROI 모양"
                       style={{ fontSize: 11.5 }}
                       onChange={(e) => {
                         const v = e.target.value as "rect" | "oval" | "free";
-                        setRoiShape(v); applyToolMode("roi", v);
+                        setRoiShape(v); applyMix(undefined, v);
                       }}>
                 <option value="oval">Oval ROI</option>
                 <option value="rect">Rectangle ROI</option>
@@ -923,23 +932,17 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
               </select>
             </>
           )}
-          <button onClick={() => { setToolMode("wl"); applyToolMode("wl"); }}
-                  title="W/L — 좌드래그로 밝기/대조 조절"
+          <button onClick={() => toggleMode("wl")}
+                  title="W/L 토글 — 다른 기능과 동시 사용 시 Ctrl+드래그"
                   style={{ fontSize: 11.5, padding: "2px 10px",
-                           background: toolMode === "wl" ? "var(--accent)" : undefined,
-                           color: toolMode === "wl" ? "#fff" : undefined }}>◐ W/L</button>
-          <button onClick={() => {
-                    if (toolMode === "fill") {   // Off — 분할 결과 삭제 후 Crosshair 복귀
-                      clearFill();
-                      setToolMode("crosshair"); applyToolMode("crosshair");
-                      setStatus("채우기 Off — 분할 삭제");
-                    } else { setToolMode("fill"); applyToolMode("fill"); }
-                  }}
+                           background: modes.wl ? "var(--accent)" : undefined,
+                           color: modes.wl ? "#fff" : undefined }}>◐ W/L</button>
+          <button onClick={() => toggleMode("fill")}
                   title="채우기(영역 성장) — MPR 에서 클릭한 지점과 같은 농도의 연결 영역(예: 척수강 뇌척수액)을 색으로 채우고 3D 컬러 렌더링. 다시 누르면 Off(삭제)"
                   style={{ fontSize: 11.5, padding: "2px 10px",
-                           background: toolMode === "fill" ? "var(--accent)" : undefined,
-                           color: toolMode === "fill" ? "#fff" : undefined }}>🪄 채우기{fillOn ? " ●" : ""}</button>
-          {toolMode === "fill" && (
+                           background: modes.fill ? "var(--accent)" : undefined,
+                           color: modes.fill ? "#fff" : undefined }}>🪄 채우기{fillOn ? " ●" : ""}</button>
+          {modes.fill && (
             <input type="color" value={fillColor} title="분할 표시/3D 렌더링 색 선택"
                    onChange={(e) => setFillColor(e.target.value)}
                    style={{ width: 30, height: 24, padding: 0, border: "1px solid var(--border)",
@@ -1020,7 +1023,10 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
           )}
         </div>
         <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-          좌={toolMode === "crosshair" ? "십자선" : "W/L"} · 우=Zoom · 휠=스크롤 · 중=Pan
+          좌={modes.crosshair ? "십자선" : modes.roi ? "ROI" : modes.wl ? "W/L" : "-"}
+          {modes.roi && modes.crosshair ? " · Shift+좌=ROI" : ""}
+          {modes.wl && (modes.crosshair || modes.roi) ? " · Ctrl+좌=W/L" : ""}
+          {modes.fill ? " · Alt+클릭=채우기" : ""} · 우=Zoom · 휠=스크롤 · 중=Pan
         </span>
         <button onClick={onClose}>닫기</button>
       </div>
@@ -1036,7 +1042,8 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
             onMouseDown={(e) => {
               setActiveVp(v.id);
               // 채우기 모드 — 클릭 지점(캔버스 좌표→월드)에서 같은 농도 영역 성장
-              if (toolMode === "fill" && !v.mip && e.button === 0) {
+              if (modes.fill && !v.mip && e.button === 0 &&
+                  (e.altKey || (!modes.crosshair && !modes.roi && !modes.wl))) {
                 try {
                   const vp = engineRef.current?.getViewport(v.id) as Types.IVolumeViewport | undefined;
                   const canvas = (e.currentTarget as HTMLElement).querySelector("canvas");
