@@ -45,7 +45,11 @@ const MPR_VIEWPORTS = [
   { id: "vp-sagittal", label: "Sagittal (MPR)", orientation: Enums.OrientationAxis.SAGITTAL },
   { id: "vp-coronal", label: "Coronal (MPR)", orientation: Enums.OrientationAxis.CORONAL },
 ] as const;
-const MIP_ID = "vp-mip";
+const MIP_VPS = [
+  { id: "vp-mip-axial", label: "MIP Axial", orientation: Enums.OrientationAxis.AXIAL },
+  { id: "vp-mip-sagittal", label: "MIP Sagittal", orientation: Enums.OrientationAxis.SAGITTAL },
+  { id: "vp-mip-coronal", label: "MIP Coronal", orientation: Enums.OrientationAxis.CORONAL },
+] as const;
 
 // Crosshairs 참조선 색 — 평면별 구분(축=노랑, 새지털=시안, 코로날=초록)
 const REF_COLORS: Record<string, string> = {
@@ -164,15 +168,16 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const [roiShape, setRoiShape] = useState<"rect" | "oval" | "free">("rect");   // ROI 모양(콤보)
   const [roiEffect, setRoiEffect] = useState<"focus" | "remove">("focus");      // Focus=영역만 / 제거=영역 빼고
   const voxBackupRef = useRef<{ vals: Float32Array; idx: Uint32Array } | null>(null);   // 제거 모드 복셀 백업(복원용)
-  const [mipOrient, setMipOrient] = useState<"AXIAL" | "SAGITTAL" | "CORONAL">("AXIAL");
+  const [mipMax, setMipMax] = useState<string | null>(null);   // MIP 1×3 중 더블클릭 확대(1×1) 대상
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const applySlab = useCallback((mm: number, mode?: "mip" | "minip" | "avip" | "off") => {
     const engine = engineRef.current;
     if (!engine) return;
-    const vp = engine.getViewport(MIP_ID) as Types.IVolumeViewport | undefined;
-    if (!vp) return;
     const m = mode ?? "mip";
+    for (const mv of MIP_VPS) {
+    const vp = engine.getViewport(mv.id) as Types.IVolumeViewport | undefined;
+    if (!vp) continue;
     try {
       // 강도 투영 모드 — MIP(최대)/MinIP(최소)/AvIP(평균)/끄기(일반 컴포지트 렌더링)
       const BM = Enums.BlendModes;
@@ -183,6 +188,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
       vp.setProperties({ slabThickness: m === "off" ? 0.1 : mm });
       vp.render();
     } catch { /* 뷰포트 미준비 */ }
+    }
   }, []);
 
   const ROI_TOOLS = [RectangleROITool.toolName, EllipticalROITool.toolName,
@@ -228,15 +234,6 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roiShape]);
 
-  // MIP 방향 전환
-  const applyMipOrient = useCallback((o: "AXIAL" | "SAGITTAL" | "CORONAL") => {
-    const vp = engineRef.current?.getViewport(MIP_ID) as Types.IVolumeViewport | undefined;
-    if (!vp) return;
-    try {
-      vp.setOrientation(Enums.OrientationAxis[o]);
-      vp.render();
-    } catch { /* 미지원 시 무시 */ }
-  }, []);
 
   // 좌측 썸네일 클릭 → 볼륨 시리즈 전환(목록에 있는 시리즈만) — 3D 를 원하는 시리즈로 재구성
   useEffect(() => {
@@ -284,12 +281,12 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
             element: containerRefs.current[v.id]!,
             defaultOptions: { orientation: v.orientation, background: [0.04, 0.04, 0.055] as Types.Point3 },
           })),
-          {
-            viewportId: MIP_ID,
+          ...MIP_VPS.map((mv) => ({
+            viewportId: mv.id,
             type: Enums.ViewportType.ORTHOGRAPHIC,
-            element: containerRefs.current[MIP_ID]!,
-            defaultOptions: { orientation: Enums.OrientationAxis[mipOrient], background: [0.04, 0.04, 0.055] as Types.Point3 },
-          }],
+            element: containerRefs.current[mv.id]!,
+            defaultOptions: { orientation: mv.orientation, background: [0.04, 0.04, 0.055] as Types.Point3 },
+          }))],
         );
 
         // ── MPR 그룹: Crosshairs(좌) + Zoom(우) + Pan(중) + 휠 스크롤 ──
@@ -339,7 +336,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         mip.setToolActive(StackScrollTool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Wheel }],
         });
-        mip.addViewport(MIP_ID, RENDERING_ENGINE_ID);
+        for (const mv of MIP_VPS) mip.addViewport(mv.id, RENDERING_ENGINE_ID);
 
         // 시리즈별 고유 볼륨 ID — 시리즈 전환 시 캐시 충돌 방지
         const volumeId = `cornerstoneStreamingImageVolume:sv-${selSeries.slice(-24)}`;
@@ -349,7 +346,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         await setVolumesForViewports(
           engine,
           [{ volumeId }],
-          [...MPR_VIEWPORTS.map((v) => v.id), MIP_ID],
+          [...MPR_VIEWPORTS.map((v) => v.id), ...MIP_VPS.map((mv) => mv.id)],
         );
         applySlab(slabMm, blend);
         window.setTimeout(() => applySlab(slabMm, blend), 300);   // MIP 블렌드 재적용(뷰포트 준비 타이밍)
@@ -406,6 +403,19 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   }, [studyUid, selSeries]);
 
   useEffect(() => () => { resizeObserverRef.current?.disconnect(); }, []);
+
+  // Esc — MIP 1×1 확대 해제(1×3 복귀)
+  useEffect(() => {
+    if (!mipMax) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMipMax(null);
+        window.setTimeout(() => { engineRef.current?.resize(true, true); engineRef.current?.render(); }, 50);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mipMax]);
 
   // ROI 크롭 — 사각 ROI 의 월드 경계를 VR 볼륨 클리핑 평면으로 적용(그 영역만 3D 렌더링)
   const applyCrop = useCallback(() => {
@@ -849,7 +859,6 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   }, [vrOn, selSeries]);
 
   const VIEWPORTS = [...MPR_VIEWPORTS.map((v) => ({ ...v, mip: false })),
-                     { id: MIP_ID, label: `MIP (${mipOrient})`, mip: true },
                      ...(vrOn ? [{ id: "vp-vr", label: "3D (Volume Rendering)", mip: true }] : [])];
 
   return (
@@ -1003,19 +1012,6 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
                          setSlabMm(v); applySlab(v, blend);
                        }} /> mm
               </label>
-              <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11.5, marginTop: 8 }}>
-                MIP 방향
-                <select value={mipOrient} style={{ fontSize: 12 }}
-                        onChange={(e) => {
-                          const o = e.target.value as "AXIAL" | "SAGITTAL" | "CORONAL";
-                          setMipOrient(o);
-                          applyMipOrient(o);
-                        }}>
-                  <option value="AXIAL">Axial</option>
-                  <option value="SAGITTAL">Sagittal</option>
-                  <option value="CORONAL">Coronal</option>
-                </select>
-              </label>
               <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--border)",
                             color: "var(--accent)", fontWeight: 700, fontSize: 11.5 }}>
                 {blend === "off" ? "일반 렌더링" : `${blend === "mip" ? "MIP" : blend === "minip" ? "MinIP" : "AvIP"} | ${slabMm}mm`}
@@ -1086,6 +1082,30 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
             )}
           </div>
         ))}
+        {/* MIP 1×3 — Axial/Sagittal/Coronal 모두 표시. 더블클릭=1×1 확대, Esc/재더블클릭=복귀 */}
+        <div style={{ position: "relative", minHeight: 0, display: "grid", gap: 2,
+                      gridTemplateColumns: mipMax ? "1fr" : "1fr 1fr 1fr",
+                      outline: "1px solid var(--border)" }}>
+          {MIP_VPS.map((mv) => (
+            <div key={mv.id}
+                 onDoubleClick={() => {
+                   setMipMax((cur) => (cur === mv.id ? null : mv.id));
+                   window.setTimeout(() => { engineRef.current?.resize(true, true); engineRef.current?.render(); }, 50);
+                 }}
+                 style={{ position: "relative", minHeight: 0, minWidth: 0,
+                          display: mipMax && mipMax !== mv.id ? "none" : "block",
+                          outline: "1px solid var(--border)" }}
+                 title="더블클릭 = 1×1 확대 / 다시 더블클릭·Esc = 1×3 복귀">
+              <div style={{ position: "absolute", top: 4, left: 6, zIndex: 1, fontSize: 11,
+                            color: "var(--ai)", pointerEvents: "none", textShadow: "0 0 4px #000" }}>
+                {mv.label}{mipMax === mv.id ? " (확대)" : ""}
+              </div>
+              <div ref={(el) => { containerRefs.current[mv.id] = el; }}
+                   style={{ width: "100%", height: "100%" }}
+                   onContextMenu={(e) => e.preventDefault()} />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
