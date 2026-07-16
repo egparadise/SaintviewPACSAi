@@ -2467,6 +2467,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     pseudo: { icon: "pseudo", label: "Psd", run: () => act("pseudo") },
     mag: { icon: "mag", label: "Mag", run: () => setMagOn((m) => { if (m) setMagPos(null); return !m; }) },
     rfsh: { icon: "rfsh", label: "Rfsh", run: () => act("rfsh") },
+    save: { icon: "save", label: "Save", run: () => { void saveAnnos(); } },
     comb: { icon: "comb", label: "Comb", run: () => act("comb") },
     print: { icon: "print", label: "Print", run: () => act("print") },
     calib: { icon: "calib", label: "Calib", run: () => act("calib") },
@@ -2476,11 +2477,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         run: () => { pickTool(tk); },
       }])),
   };
-  // 사용 상위 6개(3회 미만 비표시), ty_quick_row=false 면 행 자체를 숨김
+  // ★ Quick 구성 — Save·Rfsh 는 항상 고정, 나머지는 사용 상위(3회 미만 비표시)로 채움(총 6칸).
+  // ty_quick_row=false 면 행 자체를 숨김(설정 존중).
+  const QUICK_PINNED = ["save", "rfsh"];
   const quickIds = tyQuickRow
-    ? Object.entries(tyUsage)
-        .filter(([id, n]) => n >= 3 && quickDefs[id])
-        .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([id]) => id)
+    ? [
+        ...QUICK_PINNED,
+        ...Object.entries(tyUsage)
+          .filter(([id, n]) => n >= 3 && quickDefs[id] && !QUICK_PINNED.includes(id))
+          .sort((a, b) => b[1] - a[1]).slice(0, 6 - QUICK_PINNED.length).map(([id]) => id),
+      ]
     : [];
 
   /* SAINT VIEW 스킨 상단 메뉴 — 기존 툴 함수(quickDefs/act/pickTool/setMouseMode 등) 재사용, 아이콘 기능 동일 */
