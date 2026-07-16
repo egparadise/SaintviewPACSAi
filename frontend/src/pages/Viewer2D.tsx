@@ -639,6 +639,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [closeDlg, setCloseDlg] = useState(false);
   // 측정/주석 (07 A.4) + Reference line
   const [tool, setTool] = useState<ToolKind | null>(null);
+  // 3D Cursor Off(버튼 재클릭·다른 툴 선택·Esc 포함) → 십자 마커 전부 제거
+  useEffect(() => {
+    if (tool !== "cursor3d") setCross3d((m) => (Object.keys(m).length ? {} : m));
+  }, [tool]);
   const [annos, setAnnos] = useState<Anno[]>([]);
   const [draft, setDraft] = useState<{ pid: string; sop_uid: string; series_uid: string; points: number[][] } | null>(null);
   // 편집 선택 주석 — select 모드(도구 없음)에서 히트테스트로 지정. idx=annos 배열 index, sop=검증 태그
