@@ -363,8 +363,9 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
             <button key={q.id} onClick={q.run} title={q.label}
                     style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                              padding: "5px 4px", fontSize: 10.5, borderRadius: 4, border: "none", cursor: "pointer",
-                             background: q.id === activeId ? "var(--accent)" : "var(--bg-elevated)",
-                             color: q.id === activeId ? "#fff" : "var(--text-primary)" }}>
+                             background: "var(--bg-elevated)",
+                             color: q.id === activeId ? "#facc15" : "var(--text-primary)",
+                             fontWeight: q.id === activeId ? 700 : 400 }}>
               <ToolIconTy id={q.icon ?? q.id} size={13} flat />{q.label}
             </button>
           ))}
@@ -407,8 +408,9 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
                   <button key={it.id} onClick={() => { it.run(); if (!vertical) setOpenSet(new Set()); }}
                           style={{ display: "flex", justifyContent: "space-between", gap: 10, width: "100%", textAlign: "left",
                                    padding: "6px 12px", fontSize: 12, borderRadius: 3, border: "none", cursor: "pointer",
-                                   whiteSpace: "nowrap", background: on ? "var(--accent)" : "transparent",
-                                   color: on ? "#fff" : "var(--text-primary)", fontWeight: on ? 700 : 400 }}
+                                   whiteSpace: "nowrap", background: "transparent",
+                                   // on = 노란 아이콘·글자(아이콘은 flat currentColor 라 글자색 따라감), off = 흰색
+                                   color: on ? "#facc15" : "var(--text-primary)", fontWeight: on ? 700 : 400 }}
                           onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--bg-panel)"; }}
                           onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
