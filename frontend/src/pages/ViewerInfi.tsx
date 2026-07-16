@@ -2209,11 +2209,20 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         .flatMap((s) => s.instances.map((inst, idx) => ({ s, inst, idx })))
         .slice(0, 200)
         .map(({ s, inst, idx }) => (
-          <img key={inst.sop_uid} src={inst.preview_url} alt=""
-               title={`S${s.series_number} Img${inst.instance_number ?? idx + 1} — 클릭=활성 페인 표시`}
-               onClick={() => upd(active, { series: s, index: idx, studyUid: curD.study_uid })}
-               style={{ width: "100%", display: "block", borderRadius: 3, cursor: "pointer", flexShrink: 0,
-                        border: thumbBorder(s.series_uid, "1px solid var(--border)"), background: "#000" }} />
+          <div key={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+            <img src={inst.preview_url} alt=""
+                 title={`S${s.series_number} Img${inst.instance_number ?? idx + 1}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""} — 클릭=활성 페인 표시`}
+                 onClick={() => upd(active, { series: s, index: idx, studyUid: curD.study_uid })}
+                 style={{ width: "100%", display: "block", borderRadius: 3, cursor: "pointer",
+                          border: keyMarks.has(inst.sop_uid) ? "2px solid rgba(250,204,21,0.9)"
+                                                             : thumbBorder(s.series_uid, "1px solid var(--border)"),
+                          background: "#000" }} />
+            {/* 키이미지 — 우상단 🔑 미니 배지(뷰어 KEY 마크와 동기) */}
+            {keyMarks.has(inst.sop_uid) && (
+              <div style={{ position: "absolute", top: 2, right: 2, padding: "0 3px", borderRadius: 5, pointerEvents: "none",
+                            background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>🔑</div>
+            )}
+          </div>
         ))}
       {thumbMode === "series" && series.map((s, sIdx) => (
         <div key={s.series_uid} draggable
@@ -2240,11 +2249,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                upd(active, { series: s, index: 0, studyUid: curD.study_uid });
              }}
              title={`Se${s.series_number} · ${s.series_desc}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 클릭: 활성 페인 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
-             style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
+             style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0, position: "relative",
                       border: thumbBorder(s.series_uid, "1px solid var(--border)"),
                       borderRadius: 3, background: "#000" }}>
           {s.instances[0] && (
             <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
+          )}
+          {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 KEY 마크와 동기) */}
+          {s.instances.some((i2) => keyMarks.has(i2.sop_uid)) && (
+            <div style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6, pointerEvents: "none",
+                          background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>🔑</div>
           )}
           {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}
           <div style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>

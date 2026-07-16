@@ -2886,6 +2886,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               <img src={s.instances[Math.floor(s.instances.length / 2)].preview_url} alt=""
                    style={{ width: ts, height: ts * 0.78, objectFit: "cover", display: "block" }} />
             )}
+            {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 페인 KEY 마크와 동기) */}
+            {s.instances.some((i2) => keyMarks.has(i2.sop_uid)) && (
+              <div style={{ position: "absolute", top: 2, right: 2, padding: "0 4px", borderRadius: 6,
+                            background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8.5, fontWeight: 800 }}>
+                🔑
+              </div>
+            )}
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 9,
                           background: "rgba(0,0,0,0.65)", padding: "1px 3px" }}>
               {seriesTag(s) && <div style={{ color: "#4ade80", fontWeight: 700, fontSize: 8.5, lineHeight: 1.1 }}>{seriesTag(s)}</div>}
@@ -2895,20 +2902,35 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           {selSeries === s.series_uid && (
             <div style={{ display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 2, padding: 2 }}>
               {s.instances.slice(0, 60).map((inst, idx) => (
-                <img key={inst.sop_uid} src={inst.preview_url} alt="" title={`Img ${inst.instance_number}`}
-                     onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
-                     style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", flexShrink: 0,
-                              border: panes[activePane].series?.series_uid === s.series_uid && panes[activePane].index === idx
-                                ? "2px solid var(--anno-keyimage)" : "1px solid var(--border)" }} />
+                <div key={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+                  <img src={inst.preview_url} alt="" title={`Img ${inst.instance_number}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""}`}
+                       onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
+                       style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
+                                border: panes[activePane].series?.series_uid === s.series_uid && panes[activePane].index === idx
+                                  ? "2px solid var(--anno-keyimage)"
+                                  : keyMarks.has(inst.sop_uid) ? "2px solid rgba(250,204,21,0.9)" : "1px solid var(--border)" }} />
+                  {/* 키이미지 — 우상단 🔑 미니 배지(뷰어 KEY 마크와 동기) */}
+                  {keyMarks.has(inst.sop_uid) && (
+                    <div style={{ position: "absolute", top: 1, right: 1, padding: "0 3px", borderRadius: 5, pointerEvents: "none",
+                                  background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8, fontWeight: 800 }}>🔑</div>
+                  )}
+                </div>
               ))}
             </div>
           )}
         </div>
       )) : allInstances.slice(0, 200).map(({ s, i, idx }) => (
-        <img key={i.sop_uid} src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}`}
-             onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
-             style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", flexShrink: 0,
-                      border: "1px solid var(--border)" }} />
+        <div key={i.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
+          <img src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}${keyMarks.has(i.sop_uid) ? " · 🔑 KEY" : ""}`}
+               onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
+               style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
+                        border: keyMarks.has(i.sop_uid) ? "2px solid rgba(250,204,21,0.9)" : "1px solid var(--border)" }} />
+          {/* 키이미지 — 우상단 🔑 미니 배지(뷰어 KEY 마크와 동기) */}
+          {keyMarks.has(i.sop_uid) && (
+            <div style={{ position: "absolute", top: 1, right: 1, padding: "0 3px", borderRadius: 5, pointerEvents: "none",
+                          background: "rgba(250,204,21,0.94)", color: "#1a1a1a", fontSize: 8, fontWeight: 800 }}>🔑</div>
+          )}
+        </div>
       ))}
     </div>
   );
