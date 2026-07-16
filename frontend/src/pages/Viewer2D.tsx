@@ -2728,6 +2728,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       ]
     : [];
 
+  // SaintView 모드 하이라이트 — 기본 모드(zoom)는 '선택'으로 표시하지 않고, 사용자가 클릭했을 때만 노랑.
+  // 재클릭 = 취소(흰색 복귀, 모드는 중립 select 로).
+  const [saintModeOn, setSaintModeOn] = useState(false);
+  const SAINT_MODES = ["select", "pan", "zoom", "wl", "scroll"] as const;
+  const saintSetMode = (k: "select" | "pan" | "zoom" | "wl" | "scroll") => {
+    if (saintModeOn && mouseMode === k) { setSaintModeOn(false); setMouseMode("select"); }
+    else { setMouseMode(k); setSaintModeOn(true); }
+  };
+
   /* SAINT VIEW 스킨 상단 메뉴 — 기존 툴 함수(quickDefs/act/pickTool/setMouseMode 등) 재사용, 아이콘 기능 동일 */
   const mkItem = (id: string, label?: string, run?: () => void) => ({
     id, label: label ?? quickDefs[id]?.label ?? id,
@@ -2736,11 +2745,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   });
   const saintMenus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[] = [
     { title: "Image Tool", items: [
-      mkItem("select", "Select", () => setMouseMode("select")),
-      mkItem("pan", "Pan", () => setMouseMode("pan")),
-      mkItem("zoom", "Zoom", () => setMouseMode("zoom")),
-      mkItem("wl", "Window/level", () => setMouseMode("wl")),
-      mkItem("scroll", "Scroll", () => setMouseMode("scroll")),
+      mkItem("select", "Select", () => saintSetMode("select")),
+      mkItem("pan", "Pan", () => saintSetMode("pan")),
+      mkItem("zoom", "Zoom", () => saintSetMode("zoom")),
+      mkItem("wl", "Window/level", () => saintSetMode("wl")),
+      mkItem("scroll", "Scroll", () => saintSetMode("scroll")),
       mkItem("mag", "Magnification"),
       mkItem("fit", "Fit"),
       mkItem("reset", "Reset"),
@@ -2787,10 +2796,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* SaintView 툴 파레트 = 메뉴바 — 설정 paletteSide(좌/우/상/하) 연동 + ⠿ 드래그 도킹 */
   const saintBar = skin === "saint" && (
-    <SaintMenuBar menus={saintMenus} activeId={tool || mouseMode} side={prefs.paletteSide}
+    <SaintMenuBar menus={saintMenus} activeId={tool || (saintModeOn ? mouseMode : "")} side={prefs.paletteSide}
                   quick={quickIds.slice(0, 6).filter((id) => quickDefs[id]).map((id) => ({
                     id, label: quickDefs[id].label, icon: quickDefs[id].icon,
-                    run: () => { recordUse(id); quickDefs[id].run(); },
+                    run: () => {
+                      recordUse(id);
+                      if ((SAINT_MODES as readonly string[]).includes(id)) saintSetMode(id as typeof SAINT_MODES[number]);
+                      else quickDefs[id].run();
+                    },
                   }))}
                   onGripDown={(e) => { dockDragRef.current = { kind: "palette", sx: e.clientX, sy: e.clientY }; }}
                   onNav={navPatient}
