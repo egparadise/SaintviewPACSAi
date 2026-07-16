@@ -383,10 +383,15 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
         <div key={m.title} style={{ position: vertical ? "static" : "relative" }}
              onMouseEnter={() => { if (!vertical) setOpenSet((st) => (st.size ? new Set([m.title]) : st)); }}>
           <button onClick={() => toggle(m.title)}
-                  style={{ fontSize: 12.5, padding: "5px 12px", fontWeight: 600, borderRadius: 4,
+                  style={{ fontSize: 12.5, padding: "6px 12px", fontWeight: 700, borderRadius: 6,
                            width: vertical ? "100%" : undefined, textAlign: vertical ? "left" : "center",
-                           background: isOpen ? "var(--bg-elevated)" : "transparent",
-                           color: "var(--text-primary)", border: "none", cursor: "pointer" }}>
+                           color: "var(--text-primary)", cursor: "pointer", margin: vertical ? "3px 0 1px" : undefined,
+                           // 3D 입체 — 그룹 헤더임을 명확히: 평시 양각(raised), 펼침 시 눌림(inset)
+                           border: "1px solid rgba(0,0,0,0.55)",
+                           background: isOpen ? "linear-gradient(180deg, #232933, #2c3440)"
+                                              : "linear-gradient(180deg, #3d4657, #272d38)",
+                           boxShadow: isOpen ? "inset 0 2px 5px rgba(0,0,0,0.55)"
+                                             : "inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 3px rgba(0,0,0,0.45)" }}>
             {m.title} {isOpen ? "▴" : "▾"}
           </button>
           {isOpen && (
@@ -396,7 +401,7 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
                   ...(side === "bottom" ? { bottom: "100%", left: 0 } : { top: "100%", left: 0 }),
                   background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
                   boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
-              {m.items.map((it) => {
+              {(vertical ? m.items.filter((x) => x.id !== "report") : m.items).map((it) => {
                 const on = it.id === activeId;
                 return (
                   <button key={it.id} onClick={() => { it.run(); if (!vertical) setOpenSet(new Set()); }}
@@ -418,6 +423,21 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
         </div>
         );
       })}
+      {/* Report — 세로 모드에선 스크롤과 무관하게 하단 고정 */}
+      {vertical && (() => {
+        const rep = menus.flatMap((m) => m.items).find((it) => it.id === "report");
+        return rep ? (
+          <button onClick={rep.run} title="Report — 판독창 열기 (항상 하단 고정)"
+                  style={{ position: "sticky", bottom: 0, marginTop: "auto", zIndex: 5, flexShrink: 0,
+                           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                           padding: "9px 0", fontWeight: 700, fontSize: 12.5, borderRadius: 6, cursor: "pointer",
+                           border: "1px solid rgba(0,0,0,0.55)",
+                           background: "linear-gradient(180deg, var(--accent), #1d4ed8)", color: "#fff",
+                           boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25), 0 -2px 6px rgba(0,0,0,0.4)" }}>
+            <ToolIconTy id={rep.icon ?? "report"} size={14} flat />Report
+          </button>
+        ) : null;
+      })()}
     </div>
   );
 }
