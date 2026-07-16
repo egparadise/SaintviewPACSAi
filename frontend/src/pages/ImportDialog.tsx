@@ -234,7 +234,9 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button className="primary"
                   style={{ ...B, ...(done ? { background: "#16a34a", borderColor: "#16a34a" } : {}) }}
-                  disabled={busy || done || !picked.length} onClick={start}>
+                  disabled={busy || (!done && !picked.length)}
+                  title={done ? "업로드 완료 — 클릭하면 창을 닫습니다" : undefined}
+                  onClick={() => { if (done) { onDone(); onClose(); } else void start(); }}>
             {busy ? "진행 중…" : done ? "완료 ✓" : "Start"}
           </button>
           <button style={B} disabled={busy} title={busy ? "업로드 완료 후 닫을 수 있습니다" : "닫기"} onClick={() => { if (busy) return; onDone(); onClose(); }}>Close</button>
