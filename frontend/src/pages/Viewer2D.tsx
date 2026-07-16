@@ -510,6 +510,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => { selPanesRef.current = selPanes; }, [selPanes]);
   // TY-3(4): 3D Cursor 십자 마커 — 페인별 {sop, 정규화 x/y} (In cross3d 이식)
   const [cross3d, setCross3d] = useState<Record<string, { sop: string; x: number; y: number }>>({});
+  // 3D Cursor 홀드-드래그 — 버튼을 누른 채 움직이면 rAF 스로틀로 연속 재배치(모든 페인 동기 추적)
+  const c3DragRef = useRef<{ pid: string } | null>(null);
+  const c3RafRef = useRef(0);
   // TY-3(5): 페인별 시네 미니 컨트롤 표시용 호버 페인
   const [hoverPane, setHoverPane] = useState<string | null>(null);
   // 썸네일 시리즈 → 페인 드래그앤드롭: 드롭 대상 페인 하이라이트
@@ -1322,6 +1325,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (tool && e.button === 0 && !e.shiftKey && !e.ctrlKey) {
       // 2점 드래그 도구 → 러버밴드 그리기 시작 / 그 외(각도·4점·open-ended·1점) → 기존 클릭 점찍기
       if (DRAG_TOOLS.has(tool)) { startAnnoDraw(pid, e); return; }
+      // 3D Cursor — 클릭 배치 + 버튼 홀드 중 이동을 연속 추적(자연스러운 드래그 탐색)
+      if (tool === "cursor3d" && e.button === 0) c3DragRef.current = { pid };
       handleAnnoPoint(pid, e); return;
     }
     // select 모드(도구 없음) 좌클릭 — 주석 편집(이동/리사이즈) 히트테스트. 잡히면 편집 시작(dragRef 미설정)
@@ -1340,6 +1345,32 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // Shift+우드래그 영역 W/L — 빨간 박스(페인 상대 px) + 진행 중 드래그 ref
   const [wlBox, setWlBox] = useState<{ pid: string; left: number; top: number; w: number; h: number } | null>(null);
   const wlRegionRef = useRef<{ pid: string; rect: DOMRect; sx: number; sy: number; cx: number; cy: number } | null>(null);
+
+  // 3DC 홀드-드래그 추적 — pointermove 마다 rAF 스로틀로 커서 재배치, pointerup 에서 종료
+  useEffect(() => {
+    const mv = (e: PointerEvent) => {
+      const d = c3DragRef.current;
+      if (!d) return;
+      if (c3RafRef.current) return;   // rAF 스로틀(프레임당 1회)
+      const { clientX, clientY } = e;
+      c3RafRef.current = requestAnimationFrame(() => {
+        c3RafRef.current = 0;
+        const el = document.querySelector(`[data-pid="${d.pid}"]`) as HTMLElement | null;
+        const p = panesRef.current[d.pid];
+        const inst = p?.series?.instances[p.index];
+        if (!el || !p?.series || !inst) return;
+        const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
+        const pt = screenToImage(clientX, clientY, el.getBoundingClientRect(), p, aspect);
+        if (!pt) return;   // 이미지 밖 — 유지
+        completeToolRef.current("cursor3d", d.pid, { sop_uid: inst.sop_uid, series_uid: p.series.series_uid }, [pt], inst);
+      });
+    };
+    const up = () => { c3DragRef.current = null; };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", up);
+    return () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up);
+                   if (c3RafRef.current) cancelAnimationFrame(c3RafRef.current); };
+  }, []);
 
   // 우클릭 W/L 드래그 — window CAPTURE 단계에서 최우선 가로채기.
   // Linkclump 류 확장이 capture/document 어디에 리스너를 걸어도, window capture 가 가장 먼저 실행되고
