@@ -3128,10 +3128,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                    })));
                    return;
                  }
-                 setSelSeries(selSeries === s.series_uid ? null : s.series_uid);
+                 // 클릭 = 활성 페인에 이 시리즈 표시(교체) — 이미지 목록 펼침은 더블클릭
+                 patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) });
                }}
-               onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
-               title={`${s.series_desc || s.modality}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 더블클릭: 활성 페인 로드 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
+               onDoubleClick={() => setSelSeries(selSeries === s.series_uid ? null : s.series_uid)}
+               title={`${s.series_desc || s.modality}\n· 클릭: 활성 페인에 표시 · 더블클릭: 이미지 목록 펼침/접기\n· 드래그 → 원하는 페인에 놓기 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
                style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)"
                           : s.series_uid === curOriginUid ? "2px solid #4ade80"   // 활성 페인 표시 중
                           : shownOriginUids.has(s.series_uid) ? "2px solid #f97316"   // 다른 페인 표시 중
