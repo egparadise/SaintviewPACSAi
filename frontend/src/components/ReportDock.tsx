@@ -228,6 +228,21 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   }, []);
   // In Viewer 는 related_exams 를 옵셔널로 다룬다(런타임에 없을 수 있음) — 방어적 기본값
   const relExams = detail.related_exams ?? [];
+  // Prior Studies 미니 썸네일 — 검사당 대표 1장(첫 영상 시리즈 중간 인스턴스), 캐시
+  const [priorThumbs, setPriorThumbs] = useState<Record<number, string>>({});
+  useEffect(() => {
+    let alive = true;
+    (relExams.slice(0, 12)).forEach((e) => {
+      if (priorThumbs[e.id] !== undefined) return;
+      api.seriesTree(e.id).then((r) => {
+        const s0 = r.series.find((x) => !["SR", "KO", "PR", "SEG"].includes(x.modality) && x.instances.length);
+        const url = s0 ? s0.instances[Math.floor(s0.instances.length / 2)].preview_url : "";
+        if (alive) setPriorThumbs((m) => ({ ...m, [e.id]: url }));
+      }).catch(() => { if (alive) setPriorThumbs((m) => ({ ...m, [e.id]: "" })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.id, relExams.length]);
   const dockSig = (report?.diff_metrics as { signature?: { name: string; license_no: string; signed_at: string } })?.signature;
   const taStyle: React.CSSProperties = {
     width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
@@ -368,10 +383,18 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
           </div>
           {relExams.map((e) => (
             <div key={e.id} onClick={() => onLoadPrior(e.id)}
-                 style={{ padding: "4px 8px", fontSize: 11, cursor: "pointer", borderBottom: "1px solid #24282d" }}
+                 style={{ padding: "3px 8px", fontSize: 11, cursor: "pointer", borderBottom: "1px solid #24282d",
+                          display: "flex", alignItems: "center", gap: 7 }}
                  onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                  onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
-              {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+              {priorThumbs[e.id]
+                ? <img src={priorThumbs[e.id]} alt="" style={{ width: 34, height: 26, objectFit: "cover",
+                        borderRadius: 2, border: "1px solid var(--border)", background: "#000", flexShrink: 0 }} />
+                : <span style={{ width: 34, height: 26, borderRadius: 2, background: "#000",
+                        border: "1px solid var(--border)", flexShrink: 0 }} />}
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.study_date} {e.modality} <span style={{ color: "var(--text-secondary)" }}>{e.study_desc}</span>
+              </span>
             </div>
           ))}
           {relExams.length === 0 && (
