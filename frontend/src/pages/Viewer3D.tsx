@@ -22,6 +22,7 @@ import {
   PanTool,
   PlanarFreehandROITool,
   RectangleROITool,
+  SplineROITool,
   StackScrollTool,
   ToolGroupManager,
   TrackballRotateTool,
@@ -67,6 +68,7 @@ async function ensureInit() {
   addTool(RectangleROITool);
   addTool(EllipticalROITool);
   addTool(PlanarFreehandROITool);
+  addTool(SplineROITool);
   addTool(TrackballRotateTool);
   initialized = true;
 }
@@ -183,10 +185,12 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     } catch { /* 뷰포트 미준비 */ }
   }, []);
 
-  const ROI_TOOLS = [RectangleROITool.toolName, EllipticalROITool.toolName, PlanarFreehandROITool.toolName];
+  const ROI_TOOLS = [RectangleROITool.toolName, EllipticalROITool.toolName,
+                     PlanarFreehandROITool.toolName, SplineROITool.toolName];
   const roiToolOf = (shape: "rect" | "oval" | "free") =>
     shape === "rect" ? RectangleROITool.toolName
-    : shape === "oval" ? EllipticalROITool.toolName : PlanarFreehandROITool.toolName;
+    : shape === "oval" ? EllipticalROITool.toolName
+    : SplineROITool.toolName;   // Free — 클릭할 때마다 포인트, 시작점과 만나면 영역 확정
 
   // 도구 모드 전환 — Crosshair(십자선 연동) ↔ W/L (MPR 3면 좌클릭)
   const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi" | "fill", shape?: "rect" | "oval" | "free") => {
@@ -298,6 +302,8 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         mpr.addTool(PanTool.toolName);
         mpr.addTool(StackScrollTool.toolName);
         mpr.addTool(RectangleROITool.toolName);
+        mpr.addTool(EllipticalROITool.toolName);
+        mpr.addTool(SplineROITool.toolName);
         mpr.addTool(CrosshairsTool.toolName, {
           getReferenceLineColor: (id: string) => REF_COLORS[id] ?? "#94a3b8",
           getReferenceLineControllable: () => true,
@@ -346,6 +352,8 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
           [...MPR_VIEWPORTS.map((v) => v.id), MIP_ID],
         );
         applySlab(slabMm, blend);
+        window.setTimeout(() => applySlab(slabMm, blend), 300);   // MIP 블렌드 재적용(뷰포트 준비 타이밍)
+        window.setTimeout(() => applySlab(slabMm, blend), 900);
         applyToolMode(toolMode);   // 기본 Crosshair — 십자선 연동
         engine.render();
         requestAnimationFrame(() => {
@@ -686,6 +694,78 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   }, [applyCrop, maskVoxels, restoreVoxels]);
   const roiEffectRef = useRef(roiEffect);
   roiEffectRef.current = roiEffect;
+
+  // ── 크로스헤어 두께/위치 → 3D VR 실시간 반영. 드래그 중 저해상도(샘플거리 4배) → 놓으면 원복 ──
+  const vrBaseSampleRef = useRef(0);
+  const vrMapper = useCallback(() => {
+    try {
+      const vp = engineRef.current?.getViewport("vp-vr") as Types.IVolumeViewport | undefined;
+      const entry = vp?.getDefaultActor();
+      return entry ? (entry.actor as unknown as { getMapper: () => {
+        getSampleDistance: () => number; setSampleDistance: (d: number) => void;
+        removeAllClippingPlanes: () => void; addClippingPlane: (pl: unknown) => void } }).getMapper() : null;
+    } catch { return null; }
+  }, []);
+  const vrLowRes = useCallback((on: boolean) => {
+    const m = vrMapper();
+    if (!m) return;
+    try {
+      if (!vrBaseSampleRef.current) vrBaseSampleRef.current = m.getSampleDistance();
+      m.setSampleDistance(vrBaseSampleRef.current * (on ? 4 : 1));   // 이동 중 해상도↓ → 부드러운 회전/갱신
+    } catch { /* 무시 */ }
+  }, [vrMapper]);
+  const applyLiveSlab = useCallback(() => {
+    // MPR 각 면의 슬랩(두께>2mm)·중심 위치를 VR 클리핑 평면으로 — 실시간 부분 볼륨 렌더링
+    const engine = engineRef.current;
+    if (!engine || cropRef.current) return;   // ROI 크롭 우선
+    const m = vrMapper();
+    if (!m) return;
+    try {
+      const planes: { normal: number[]; origin: number[] }[] = [];
+      for (const v of MPR_VIEWPORTS) {
+        const vp = engine.getViewport(v.id) as Types.IVolumeViewport | undefined;
+        const t = vp?.getProperties?.()?.slabThickness;
+        if (!vp || !t || t <= 2) continue;
+        const cam = vp.getCamera();
+        const n = cam.viewPlaneNormal ?? [0, 0, 1];
+        const fp = cam.focalPoint ?? [0, 0, 0];
+        planes.push({ normal: [...n], origin: fp.map((x, i) => x - n[i] * t / 2) });
+        planes.push({ normal: n.map((x) => -x), origin: fp.map((x, i) => x + n[i] * t / 2) });
+      }
+      m.removeAllClippingPlanes();
+      for (const pl of planes) {
+        m.addClippingPlane(vtkPlane.newInstance({ normal: pl.normal as [number, number, number],
+                                                  origin: pl.origin as [number, number, number] }));
+      }
+      engine.getViewport("vp-vr")?.render();
+    } catch { /* VR 미준비 */ }
+  }, [vrMapper]);
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el || !vrOn) return;
+    let dragging = false, raf = 0;
+    const down = () => { dragging = true; vrLowRes(true); };
+    const move = () => {
+      if (!dragging || raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; applyLiveSlab(); });
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      vrLowRes(false);        // 멈추면 해상도 원복
+      applyLiveSlab();
+      engineRef.current?.getViewport("vp-vr")?.render();
+    };
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [vrOn, applyLiveSlab, vrLowRes]);
 
   // 참조선 점선(슬랩 폭) 드래그 감지 — MPR 뷰포트의 slabThickness 가 2mm 를 넘으면 3D(VR) 페인 자동 추가
   useEffect(() => {
