@@ -151,7 +151,11 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const [activeVp, setActiveVp] = useState("vp-axial");
   const [seriesList, setSeriesList] = useState<SeriesCand[]>([]);
   const [selSeries, setSelSeries] = useState("");
-  const [toolMode, setToolMode] = useState<"crosshair" | "wl" | "roi">("crosshair");
+  const [toolMode, setToolMode] = useState<"crosshair" | "wl" | "roi" | "fill">("crosshair");
+  const [fillColor, setFillColor] = useState("#22d3ee");   // 채우기(분할) 색 — 컬러 피커
+  const [fillOn, setFillOn] = useState(false);             // 분할 결과 존재 여부
+  const segIdRef = useRef("");                             // 라벨맵(파생) 볼륨 ID
+  const segVpsRef = useRef<Set<string>>(new Set());        // 세그 볼륨이 추가된 뷰포트
   const [vrCam, setVrCam] = useState("");                       // VR 좌하단 좌표(회전각·카메라 위치)
   const [cropOn, setCropOn] = useState(false);                  // ROI 크롭 적용 여부
   const cropRef = useRef<{ mins: number[]; maxs: number[] } | null>(null);
@@ -185,7 +189,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     : shape === "oval" ? EllipticalROITool.toolName : PlanarFreehandROITool.toolName;
 
   // 도구 모드 전환 — Crosshair(십자선 연동) ↔ W/L (MPR 3면 좌클릭)
-  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi", shape?: "rect" | "oval" | "free") => {
+  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi" | "fill", shape?: "rect" | "oval" | "free") => {
     const g = ToolGroupManager.getToolGroup(TG_MPR);
     if (!g) return;
     try {
@@ -203,6 +207,11 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         g.setToolActive(roiToolOf(shape ?? roiShape), {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
+      } else if (mode === "fill") {
+        // 채우기(영역 성장) — 좌클릭은 자체 핸들러 처리(같은 농도 영역 분할)
+        g.setToolDisabled(CrosshairsTool.toolName);
+        for (const t of ROI_TOOLS) g.setToolPassive(t);
+        g.setToolPassive(WindowLevelTool.toolName);
       } else {
         g.setToolDisabled(CrosshairsTool.toolName);
         for (const t of ROI_TOOLS) g.setToolPassive(t);
@@ -415,6 +424,138 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
       setCropOn(true);
     } catch { /* VR 미준비 — vrOn 효과에서 재시도 */ }
   }, []);
+  // ── 채우기(영역 성장) 분할 — 클릭 지점과 같은 농도(±6%) 연결 영역을 라벨맵에 기록 ──
+  const fillColorRef = useRef("#22d3ee");
+  fillColorRef.current = fillColor;
+  const hexRgb = (hex: string): [number, number, number] => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  };
+  const segTf = useCallback((volumeActor: unknown) => {
+    // 세그 볼륨 전달함수 — 0=투명, 1=선택 색(반투명). MPR·3D 공통
+    const [r, g, b] = hexRgb(fillColorRef.current);
+    const prop = (volumeActor as { getProperty: () => {
+      getRGBTransferFunction: (i: number) => { removeAllPoints: () => void; addRGBPoint: (x: number, r: number, g: number, b: number) => void };
+      getScalarOpacity: (i: number) => { removeAllPoints: () => void; addPoint: (x: number, y: number) => void };
+      setInterpolationTypeToNearest?: () => void;
+    } }).getProperty();
+    const ctf = prop.getRGBTransferFunction(0);
+    ctf.removeAllPoints();
+    ctf.addRGBPoint(0, 0, 0, 0);
+    ctf.addRGBPoint(1, r, g, b);
+    const otf = prop.getScalarOpacity(0);
+    otf.removeAllPoints();
+    otf.addPoint(0, 0);
+    otf.addPoint(0.5, 0);
+    otf.addPoint(1, 0.6);
+    prop.setInterpolationTypeToNearest?.();
+  }, []);
+  const ensureSegOn = useCallback(async (vpIds: string[]) => {
+    const engine = engineRef.current;
+    if (!engine || !segIdRef.current) return;
+    for (const id of vpIds) {
+      if (segVpsRef.current.has(id)) continue;
+      try {
+        const vp = engine.getViewport(id) as unknown as {
+          addVolumes: (v: { volumeId: string; callback: (a: { volumeActor: unknown }) => void }[]) => Promise<void> };
+        await vp.addVolumes([{ volumeId: segIdRef.current, callback: ({ volumeActor }) => segTf(volumeActor) }]);
+        segVpsRef.current.add(id);
+      } catch { /* 뷰포트 미준비 */ }
+    }
+    engine.render();
+  }, [segTf]);
+  const regionGrow = useCallback(async (world: number[]) => {
+    const engine = engineRef.current;
+    if (!engine || !volumeIdRef.current) return;
+    try {
+      const vol = cache.getVolume(volumeIdRef.current) as unknown as {
+        imageData: { worldToIndex: (p: number[]) => number[]; getDimensions: () => number[];
+                     getPointData: () => { getScalars: () => { getRange: () => number[] } } };
+        getScalarData?: () => Float32Array | Int16Array | Uint16Array | Uint8Array;
+        voxelManager?: { getCompleteScalarDataArray?: () => Float32Array | Int16Array | Uint16Array | Uint8Array };
+      };
+      const data = vol.getScalarData?.() ?? vol.voxelManager?.getCompleteScalarDataArray?.();
+      if (!data) { setStatus("이 볼륨에선 채우기를 지원하지 못했습니다"); return; }
+      const dim = vol.imageData.getDimensions();
+      const seed = vol.imageData.worldToIndex(world).map((v) => Math.round(v));
+      if (seed.some((v, i) => v < 0 || v >= dim[i])) return;
+      if (!segIdRef.current) {   // 라벨맵(파생 볼륨) — 최초 1회 생성
+        segIdRef.current = "sv-seg-" + volumeIdRef.current.slice(-24);
+        await (volumeLoader as unknown as {
+          createAndCacheDerivedLabelmapVolume: (ref: string, o: { volumeId: string }) => Promise<unknown> })
+          .createAndCacheDerivedLabelmapVolume(volumeIdRef.current, { volumeId: segIdRef.current });
+      }
+      const seg = cache.getVolume(segIdRef.current) as unknown as {
+        imageData?: { modified: () => void };
+        getScalarData?: () => Uint8Array | Float32Array;
+        voxelManager?: { getCompleteScalarDataArray?: () => Uint8Array | Float32Array };
+      };
+      const segData = seg.getScalarData?.() ?? seg.voxelManager?.getCompleteScalarDataArray?.();
+      if (!segData) return;
+      // BFS 영역 성장 — 6-연결, 허용오차 = 전체 범위의 6%, 최대 1,000만 복셀
+      const range = vol.imageData.getPointData().getScalars().getRange();
+      const tol = (range[1] - range[0]) * 0.06;
+      const sx = dim[0], sxy = dim[0] * dim[1];
+      const seedO = seed[2] * sxy + seed[1] * sx + seed[0];
+      const seedVal = data[seedO];
+      const q = new Uint32Array(2_000_000);
+      let qh = 0, qt = 0, painted = 0;
+      q[qt++] = seedO;
+      segData[seedO] = 1;
+      while (qh < qt && painted < 10_000_000) {
+        const o = q[qh++]; painted++;
+        const z = Math.floor(o / sxy), rem = o % sxy, y = Math.floor(rem / sx), x = rem % sx;
+        const nbrs = [
+          x > 0 ? o - 1 : -1, x < sx - 1 ? o + 1 : -1,
+          y > 0 ? o - sx : -1, y < dim[1] - 1 ? o + sx : -1,
+          z > 0 ? o - sxy : -1, z < dim[2] - 1 ? o + sxy : -1,
+        ];
+        for (const n of nbrs) {
+          if (n < 0 || segData[n] === 1) continue;
+          if (Math.abs(data[n] - seedVal) <= tol) {
+            segData[n] = 1;
+            if (qt < q.length) q[qt++] = n;
+          }
+        }
+      }
+      seg.imageData?.modified();
+      setFillOn(true);
+      setVrOn(true);   // 분할 결과를 컬러로 3D 렌더링
+      await ensureSegOn([...MPR_VIEWPORTS.map((v) => v.id)]);
+      window.setTimeout(() => { void ensureSegOn(["vp-vr"]); }, 400);   // VR 준비 후 세그 추가
+      engine.render();
+      setStatus("채우기 완료 — " + painted.toLocaleString() + " 복셀 분할(색 표시 + 3D 컬러 렌더링)");
+    } catch (e) { setStatus(e instanceof Error ? e.message : "채우기 실패"); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ensureSegOn]);
+  const clearFill = useCallback(() => {
+    try {
+      const seg = cache.getVolume(segIdRef.current) as unknown as {
+        imageData?: { modified: () => void };
+        getScalarData?: () => Uint8Array | Float32Array;
+        voxelManager?: { getCompleteScalarDataArray?: () => Uint8Array | Float32Array };
+      } | undefined;
+      const d = seg?.getScalarData?.() ?? seg?.voxelManager?.getCompleteScalarDataArray?.();
+      d?.fill(0);
+      seg?.imageData?.modified();
+      engineRef.current?.render();
+    } catch { /* 무시 */ }
+    setFillOn(false);
+  }, []);
+  // 색 변경 — 이미 추가된 세그 액터의 전달함수 갱신
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !segIdRef.current) return;
+    for (const id of segVpsRef.current) {
+      try {
+        const vp = engine.getViewport(id) as unknown as { getActors: () => { uid: string; actor: unknown }[] };
+        const entry = vp.getActors().find((a) => a.uid === segIdRef.current);
+        if (entry) segTf(entry.actor);
+      } catch { /* 무시 */ }
+    }
+    engine.render();
+  }, [fillColor, segTf]);
+
   // 좌측 썸네일 드롭 — 특정 MPR 페인만 다른 시리즈 볼륨으로 교체(개별 소스 지정)
   const loadVolumeToViewport = useCallback(async (uid: string, vpId: string) => {
     const engine = engineRef.current;
@@ -698,6 +839,23 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
                   style={{ fontSize: 11.5, padding: "2px 10px",
                            background: toolMode === "wl" ? "var(--accent)" : undefined,
                            color: toolMode === "wl" ? "#fff" : undefined }}>◐ W/L</button>
+          <button onClick={() => {
+                    if (toolMode === "fill") {   // Off — 분할 결과 삭제 후 Crosshair 복귀
+                      clearFill();
+                      setToolMode("crosshair"); applyToolMode("crosshair");
+                      setStatus("채우기 Off — 분할 삭제");
+                    } else { setToolMode("fill"); applyToolMode("fill"); }
+                  }}
+                  title="채우기(영역 성장) — MPR 에서 클릭한 지점과 같은 농도의 연결 영역(예: 척수강 뇌척수액)을 색으로 채우고 3D 컬러 렌더링. 다시 누르면 Off(삭제)"
+                  style={{ fontSize: 11.5, padding: "2px 10px",
+                           background: toolMode === "fill" ? "var(--accent)" : undefined,
+                           color: toolMode === "fill" ? "#fff" : undefined }}>🪄 채우기{fillOn ? " ●" : ""}</button>
+          {toolMode === "fill" && (
+            <input type="color" value={fillColor} title="분할 표시/3D 렌더링 색 선택"
+                   onChange={(e) => setFillColor(e.target.value)}
+                   style={{ width: 30, height: 24, padding: 0, border: "1px solid var(--border)",
+                            borderRadius: 4, background: "transparent", cursor: "pointer" }} />
+          )}
         </span>
         {status && <span style={{ color: "var(--stat-draft)", fontSize: 12 }}>{status}</span>}
         {error && <span style={{ color: "var(--stat-emergency)", fontSize: 12 }}>⚠ {error}</span>}
@@ -799,7 +957,21 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         {VIEWPORTS.map((v) => (
           <div
             key={v.id}
-            onMouseDown={() => setActiveVp(v.id)}
+            onMouseDown={(e) => {
+              setActiveVp(v.id);
+              // 채우기 모드 — 클릭 지점(캔버스 좌표→월드)에서 같은 농도 영역 성장
+              if (toolMode === "fill" && !v.mip && e.button === 0) {
+                try {
+                  const vp = engineRef.current?.getViewport(v.id) as Types.IVolumeViewport | undefined;
+                  const canvas = (e.currentTarget as HTMLElement).querySelector("canvas");
+                  if (vp && canvas) {
+                    const r = canvas.getBoundingClientRect();
+                    const world = vp.canvasToWorld([e.clientX - r.left, e.clientY - r.top]);
+                    void regionGrow(world as unknown as number[]);
+                  }
+                } catch { /* 미준비 */ }
+              }
+            }}
             onDragOver={(e) => { if (!v.mip) e.preventDefault(); }}
             onDrop={(e) => {
               // 좌측 썸네일 드래그 → 이 MPR 페인만 해당 시리즈 볼륨으로 교체(AX/SAG/COR 소스 개별 지정)
