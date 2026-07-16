@@ -179,6 +179,31 @@ def _has_dicm_signature(path: Path) -> bool:
         return False
 
 
+def _dtext(ds, tag: str) -> str:
+    """DICOM 텍스트 추출 — 문자셋 태그(0008,0005) 없는 한국 DICOM의 인코딩 폴백.
+
+    pydicom 은 SpecificCharacterSet 부재 시 Latin-1 로 디코딩해 한글이 깨진다(mojibake).
+    비ASCII 가 섞여 있고 문자셋 미지정이면 원바이트로 되돌려 UTF-8 → CP949 순으로 재해석하되,
+    결과에 한글이 있을 때만 채택 — 정상 서양어(악센트) 텍스트의 오변환을 차단.
+    """
+    raw = getattr(ds, tag, "") or ""
+    s = str(raw)
+    scs = str(getattr(ds, "SpecificCharacterSet", "") or "")
+    if not scs and any(ord(c) > 127 for c in s):
+        try:
+            b = s.encode("latin-1")
+        except UnicodeEncodeError:
+            return s
+        for enc in ("utf-8", "cp949"):
+            try:
+                fixed = b.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            if any("가" <= c <= "힣" for c in fixed):
+                return fixed
+    return s
+
+
 def _read_dataset(path: Path):
     """파일명 무관 — DICM 시그니처/파싱(force)으로 DICOM 여부 판정.
 
@@ -222,19 +247,18 @@ def import_temp_file(conn: sqlite3.Connection, root: Path, tmp: Path, ds, sop: s
     # study upsert (study_uid 기준)
     row = conn.execute("SELECT id FROM studies WHERE study_uid=?", (study_uid,)).fetchone()
     if row is None:
-        pn = getattr(ds, "PatientName", "")
         cur = conn.execute(
             "INSERT INTO studies(patient_key, patient_name, sex, birth_date, study_uid,"
             " study_date, modality, study_desc) VALUES(?,?,?,?,?,?,?,?)",
             (
                 pid,
-                str(pn) if pn else "",
+                _dtext(ds, "PatientName"),
                 str(getattr(ds, "PatientSex", "") or ""),
                 str(getattr(ds, "PatientBirthDate", "") or ""),
                 study_uid,
                 study_date if study_date != "UNKNOWN" else "",
                 modality,
-                str(getattr(ds, "StudyDescription", "") or ""),
+                _dtext(ds, "StudyDescription"),
             ),
         )
         study_id = int(cur.lastrowid)
@@ -252,7 +276,7 @@ def import_temp_file(conn: sqlite3.Connection, root: Path, tmp: Path, ds, sop: s
             "INSERT INTO series(study_id, series_uid, series_number, series_desc, modality)"
             " VALUES(?,?,?,?,?)",
             (study_id, series_uid, series_no,
-             str(getattr(ds, "SeriesDescription", "") or ""), modality),
+             _dtext(ds, "SeriesDescription"), modality),
         )
         series_id = int(cur.lastrowid)
     else:

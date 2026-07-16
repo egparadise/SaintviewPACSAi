@@ -22,7 +22,11 @@ from app.services.permissions import (
     ROLES,
     effective_perms,
 )
-from app.services.settings_service import get_hospital_setting, set_hospital_setting
+from app.services.settings_service import (
+    WL_HOSPITAL_KEYS,
+    get_hospital_setting,
+    set_hospital_setting,
+)
 
 router = APIRouter(prefix="/api", tags=["hospital-admin"])
 
@@ -396,3 +400,41 @@ def study_admin_action(study_id: int, body: AdminActionBody, db: Session = Depen
                     target_type="study", target_id=str(study_id), detail=detail))
     db.commit()
     return result
+
+
+# ════════════ 병원 기본 워크리스트·뷰어 설정 (설정>워크리스트와 동일 구현 — 어디서나 작업) ════════════
+# 관리 콘솔 [뷰어·워크리스트 설정] 탭이 병원 스코프로 저장하고, 계정별 설정이 없는
+# 사용자는 /api/settings 조회 시 이 병원 기본값으로 폴백된다(user > hospital > 빈값).
+WL_SETTING_KEYS = set(WL_HOSPITAL_KEYS)  # 사용자 폴백(settings.py)과 단일 소스 공유
+
+
+class WlSettingBody(BaseModel):
+    value: dict
+
+
+@router.get("/hospitals/{hid}/wl-setting/{key}")
+def get_wl_setting(hid: int, key: str, db: Session = Depends(get_db),
+                   user: dict = Depends(current_user)):
+    _require_access(user, hid)
+    if key not in WL_SETTING_KEYS:
+        raise HTTPException(status_code=404, detail="알 수 없는 워크리스트 설정 키")
+    _get_hospital(db, hid)
+    return {"key": key, "value": get_hospital_setting(db, hid, key, default={})}
+
+
+@router.put("/hospitals/{hid}/wl-setting/{key}")
+def put_wl_setting(hid: int, key: str, body: WlSettingBody, db: Session = Depends(get_db),
+                   user: dict = Depends(current_user)):
+    _require_admin_access(user, hid)
+    if key not in WL_SETTING_KEYS:
+        raise HTTPException(status_code=404, detail="알 수 없는 워크리스트 설정 키")
+    _get_hospital(db, hid)
+    if key == "worklist.tabs":
+        items = body.value.get("items", [])
+        if not isinstance(items, list) or len(items) > 10:
+            raise HTTPException(status_code=400, detail="워크리스트 페이지는 리스트 최대 10개입니다 (UBPACS-Z 규격)")
+    set_hospital_setting(db, hid, key, body.value)
+    db.add(AuditLog(account_id=user.get("uid"), action="hospital_wl_setting",
+                    target_type="hospital", target_id=str(hid), detail={"key": key}))
+    db.commit()
+    return {"ok": True, "key": key, "scope": "hospital"}

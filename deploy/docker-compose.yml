@@ -30,6 +30,8 @@ services:
       ORTHANC__DICOM_WEB__ENABLE: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
       ORTHANC__OVERWRITE_INSTANCES: "true"
+      # 문자셋 태그(0008,0005) 없는 한국 DICOM을 EUC-KR(ISO_IR 149)로 해석 — 미설정 시 Latin1 로 한글 깨짐
+      ORTHANC__DEFAULT_ENCODING: "Korean"
       # ── SCP 수신 정책 (설정>장비·수신에서 토글 → deploy/scp-policy.env 생성 후 .env 반영·재기동) ──
       # 등록 장비만 수신(미등록 호스트/AET의 C-STORE 거부)
       ORTHANC__DICOM_CHECK_MODALITY_HOST: "${ORTHANC_CHECK_MODALITY_HOST:-false}"

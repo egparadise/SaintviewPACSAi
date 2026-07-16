@@ -485,6 +485,14 @@ export const api = {
   /** 병원별 DB·Storage 사용량 */
   hospitalUsage: (hid: number) => req<HospitalUsage>(`/api/hospitals/${hid}/usage`),
   /** 병원별 등급 권한 매트릭스 (GET=기본값 폴백 병합) */
+  // 병원 기본 워크리스트·뷰어 설정 — 설정>워크리스트와 동일 구현(계정 설정 없으면 이 값으로 폴백)
+  hospWlSetting: (hid: number, key: string) =>
+    req<{ key: string; value: Record<string, unknown> }>(`/api/hospitals/${hid}/wl-setting/${key}`),
+  putHospWlSetting: (hid: number, key: string, value: Record<string, unknown>) =>
+    req<{ ok: boolean }>(`/api/hospitals/${hid}/wl-setting/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    }),
   permMatrix: (hid: number) => req<PermMatrixResp>(`/api/hospitals/${hid}/perm-matrix`),
   /** 병원별 권한 매트릭스 저장 (관리자 — hospital 스코프 setting 'perm.matrix') */
   putPermMatrix: (hid: number, matrix: Record<string, string[]>) =>

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import current_user
 from app.db import get_db
-from app.services.settings_service import get_setting, set_setting
+from app.services.settings_service import WL_HOSPITAL_KEYS, get_setting, set_setting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -79,7 +79,17 @@ def read_setting(key: str, db: Session = Depends(get_db), user: dict = Depends(c
         row = db.execute(_select(AppSetting).where(
             AppSetting.scope == "user", AppSetting.scope_id == user["sub"], AppSetting.key == key
         )).scalar_one_or_none()
-        return {"key": key, "value": row.value if row is not None else {}}
+        if row is not None:
+            return {"key": key, "value": row.value}
+        # 계정 설정이 없으면 소속 병원 기본값 폴백(관리 콘솔 [뷰어·워크리스트 설정]) —
+        # 자기 병원(hid)만 조회하므로 병원 간 누출 없음. 개인 설정 저장 시 그 값이 우선.
+        hid = user.get("hid")
+        if hid is not None and key in WL_HOSPITAL_KEYS:
+            from app.services.settings_service import get_hospital_setting
+            hv = get_hospital_setting(db, int(hid), key)
+            if hv is not None:
+                return {"key": key, "value": hv}
+        return {"key": key, "value": {}}
     # 전역 전용 키는 user 스코프 무시 — 과거에 남은 user 사본이 전역 값을 가리는 것 방지
     value = get_setting(db, key, user="" if key in GLOBAL_ONLY_KEYS else user["sub"], default={})
     if key == "mode.profiles" and not value:

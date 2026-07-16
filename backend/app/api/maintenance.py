@@ -463,3 +463,67 @@ def mirror_run(db: Session = Depends(get_db), user: dict = Depends(admin_user)):
             "bytes": result["bytes"], "errors": result["errors"][:10]})
     db.commit()
     return {"ok": True, "mirror_path": mp, **result}
+
+
+# ════════════════════════════ 한글 인코딩 복구 (EUC-KR mojibake) ════════════════════════════
+def _recover_kr(s: str | None) -> str | None:
+    """Latin-1 로 잘못 디코딩된 EUC-KR 텍스트 복구 — 정상 UTF-8 한글은 보존(멱등).
+
+    깨진 행만 latin-1 재인코딩이 성공(코드포인트 0-255)하므로, 실패(=정상 한글)는 원문 유지.
+    추가 가드: 복구 결과에 한글 음절이 없으면 원문 유지 — 정상 서양어(예 'SÃO PAULO')가
+    우연히 유효 CP949 바이트쌍을 이뤄 한자 잡음으로 오변환되는 것을 차단.
+    """
+    if not s or all(ord(c) < 128 for c in s):
+        return s
+    try:
+        fixed = s.encode("latin-1").decode("cp949")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+    return fixed if any("가" <= c <= "힣" for c in fixed) else s
+
+
+class RepairEncodingBody(BaseModel):
+    dry_run: bool = True   # true=변경 없이 대상 건수·표본만 반환
+
+
+@router.post("/repair-encoding")
+def repair_encoding(body: RepairEncodingBody, db: Session = Depends(get_db),
+                    user: dict = Depends(admin_user)):
+    """DB에 깨진 채 저장된 한글(EUC-KR→Latin-1 mojibake)을 일괄 복구.
+
+    원인: Orthanc DefaultEncoding 미설정(Latin1) 시기에 수신된 검사 메타데이터.
+    latin-1 인코딩 성공 + 복구 결과 한글 포함이 '깨진 행' 판별이라 반복 실행해도 안전(멱등).
+    전 병원 데이터를 스캔하고 samples 에 환자명이 포함되므로 시스템 관리자 전용.
+    """
+    from app.api.hospitals import _is_system_admin
+    from app.models import Order, Patient, Series
+
+    if not _is_system_admin(user):
+        raise HTTPException(status_code=403, detail="시스템 관리자 전용 기능입니다 (전 병원 데이터 스캔)")
+
+    targets = [
+        (Study, ["study_desc", "clinical_info", "institution", "referring_physician", "department"]),
+        (Patient, ["name_masked"]),
+        (Series, ["series_desc"]),
+        (Order, ["patient_name", "procedure_desc", "department"]),
+        (Hospital, ["departments"]),
+    ]
+    fixed = 0
+    samples: list[dict] = []
+    for model, cols in targets:
+        # yield_per — 대용량 테이블 전량 메모리 적재 방지(스트리밍 스캔)
+        for row in db.execute(select(model).execution_options(yield_per=500)).scalars():
+            for col in cols:
+                cur = getattr(row, col, None)
+                new = _recover_kr(cur)
+                if new != cur:
+                    if len(samples) < 20:
+                        samples.append({"table": model.__tablename__, "col": col,
+                                        "before": cur, "after": new})
+                    if not body.dry_run:
+                        setattr(row, col, new)
+                    fixed += 1
+    if not body.dry_run:
+        _audit(db, user, "maintenance_repair_encoding", "all", {"fixed": fixed})
+        db.commit()
+    return {"ok": True, "dry_run": body.dry_run, "fixed": fixed, "samples": samples}

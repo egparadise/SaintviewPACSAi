@@ -24,6 +24,7 @@ services:
       ORTHANC__DICOM_WEB__ENABLE: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
       ORTHANC__OVERWRITE_INSTANCES: "true"
+      ORTHANC__DEFAULT_ENCODING: "Korean"
     ports:
       - "8101:8042"   # HTTP / DICOMweb
       - "4301:4242" # DICOM C-STORE

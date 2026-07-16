@@ -979,8 +979,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const ma = mammo ? mammoAssign(imgSeries) : null;
       const mammoSeries = ma && ma.some(Boolean) ? ma : null;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
       if (mammo) { setLayout("2x2"); setOverlayOn(false); }
+      setSelSeries(null);   // 처음 열 때 썸네일 이미지 목록은 모두 접힘 — 더블클릭으로만 펼침
       if (imgSeries[0]) {
-        setSelSeries(imgSeries[0].series_uid);
         // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
         //    HU 윈도우가 화면을 날리므로 적용하지 않는다(서버 VOI 기본 유지)
         const mod = detail.modality || imgSeries[0].modality;

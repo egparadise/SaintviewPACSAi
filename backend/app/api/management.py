@@ -596,6 +596,8 @@ def scp_config(body: ScpConfigBody, db: Session = Depends(get_db),
         "DicomCheckModalityHost": bool(body.registered_only),
         "DicomCheckCalledAet": bool(body.check_called_aet),
         "DicomServerEnabled": bool(body.receive_enabled),
+        # 문자셋 태그 없는 한국 DICOM을 EUC-KR(ISO_IR 149)로 해석 — 미설정 시 Latin1 로 한글 깨짐
+        "DefaultEncoding": "Korean",
     }
     deploy = _repo_root() / "deploy"
     written: list[str] = []

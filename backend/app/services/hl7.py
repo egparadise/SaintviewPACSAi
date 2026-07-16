@@ -33,6 +33,33 @@ MAX_BUFFER_BYTES = 4 * 1024 * 1024   # 프레임 종료 없는 수신 누적 상
 CONFIG_KEY = "hl7.config"
 
 
+def _decode_hl7(b: bytes) -> str:
+    """HL7 바이트 디코딩 — 한국 HIS/RIS 는 통상 EUC-KR 로 보낸다. UTF-8 우선, 실패 시 CP949 폴백.
+
+    가드: EUC-KR 바이트가 우연히 유효 UTF-8 인 짧은 한글(예 '징'=C2A1→'¡')을 놓치지 않도록,
+    UTF-8 결과에 한글은 없는데 Latin-1 보충 문자만 있으면 CP949 재해석을 시도해
+    한글이 나오는 쪽을 채택한다.
+    """
+    try:
+        s = b.decode("utf-8")
+        has_hangul = any("가" <= c <= "힣" for c in s)
+        has_latin1_sup = any("\xa1" <= c <= "\xff" for c in s)
+        if not has_hangul and has_latin1_sup:
+            try:
+                s2 = b.decode("cp949")
+                if any("가" <= c <= "힣" for c in s2):
+                    return s2
+            except UnicodeDecodeError:
+                pass
+        return s
+    except UnicodeDecodeError:
+        pass
+    try:
+        return b.decode("cp949")
+    except UnicodeDecodeError:
+        return b.decode("utf-8", errors="replace")
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -296,7 +323,7 @@ class MllpListener:
                 break
             while MLLP_END in buf:
                 frame, buf = buf.split(MLLP_END, 1)
-                raw = frame.lstrip(MLLP_START).decode("utf-8", errors="replace")
+                raw = _decode_hl7(frame.lstrip(MLLP_START))
                 ack = self._dispatch(raw)
                 conn.sendall(MLLP_START + ack.encode("utf-8") + MLLP_END)
 
@@ -460,7 +487,7 @@ def send_mllp(host: str, port: int, raw: str, timeout: float = 10.0) -> str:
             if not chunk:
                 break
             buf += chunk
-    return buf.split(MLLP_END, 1)[0].lstrip(MLLP_START).decode("utf-8", errors="replace")
+    return _decode_hl7(buf.split(MLLP_END, 1)[0].lstrip(MLLP_START))
 
 
 def send_outbox_item(db: Session, item: Hl7Outbox, cfg: dict) -> Hl7Outbox:

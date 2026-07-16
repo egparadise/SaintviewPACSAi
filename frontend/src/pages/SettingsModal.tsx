@@ -595,7 +595,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     디코딩 전에는 서버 렌더링으로 표시(자동 폴백).
                   </div>
                 </Group>
-                <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)">
+                {/* 제품 모드 프로파일 + 선택 뷰어 — 같은 높이 좌/우 배치(좁으면 줄바꿈) */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>
+                <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)" style={{ flex: "1 1 360px", minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <select id="sv-mode" value={modeSel} onChange={(e) => setModeSel(e.target.value)}>
                       <option value="" disabled>모드 선택…</option>
@@ -686,6 +688,21 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </details>
                   )}
                 </Group>
+                <Group title="선택 뷰어 (Client Viewer)" style={{ flex: "1 1 300px", minWidth: 0 }}>
+                  <Row label="사용할 뷰어">
+                    <select value={clientViewer} onChange={(e) => setClientViewer(e.target.value)}>
+                      {CLIENT_VIEWERS.map((v) => (
+                        <option key={v.id} value={v.id} disabled={!v.available}>
+                          {v.label}{v.available ? "" : " (개발 중)"}
+                        </option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
+                      {CLIENT_VIEWERS.find((v) => v.id === clientViewer)?.desc}
+                    </span>
+                  </Row>
+                </Group>
+                </div>
               </>
             )}
             {page === "env" && (
@@ -1312,22 +1329,6 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   두 뷰어의 도구 팔레트 아이콘 크기를 한 곳에서 조정합니다 (각 뷰어 전용 탭에서도 동일하게 조정 가능).
                   <b> OK(저장)</b> 후 열려 있는 뷰어를 새로고침하면 반영됩니다.
                 </div>
-              </Group>
-            )}
-            {page === "viewer" && (
-              <Group title="선택 뷰어 (Client Viewer)">
-                <Row label="사용할 뷰어">
-                  <select value={clientViewer} onChange={(e) => setClientViewer(e.target.value)}>
-                    {CLIENT_VIEWERS.map((v) => (
-                      <option key={v.id} value={v.id} disabled={!v.available}>
-                        {v.label}{v.available ? "" : " (개발 중)"}
-                      </option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
-                    {CLIENT_VIEWERS.find((v) => v.id === clientViewer)?.desc}
-                  </span>
-                </Row>
               </Group>
             )}
             {page === "viewerIn" && (
@@ -2433,7 +2434,7 @@ function HpDisplayEditor({ displays, onChange }: {
 }
 
 /* ── Filter Setting 리스트 (UBPACS형 — ITEM | USE/NO USE 토글 + ▲▼ 순서) ── */
-function FilterSettingList({ all, selected, labelOf, onChange }: {
+export function FilterSettingList({ all, selected, labelOf, onChange }: {
   all: string[];
   selected: string[];
   labelOf: (k: string) => string;
@@ -2491,7 +2492,7 @@ function FilterSettingList({ all, selected, labelOf, onChange }: {
 }
 
 /* ── 듀얼 리스트 (화면분석 §5.10 패턴: Available ↔ Selected + Up/Down) ── */
-function DualList({ all, selected, labelOf, onChange }: {
+export function DualList({ all, selected, labelOf, onChange }: {
   all: string[];
   selected: string[];
   labelOf: (k: string) => string;
@@ -2550,9 +2551,9 @@ function DualList({ all, selected, labelOf, onChange }: {
   );
 }
 
-function Group({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+export function Group({ title, right, children, style }: { title: string; right?: React.ReactNode; children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <fieldset style={{ border: "1px solid var(--border)", borderRadius: 5, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, margin: 0 }}>
+    <fieldset style={{ border: "1px solid var(--border)", borderRadius: 5, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, margin: 0, ...style }}>
       <legend style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)", padding: "0 6px", display: "flex", gap: 8 }}>
         {title}{right}
       </legend>
@@ -2560,7 +2561,7 @@ function Group({ title, right, children }: { title: string; right?: React.ReactN
     </fieldset>
   );
 }
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+export function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5 }}>
       <span style={{ width: 110, color: "var(--text-secondary)" }}>{label}</span>

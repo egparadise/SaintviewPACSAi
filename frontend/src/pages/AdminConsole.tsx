@@ -16,6 +16,7 @@ import {
   AccountsTab, BackupTab, ConnDashboardTab, ExamControlTab, HospitalDataTab, HospitalLogsTab,
   HospitalModalityTab, HospitalStatsTab, PermMatrixTab, ScuTab, StudyAdminTab, UsageTab, HospitalStorageTab,
 } from "./admin/HospitalAdmin";
+import { HospitalWorklistSettings } from "./admin/HospitalWorklistSettings";
 import {
   BackupMirrorPanel, DataWipePanel, MaintStoragePanel, RestorePanel, ServerConfigPanel,
 } from "./admin/ServerMaintenance";
@@ -169,6 +170,7 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     { key: "examctl", label: "⑬ Exam Control (검사 QC)" },
     { key: "backup", label: "⑭ 백업 (설정 내보내기·복원)" },
   { key: "hstorage", label: "⑮ Storage (백업·보존)" },
+  { key: "wlset", label: "⑯ 뷰어·워크리스트 설정" },
   ];
 
   const itemStyle = (active: boolean, indent = 0): React.CSSProperties => ({
@@ -248,6 +250,8 @@ export function AdminConsole({ userName, isSystemAdmin, onLogout }: {
     else if (sub === "cont") content = <HospitalContainersSection hid={hid} />;
     else if (sub === "examctl") content = <ExamControlTab hid={hid} />;
     else if (sub === "hstorage") content = <HospitalStorageTab hid={hid} />;
+    // key={hid} — 병원 전환 시 리마운트로 상태·진행 중 요청을 완전 초기화(병원 간 설정 오염 방지)
+    else if (sub === "wlset") content = <HospitalWorklistSettings key={hid} hid={hid} />;
     else if (sub === "backup") content = <BackupTab hid={hid} hospitalName={hosps.find((h) => h.id === hid)?.name || ""} />;
   }
 

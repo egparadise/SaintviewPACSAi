@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.models import AppSetting
 
+# 병원 기본값으로 관리·폴백되는 워크리스트 설정 키 — 관리 콘솔 [뷰어·워크리스트 설정](wl-setting
+# 엔드포인트)과 /api/settings 사용자 폴백이 공유하는 단일 소스(이중 정의 금지).
+WL_HOSPITAL_KEYS = ("worklist.prefs", "worklist.tabs", "worklist.tree")
+
 
 def get_setting(db: Session, key: str, *, user: str = "", source: str = "", default=None):
     """우선순위: user > source > global."""
