@@ -315,19 +315,32 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 // eslint-disable-next-line react-refresh/only-export-components
 /* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional)
    + 좌측 환자 ◀▶ 이동 + 활성 마우스모드/툴 칩. 항목 run 은 기존 툴 함수 그대로 호출(기능=TY 뷰어 동일). */
-function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled }: {
+function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled, side = "top", onGripDown }: {
   menus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[];
   activeId: string;                 // 현재 활성 마우스모드/툴 id (드롭다운·칩 하이라이트)
   onNav: (dir: 1 | -1) => void;     // 환자(검사) ◀▶ 이동
   navPrevDisabled: boolean;
   navNextDisabled: boolean;
+  side?: "top" | "bottom" | "left" | "right";   // 도킹 위치(설정 툴 팔레트 위치와 연동)
+  onGripDown?: (e: React.PointerEvent) => void; // ⠿ 그립 — 드래그 도킹 시작
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const vertical = side === "left" || side === "right";
   const activeLabel = menus.flatMap((m) => m.items).find((it) => it.id === activeId)?.label ?? activeId;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "2px 8px", background: "var(--bg-panel)",
-                  borderBottom: "1px solid var(--border)", position: "relative", zIndex: 30 }}
+    <div style={{ display: "flex", flexDirection: vertical ? "column" : "row",
+                  alignItems: vertical ? "stretch" : "center", gap: 2, padding: vertical ? "6px 4px" : "2px 8px",
+                  background: "var(--bg-panel)", position: "relative", zIndex: 30, flexShrink: 0,
+                  ...(vertical ? { width: 148, ...(side === "right" ? { borderLeft: "1px solid var(--border)" }
+                                                                     : { borderRight: "1px solid var(--border)" }) }
+                               : side === "bottom" ? { borderTop: "1px solid var(--border)" }
+                               : { borderBottom: "1px solid var(--border)" }) }}
          onMouseLeave={() => setOpen(null)}>
+      {/* 위치 그립 — 드래그해서 좌/우/상/하 도킹(설정 툴 팔레트 위치와 동일 저장) */}
+      <div title="드래그로 툴 파레트(메뉴바) 위치 이동 — 화면 가장자리로 끌어 놓으세요"
+           onPointerDown={onGripDown}
+           style={{ cursor: "grab", fontSize: 10, color: "var(--text-secondary)", userSelect: "none",
+                    textAlign: "center", padding: vertical ? "0 0 2px" : "0 4px", flexShrink: 0 }}>⠿</div>
       {/* 환자 ◀▶ 이동 */}
       <button title="◀ 이전 검사" disabled={navPrevDisabled} onClick={() => onNav(-1)}
               style={{ padding: "4px 9px", fontSize: 13, fontWeight: 700, opacity: navPrevDisabled ? 0.35 : 1 }}>◀</button>
@@ -348,7 +361,11 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
             {m.title} ▾
           </button>
           {open === m.title && (
-            <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 350, minWidth: 190,
+            <div style={{ position: "absolute", zIndex: 350, minWidth: 190,
+                          ...(side === "left" ? { left: "100%", top: 0 }
+                            : side === "right" ? { right: "100%", top: 0 }
+                            : side === "bottom" ? { bottom: "100%", left: 0 }
+                            : { top: "100%", left: 0 }),
                           background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 5,
                           boxShadow: "0 6px 18px rgba(0,0,0,0.5)", maxHeight: 460, overflow: "auto", padding: 3 }}>
               {m.items.map((it) => {
@@ -2717,9 +2734,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     ] },
   ];
 
+  /* SaintView 툴 파레트 = 메뉴바 — 설정 paletteSide(좌/우/상/하) 연동 + ⠿ 드래그 도킹 */
+  const saintBar = skin === "saint" && (
+    <SaintMenuBar menus={saintMenus} activeId={tool || mouseMode} side={prefs.paletteSide}
+                  onGripDown={(e) => { dockDragRef.current = { kind: "palette", sx: e.clientX, sy: e.clientY }; }}
+                  onNav={navPatient}
+                  navPrevDisabled={navTarget(-1) === undefined}
+                  navNextDisabled={navTarget(1) === undefined} />
+  );
+
   /* 팔레트(방향 전환 가능 — 요청 2). SAINT VIEW 스킨은 상단 가로 메뉴 툴바를 쓰므로 세로 팔레트 숨김 */
-  // SaintView 도 설정 위치대로 팔레트 표시(상단 메뉴바와 병행) — 드래그 도킹 그립 포함
-  const palette = paletteOpen && (
+  const palette = skin !== "saint" && paletteOpen && (
     <div style={{
       display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 3, padding: 4,
       background: "var(--bg-panel)", flexShrink: 0, overflow: paletteHoriz ? "auto" : "hidden",
@@ -3552,21 +3577,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {imgLay.r}×{imgLay.c}</span>
       </div>
 
-      {skin === "saint" && (
-        <SaintMenuBar menus={saintMenus} activeId={tool || mouseMode}
-                      onNav={navPatient}
-                      navPrevDisabled={navTarget(-1) === undefined}
-                      navNextDisabled={navTarget(1) === undefined} />
-      )}
+      {skin === "saint" && prefs.paletteSide === "top" && saintBar}
       {prefs.paletteSide === "top" && palette}
       {prefs.thumbSide === "top" && thumbs}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
-        {prefs.paletteSide === "left" && paletteOpen && (
+        {skin === "saint" && prefs.paletteSide === "left" && saintBar}
+        {skin !== "saint" && prefs.paletteSide === "left" && paletteOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW + dx, 64, 240) }))} />
         )}
-        {!paletteOpen && prefs.paletteSide === "left" && (
+        {skin !== "saint" && !paletteOpen && prefs.paletteSide === "left" && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
         )}
         {prefs.thumbSide === "left" && thumbs}
@@ -3630,8 +3651,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW - dx, 64, 240) }))} />
         )}
+        {skin === "saint" && prefs.paletteSide === "right" && saintBar}
         {paletteRight && palette}
-        {!paletteOpen && paletteRight && (
+        {skin !== "saint" && !paletteOpen && paletteRight && (
           <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
         )}
         {prefs.reportDock && !reportCollapsed && (
@@ -3659,6 +3681,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </div>
       {prefs.thumbSide === "bottom" && thumbs}
       {prefs.paletteSide === "bottom" && palette}
+      {skin === "saint" && prefs.paletteSide === "bottom" && saintBar}
       {/* 휴대폰 촬영 QR 다이얼로그 */}
       {qrCap && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 600 }}
