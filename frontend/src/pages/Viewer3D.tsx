@@ -7,17 +7,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Enums,
   RenderingEngine,
+  eventTarget,
   init as csInit,
   setVolumesForViewports,
   volumeLoader,
   type Types,
 } from "@cornerstonejs/core";
+import vtkPlane from "@kitware/vtk.js/Common/DataModel/Plane";
 import {
   CrosshairsTool,
   Enums as ToolsEnums,
   PanTool,
+  RectangleROITool,
   StackScrollTool,
   ToolGroupManager,
+  TrackballRotateTool,
   WindowLevelTool,
   ZoomTool,
   addTool,
@@ -56,6 +60,8 @@ async function ensureInit() {
   addTool(ZoomTool);
   addTool(StackScrollTool);
   addTool(CrosshairsTool);
+  addTool(RectangleROITool);
+  addTool(TrackballRotateTool);
   initialized = true;
 }
 
@@ -139,7 +145,10 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const [activeVp, setActiveVp] = useState("vp-axial");
   const [seriesList, setSeriesList] = useState<SeriesCand[]>([]);
   const [selSeries, setSelSeries] = useState("");
-  const [toolMode, setToolMode] = useState<"crosshair" | "wl">("crosshair");
+  const [toolMode, setToolMode] = useState<"crosshair" | "wl" | "roi">("crosshair");
+  const [vrCam, setVrCam] = useState("");                       // VR 좌하단 좌표(회전각·카메라 위치)
+  const [cropOn, setCropOn] = useState(false);                  // ROI 크롭 적용 여부
+  const cropRef = useRef<{ mins: number[]; maxs: number[] } | null>(null);
   const [mipOrient, setMipOrient] = useState<"AXIAL" | "SAGITTAL" | "CORONAL">("AXIAL");
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -162,17 +171,26 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   }, []);
 
   // 도구 모드 전환 — Crosshair(십자선 연동) ↔ W/L (MPR 3면 좌클릭)
-  const applyToolMode = useCallback((mode: "crosshair" | "wl") => {
+  const applyToolMode = useCallback((mode: "crosshair" | "wl" | "roi") => {
     const g = ToolGroupManager.getToolGroup(TG_MPR);
     if (!g) return;
     try {
       if (mode === "crosshair") {
         g.setToolPassive(WindowLevelTool.toolName);
+        g.setToolPassive(RectangleROITool.toolName);
         g.setToolActive(CrosshairsTool.toolName, {
+          bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
+        });
+      } else if (mode === "roi") {
+        // ROI — MPR 에 사각 영역을 그리면 그 영역만 3D 볼륨 렌더링(크롭)
+        g.setToolDisabled(CrosshairsTool.toolName);
+        g.setToolPassive(WindowLevelTool.toolName);
+        g.setToolActive(RectangleROITool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
       } else {
         g.setToolDisabled(CrosshairsTool.toolName);
+        g.setToolPassive(RectangleROITool.toolName);
         g.setToolActive(WindowLevelTool.toolName, {
           bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }],
         });
@@ -254,6 +272,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         mpr.addTool(ZoomTool.toolName);
         mpr.addTool(PanTool.toolName);
         mpr.addTool(StackScrollTool.toolName);
+        mpr.addTool(RectangleROITool.toolName);
         mpr.addTool(CrosshairsTool.toolName, {
           getReferenceLineColor: (id: string) => REF_COLORS[id] ?? "#94a3b8",
           getReferenceLineControllable: () => true,
@@ -355,6 +374,60 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
 
   useEffect(() => () => { resizeObserverRef.current?.disconnect(); }, []);
 
+  // ROI 크롭 — 사각 ROI 의 월드 경계를 VR 볼륨 클리핑 평면으로 적용(그 영역만 3D 렌더링)
+  const applyCrop = useCallback(() => {
+    const engine = engineRef.current;
+    const c = cropRef.current;
+    if (!engine || !c) return;
+    try {
+      const vp = engine.getViewport("vp-vr") as Types.IVolumeViewport | undefined;
+      const actorEntry = vp?.getDefaultActor();
+      if (!vp || !actorEntry) return;
+      const mapper = (actorEntry.actor as unknown as { getMapper: () => {
+        removeAllClippingPlanes: () => void; addClippingPlane: (p: unknown) => void } }).getMapper();
+      mapper.removeAllClippingPlanes();
+      for (let i = 0; i < 3; i++) {
+        if (c.maxs[i] - c.mins[i] < 0.5) continue;   // 평면 축(두께 0) — 클리핑 생략
+        const nMin = [0, 0, 0]; nMin[i] = 1;
+        const oMin = [...c.mins];
+        mapper.addClippingPlane(vtkPlane.newInstance({ normal: nMin as [number, number, number], origin: oMin as [number, number, number] }));
+        const nMax = [0, 0, 0]; nMax[i] = -1;
+        const oMax = [...c.maxs];
+        mapper.addClippingPlane(vtkPlane.newInstance({ normal: nMax as [number, number, number], origin: oMax as [number, number, number] }));
+      }
+      vp.render();
+      setCropOn(true);
+    } catch { /* VR 미준비 — vrOn 효과에서 재시도 */ }
+  }, []);
+  const clearCrop = useCallback(() => {
+    cropRef.current = null;
+    setCropOn(false);
+    try {
+      const vp = engineRef.current?.getViewport("vp-vr") as Types.IVolumeViewport | undefined;
+      const actorEntry = vp?.getDefaultActor();
+      const mapper = (actorEntry?.actor as unknown as { getMapper: () => { removeAllClippingPlanes: () => void } } | undefined)?.getMapper();
+      mapper?.removeAllClippingPlanes();
+      vp?.render();
+    } catch { /* 무시 */ }
+  }, []);
+  useEffect(() => {
+    const onDone = (evt: Event) => {
+      const anno = (evt as CustomEvent).detail?.annotation as
+        { metadata?: { toolName?: string }; data?: { handles?: { points?: number[][] } } } | undefined;
+      if (anno?.metadata?.toolName !== RectangleROITool.toolName) return;
+      const pts = anno.data?.handles?.points;
+      if (!pts || pts.length < 4) return;
+      const mins = [0, 1, 2].map((i) => Math.min(...pts.map((p) => p[i])));
+      const maxs = [0, 1, 2].map((i) => Math.max(...pts.map((p) => p[i])));
+      cropRef.current = { mins, maxs };
+      setVrOn(true);        // 영역 선택 → 3D 렌더링 페인 자동 표시
+      setStatus("ROI 영역 3D 렌더링 — 선택 영역만 볼륨 표시(ROI 해제로 복원)");
+      window.setTimeout(applyCrop, 300);   // VR 이 이미 켜져 있으면 즉시, 새로 켜지면 vrOn 효과 후 재적용
+    };
+    eventTarget.addEventListener(ToolsEnums.Events.ANNOTATION_COMPLETED, onDone);
+    return () => eventTarget.removeEventListener(ToolsEnums.Events.ANNOTATION_COMPLETED, onDone);
+  }, [applyCrop]);
+
   // 참조선 점선(슬랩 폭) 드래그 감지 — MPR 뷰포트의 slabThickness 가 2mm 를 넘으면 3D(VR) 페인 자동 추가
   useEffect(() => {
     const el = gridRef.current;
@@ -396,6 +469,30 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         const mod = seriesList.find((x) => x.uid === selSeries)?.modality ?? "";
         try { (vp as unknown as { setProperties: (p: { preset: string }) => void })
           .setProperties({ preset: mod === "CT" ? "CT-Bone" : "MR-Default" }); } catch { /* 프리셋 미지원 */ }
+        // ── VR 조작: 좌드래그 = 입체 회전(Trackball) · 우 = Zoom · 중 = Pan ──
+        if (ToolGroupManager.getToolGroup("sv-tools-vr")) ToolGroupManager.destroyToolGroup("sv-tools-vr");
+        const vr = ToolGroupManager.createToolGroup("sv-tools-vr")!;
+        vr.addTool(TrackballRotateTool.toolName);
+        vr.addTool(ZoomTool.toolName);
+        vr.addTool(PanTool.toolName);
+        vr.setToolActive(TrackballRotateTool.toolName, { bindings: [{ mouseButton: ToolsEnums.MouseBindings.Primary }] });
+        vr.setToolActive(ZoomTool.toolName, { bindings: [{ mouseButton: ToolsEnums.MouseBindings.Secondary }] });
+        vr.setToolActive(PanTool.toolName, { bindings: [{ mouseButton: ToolsEnums.MouseBindings.Auxiliary }] });
+        vr.addViewport("vp-vr", RENDERING_ENGINE_ID);
+        // 좌하단 좌표 — 회전각(방위/고도)·카메라 위치, 회전 중 실시간 갱신
+        const onCam = () => {
+          try {
+            const cam = vp.getCamera();
+            const n = cam.viewPlaneNormal ?? [0, 0, 1];
+            const az = Math.round(Math.atan2(n[0], n[2]) * 180 / Math.PI);
+            const el = Math.round(Math.asin(Math.max(-1, Math.min(1, n[1]))) * 180 / Math.PI);
+            const pos = (cam.position ?? [0, 0, 0]).map((x) => Math.round(x));
+            setVrCam(`회전 ${az}° / ${el}° · 카메라 (${pos[0]}, ${pos[1]}, ${pos[2]})`);
+          } catch { /* 무시 */ }
+        };
+        elVr.addEventListener(Enums.Events.CAMERA_MODIFIED, onCam);
+        onCam();
+        if (cropRef.current) window.setTimeout(applyCrop, 200);   // ROI 크롭 재적용(볼륨 준비 후)
         vp.render();
         engine.resize(true, true);
         engine.render();
@@ -403,7 +500,11 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
     })();
     return () => {
       dead = true;
-      try { engine.disableElement("vp-vr"); } catch { /* 무시 */ }
+      try {
+        if (ToolGroupManager.getToolGroup("sv-tools-vr")) ToolGroupManager.destroyToolGroup("sv-tools-vr");
+        engine.disableElement("vp-vr");
+      } catch { /* 무시 */ }
+      setVrCam("");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vrOn, selSeries]);
@@ -443,6 +544,15 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
                   style={{ fontSize: 11.5, padding: "2px 10px",
                            background: toolMode === "crosshair" ? "var(--accent)" : undefined,
                            color: toolMode === "crosshair" ? "#fff" : undefined }}>✛ Crosshair</button>
+          <button onClick={() => { setToolMode("roi"); applyToolMode("roi"); }}
+                  title="ROI — MPR 에 사각 영역을 그리면 그 영역만 3D 볼륨 렌더링(크롭)"
+                  style={{ fontSize: 11.5, padding: "2px 10px",
+                           background: toolMode === "roi" ? "var(--accent)" : undefined,
+                           color: toolMode === "roi" ? "#fff" : undefined }}>▭ ROI</button>
+          {cropOn && (
+            <button onClick={clearCrop} title="ROI 크롭 해제 — 전체 볼륨 렌더링으로 복원"
+                    style={{ fontSize: 11.5, padding: "2px 10px", color: "var(--stat-emergency)" }}>✕ ROI 해제</button>
+          )}
           <button onClick={() => { setToolMode("wl"); applyToolMode("wl"); }}
                   title="W/L — 좌드래그로 밝기/대조 조절"
                   style={{ fontSize: 11.5, padding: "2px 10px",
@@ -567,6 +677,13 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
               style={{ width: "100%", height: "100%" }}
               onContextMenu={(e) => e.preventDefault()}
             />
+            {/* 3D(VR) 좌하단 좌표 — 좌드래그 회전 시 실시간 회전각·카메라 위치 */}
+            {v.id === "vp-vr" && vrCam && (
+              <div style={{ position: "absolute", bottom: 4, left: 6, zIndex: 1, fontSize: 10.5,
+                            color: "var(--text-secondary)", pointerEvents: "none", textShadow: "0 0 4px #000" }}>
+                {vrCam}{cropOn ? " · ROI 크롭" : ""}
+              </div>
+            )}
           </div>
         ))}
       </div>
