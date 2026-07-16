@@ -2756,6 +2756,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       mkItem("fit", "Fit"),
       mkItem("reset", "Reset"),
       mkItem("lens", "Probe", () => pickTool("lens")),
+      // 3D Cursor — 클릭/홀드-드래그로 모든 페인을 같은 3D 위치로 동기(T·In 뷰어와 동일 엔진)
+      mkItem("cursor3d", "3D Cursor", () => pickTool("cursor3d")),
     ] },
     { title: "Measurement", items: [
       mkItem("length", "Measure", () => pickTool("length")),
