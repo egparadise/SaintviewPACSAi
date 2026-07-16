@@ -253,3 +253,19 @@ def hospital_action(db: Session, hid: int, action: str) -> dict:
         return {"ok": ok, "name": name, "action": "remove",
                 "detail": (cp.stdout if ok else cp.stderr).strip()[-300:]}
     raise ValueError(f"허용되지 않은 액션입니다 (start/stop/restart/remove): {action!r}")
+
+
+def main_action(action: str) -> dict:
+    """메인 스택(deploy/docker-compose.yml — db·orthanc·ohif) 일괄 start|stop|restart.
+
+    start 는 compose up -d(미생성 컨테이너 생성 포함), stop/restart 는 컨테이너 유지.
+    """
+    action = validate_action(action)
+    compose_file = deploy_dir() / "docker-compose.yml"
+    if not compose_file.is_file():
+        raise ValueError(f"메인 compose 파일이 없습니다: {compose_file}")
+    args = {"start": ["up", "-d"], "stop": ["stop"], "restart": ["restart"]}[action]
+    cp = _docker(["compose", "-f", str(compose_file), *args], timeout=300)
+    ok = cp.returncode == 0
+    return {"ok": ok, "name": "main-stack", "action": action,
+            "detail": (cp.stdout if ok else cp.stderr).strip()[-300:]}

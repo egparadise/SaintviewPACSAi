@@ -214,3 +214,24 @@ def ddns_update(db: Session = Depends(get_db), user: dict = Depends(admin_user))
     _audit(db, user, "infra_ddns_update", str(status.get("last_ip", "")), dict(status))
     db.commit()
     return {"ok": bool(status.get("ok")), "status": status}
+
+
+# ════════════════════════════ 메인 스택 일괄 제어 (부모 컨테이너) ════════════════════════════
+class MainActionBody(BaseModel):
+    action: str  # start | stop | restart
+
+
+@router.post("/main/action")
+def main_stack_action(body: MainActionBody,
+                      db: Session = Depends(get_db), user: dict = Depends(admin_user)):
+    """메인 docker 스택(db·orthanc·ohif) 일괄 start/stop/restart — 시스템 구조도 부모 박스."""
+    try:
+        result = docker_service.main_action(body.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DockerUnavailable as e:
+        raise HTTPException(status_code=503, detail=f"docker 미가용: {str(e)[:200]}")
+    _audit(db, user, "infra_main_action", "main-stack",
+           {"action": body.action, "ok": result["ok"], "detail": result["detail"]})
+    db.commit()
+    return result

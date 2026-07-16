@@ -24,10 +24,26 @@ export function ServerPanel() {
   const [st, setSt] = useState<ServerStatusAll | null>(null);
   const [msg, setMsg] = useState("");
   const [at, setAt] = useState("");
+  const [busy, setBusy] = useState(false);
   const load = () => api.serverStatusAll()
     .then((s) => { setSt(s); setAt(new Date().toLocaleTimeString()); setMsg(""); })
     .catch((e) => setMsg("⚠ " + e.message));
   useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, []);
+
+  // 서비스 강제 제어 — 컨테이너(start/stop/restart) 또는 백엔드 프로세스(restart/stop)
+  const ctl = async (label: string, fn: () => Promise<{ ok: boolean; detail?: string }>, warn?: string) => {
+    if (!window.confirm(`${label} — 진행할까요?${warn ? `\n\n⚠ ${warn}` : ""}`)) return;
+    setBusy(true); setMsg(`⏳ ${label} 중…`);
+    try {
+      const r = await fn();
+      setMsg(r.ok ? `✅ ${label} 요청됨 — 잠시 후 상태가 갱신됩니다` : `⚠ ${r.detail ?? label + " 실패"}`);
+    } catch (e) { setMsg("⚠ " + (e as Error).message); }
+    finally { setBusy(false); setTimeout(load, 2500); }
+  };
+  const ctlBtn = (label: string, title: string, onClick: () => void) => (
+    <button disabled={busy} title={title} onClick={onClick}
+            style={{ padding: "2px 7px", fontSize: 11.5 }}>{label}</button>
+  );
 
   return (
     <Group title="메인 서버 — 통합 상태 / 관리"
@@ -57,10 +73,28 @@ export function ServerPanel() {
                     <span style={{ color: sv.ok ? undefined : "var(--danger, #f87171)" }}>{sv.detail}</span>
                   </span>
                 </td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {sv.manage
-                    ? <button onClick={() => window.open(sv.manage, "_blank")}>열기 ↗</button>
-                    : <span style={{ color: "var(--text-secondary)" }}>—</span>}
+                <td style={{ whiteSpace: "nowrap", display: "flex", gap: 4, alignItems: "center" }}>
+                  {sv.manage && <button onClick={() => window.open(sv.manage, "_blank")}>열기 ↗</button>}
+                  {/* 강제 On/Off — docker 컨테이너 서비스 */}
+                  {sv.container && <>
+                    {ctlBtn("▶ 시작", `${sv.name} 컨테이너 시작`, () =>
+                      ctl(`${sv.name} 시작`, () => api.infraContainerAction(sv.container!, "start")))}
+                    {ctlBtn("⟳ 재시작", `${sv.name} 컨테이너 재시작`, () =>
+                      ctl(`${sv.name} 재시작`, () => api.infraContainerAction(sv.container!, "restart")))}
+                    {ctlBtn("■ 중지", `${sv.name} 컨테이너 중지`, () =>
+                      ctl(`${sv.name} 중지`, () => api.infraContainerAction(sv.container!, "stop"),
+                          sv.container === "saintview-db" ? "DB 를 중지하면 프로그램 전체가 동작하지 않습니다" : undefined))}
+                  </>}
+                  {/* 백엔드 API 자체 — 재시작/중지(중지 후 재기동은 바탕화면 아이콘) */}
+                  {sv.kind === "api" && <>
+                    {ctlBtn("⟳ 재시작", "백엔드 서버 프로세스 재시작 (약 5초 순단)", () =>
+                      ctl("백엔드 재시작", () => api.serverControl("restart"),
+                          "재시작 동안 몇 초간 접속이 끊깁니다 (자동 재접속)"))}
+                    {ctlBtn("■ 중지", "백엔드 서버 프로세스 강제 종료", () =>
+                      ctl("백엔드 중지", () => api.serverControl("stop"),
+                          "웹 화면 전체가 내려갑니다! 재기동은 서버 PC 바탕화면 [Saintview PACS 시작] 아이콘으로만 가능합니다"))}
+                  </>}
+                  {!sv.manage && !sv.container && sv.kind !== "api" && <span style={{ color: "var(--text-secondary)" }}>—</span>}
                 </td>
               </tr>
             ))}

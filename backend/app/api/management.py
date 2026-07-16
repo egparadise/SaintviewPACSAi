@@ -838,7 +838,7 @@ def server_status_all(db: Session = Depends(get_db),
     s = get_settings()
     services: list[dict] = []
 
-    # 1) 백엔드 API (자기 자신)
+    # 1) 백엔드 API (자기 자신) — container 필드: docker 제어 가능한 서비스는 컨테이너 이름 노출
     services.append({"name": "백엔드 API", "url": s.api_url, "kind": "api", "ok": True,
                      "detail": f"status ok · AI {s.ai_mode}", "manage": s.api_url + "/docs"})
 
@@ -849,24 +849,27 @@ def server_status_all(db: Session = Depends(get_db),
             info = client._client.get("/system").json()
             cnt = len(client._client.get("/studies").json())
             services.append({"name": "DICOM 서버(Orthanc)", "url": s.orthanc_url, "kind": "orthanc",
-                             "ok": True, "manage": s.orthanc_url,
+                             "ok": True, "manage": s.orthanc_url, "container": "saintview-orthanc",
                              "detail": f"v{info.get('Version','?')} · AET {info.get('DicomAet')} · "
                                        f"DICOM {info.get('DicomPort')} · 검사 {cnt}"})
         else:
             services.append({"name": "DICOM 서버(Orthanc)", "url": s.orthanc_url, "kind": "orthanc",
-                             "ok": False, "detail": "연결 안 됨", "manage": s.orthanc_url})
+                             "ok": False, "detail": "연결 안 됨", "manage": s.orthanc_url,
+                             "container": "saintview-orthanc"})
     finally:
         client.close()
 
     # 3) OHIF 뷰어
     ohif_ok, ohif_detail = _http_ok(s.ohif_url)
     services.append({"name": "OHIF 뷰어", "url": s.ohif_url, "kind": "ohif",
-                     "ok": ohif_ok, "detail": ohif_detail, "manage": s.ohif_url})
+                     "ok": ohif_ok, "detail": ohif_detail, "manage": s.ohif_url,
+                     "container": "saintview-ohif"})
 
     # 4) PostgreSQL (docker) — TCP 점검
     pg_ok = _tcp_ok(s.pg_host, s.pg_port)
     services.append({"name": "PostgreSQL", "url": f"{s.pg_host}:{s.pg_port}", "kind": "db",
-                     "ok": pg_ok, "detail": "Up" if pg_ok else "연결 안 됨"})
+                     "ok": pg_ok, "detail": "Up" if pg_ok else "연결 안 됨",
+                     "container": "saintview-db"})
 
     # 5) 애플리케이션 DB (현재 엔진) — SELECT 1
     try:
@@ -992,3 +995,51 @@ def purge(body: PurgeBody, db: Session = Depends(get_db),
     finally:
         client.close()
     return {"ok": True, "deleted": deleted, "orthanc_removed": orthanc_removed}
+
+
+# ════════════════════════════ 백엔드 프로세스 자체 제어 (restart|stop) ════════════════════════════
+class ServerControlBody(BaseModel):
+    action: str  # restart | stop
+
+
+@router.post("/server-control")
+def server_control(body: ServerControlBody, db: Session = Depends(get_db),
+                   user: dict = Depends(require_perm("server.manage"))):
+    """백엔드 API 프로세스 강제 재시작/중지 — 분리된 cmd 가 2초 뒤 수행(이 응답은 정상 반환).
+
+    restart: 현재 PID 종료 후 동일 인터프리터·인자로 uvicorn 재기동(환경변수 상속).
+    stop: 종료만 — 웹 UI 도 함께 내려가므로 재기동은 바탕화면 [Saintview PACS 시작] 아이콘 사용.
+    """
+    import os
+    import subprocess
+
+    if body.action not in ("restart", "stop"):
+        raise HTTPException(status_code=400, detail="action은 restart|stop")
+    if os.name != "nt":
+        raise HTTPException(status_code=501, detail="Windows 서버에서만 지원됩니다")
+    pid = os.getpid()
+    backend_dir = Path(__file__).resolve().parents[2]
+    bat = backend_dir / "server_restart.bat"
+    if not bat.is_file():
+        raise HTTPException(status_code=500, detail="server_restart.bat 이 없습니다 (backend 폴더)")
+    # ⚠ 자식 프로세스(cmd 분리 실행)는 부모 Job 정리에 함께 종료될 수 있어 신뢰 불가 —
+    #   작업 스케줄러(schtasks) 일회성 작업으로 실행하면 스케줄러 서비스 소속이라 확실히 살아남는다.
+    (backend_dir / "restart.pid").write_text(str(pid), encoding="ascii")
+    # 감사 로그는 프로세스가 죽기 전에 커밋
+    db.add(AuditLog(account_id=user.get("uid"), action="server_control",
+                    target_type="server", target_id=body.action, detail={"pid": pid}))
+    db.commit()
+    no_win = subprocess.CREATE_NO_WINDOW
+    cr = subprocess.run(
+        ["schtasks", "/create", "/f", "/tn", "SaintviewServerControl",
+         "/tr", f'"{bat}" {body.action}', "/sc", "once", "/st", "23:59"],
+        capture_output=True, text=True, timeout=30, creationflags=no_win)
+    if cr.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"작업 등록 실패: {(cr.stderr or cr.stdout).strip()[:120]}")
+    rn = subprocess.run(["schtasks", "/run", "/tn", "SaintviewServerControl"],
+                        capture_output=True, text=True, timeout=30, creationflags=no_win)
+    if rn.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"작업 실행 실패: {(rn.stderr or rn.stdout).strip()[:120]}")
+    return {"ok": True, "action": body.action,
+            "detail": "2초 후 수행됩니다" + (" — 잠시 후 자동 재접속" if body.action == "restart" else
+                                         " — 재기동은 바탕화면 아이콘(saintview_recover.bat) 사용")}

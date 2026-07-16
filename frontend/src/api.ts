@@ -648,6 +648,22 @@ export const api = {
   // ── 인프라 (시스템 구조도 — InfraPanel 로컬 fetch 와 동일 계약 /api/infra/hospitals) ──
   /** 병원별 Orthanc 컨테이너 현황 — state/ports/aet (미프로비저닝=entry null → 공유 Orthanc 폴백) */
   infraHospitals: () => req<InfraHospitalsRes>("/api/infra/hospitals"),
+  /** 메인 컨테이너(saintview-*) 개별 제어 — start|stop|restart */
+  infraContainerAction: (name: string, action: "start" | "stop" | "restart") =>
+    req<{ ok: boolean; detail: string }>(`/api/infra/containers/${encodeURIComponent(name)}/action`,
+      { method: "POST", body: JSON.stringify({ action }) }),
+  /** 병원(자식) 컨테이너 제어 — start|stop|restart */
+  infraHospitalAction: (hid: number, action: "start" | "stop" | "restart") =>
+    req<{ ok: boolean; detail: string }>(`/api/infra/hospitals/${hid}/action`,
+      { method: "POST", body: JSON.stringify({ action }) }),
+  /** 메인 docker 스택(db·orthanc·ohif) 일괄 제어 — 부모 컨테이너 On/Off */
+  infraMainAction: (action: "start" | "stop" | "restart") =>
+    req<{ ok: boolean; detail: string }>("/api/infra/main/action",
+      { method: "POST", body: JSON.stringify({ action }) }),
+  /** 백엔드 API 프로세스 자체 재시작/중지 (Windows 서버측 분리 실행) */
+  serverControl: (action: "restart" | "stop") =>
+    req<{ ok: boolean; detail: string }>("/api/admin/server-control",
+      { method: "POST", body: JSON.stringify({ action }) }),
 
   // ── Local Server 모드 (레인 F/B 공통 계약 /api/local — 서버 Orthanc/DB 와 완전 분리) ──
   /** 로컬 루트(server.network.local_share_dir) 하위 DB/Image/Temp 폴더 구조 생성(멱등) */
@@ -990,6 +1006,7 @@ export interface ServiceStatus {
   ok: boolean;
   detail: string;
   manage?: string;    // 관리 UI 링크(있으면)
+  container?: string; // docker 컨테이너 이름(있으면 시작/중지/재시작 제어 가능)
 }
 export interface ServerStatusAll {
   services: ServiceStatus[];

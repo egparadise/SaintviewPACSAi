@@ -124,6 +124,20 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
     if (alive.current) setLoadedAt(new Date());
   }, []);
 
+  /** 서버 강제 제어(부모 스택·백엔드·병원 컨테이너) — 확인 후 실행, 완료 시 상태 재로드 */
+  const ctl = async (e: React.MouseEvent, label: string,
+                     fn: () => Promise<{ ok: boolean; detail?: string }>, warn?: string) => {
+    e.stopPropagation();   // 병원 박스 클릭(탭 이동)과 분리
+    if (!window.confirm(`${label} — 진행할까요?${warn ? `\n\n⚠ ${warn}` : ""}`)) return;
+    setProgress(`⏳ ${label} 중…`);
+    try {
+      const r = await fn();
+      setProgress(r.ok ? `✅ ${label} 요청됨` : `⚠ ${r.detail ?? label + " 실패"}`);
+    } catch (err) { setProgress("⚠ " + (err as Error).message); }
+    setTimeout(loadAll, 2500);
+  };
+  const ctlBtnStyle: React.CSSProperties = { padding: "1px 7px", fontSize: 11 };
+
   // 마운트 로드 + 60초 자동 갱신(echo 제외) — unmount 시 정리
   useEffect(() => {
     loadAll();
@@ -221,7 +235,7 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
 
       {/* ══ 부모 컨테이너 — Admin System ══ */}
       <div style={parentBox}>
-        {/* 헤더: 설정값 + 상태등 */}
+        {/* 헤더: 설정값 + 상태등 + 부모 서버 강제 제어 */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 Admin System — 부모 컨테이너</div>
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
@@ -229,6 +243,18 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
               {net.name || "이름 미설정"} · 진입점 <code>{net.ip || "?"}:{net.port || "9000"}</code>
               &nbsp;· AE <code>{net.ae_title || "SAINTVIEW_AI"}</code> · DICOM Port <code>{net.dicom_port || "4242"}</code>
             </> : "설정 불러오는 중…"}
+          </span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
+            <button style={ctlBtnStyle} title="메인 docker 스택(DB·Orthanc·OHIF) 전체 시작"
+                    onClick={(e) => ctl(e, "부모 스택 전체 시작", () => api.infraMainAction("start"))}>▶ 전체 시작</button>
+            <button style={ctlBtnStyle} title="메인 docker 스택 전체 재시작"
+                    onClick={(e) => ctl(e, "부모 스택 전체 재시작", () => api.infraMainAction("restart"))}>⟳ 재시작</button>
+            <button style={ctlBtnStyle} title="메인 docker 스택 전체 중지 — DB 중지 시 프로그램 전체가 동작하지 않습니다"
+                    onClick={(e) => ctl(e, "부모 스택 전체 중지", () => api.infraMainAction("stop"),
+                                        "DB·Orthanc·OHIF 가 모두 내려갑니다 — 프로그램이 동작하지 않게 됩니다")}>■ 전체 중지</button>
+            <button style={ctlBtnStyle} title="백엔드 API 프로세스 재시작 (약 5초 순단 후 자동 재접속)"
+                    onClick={(e) => ctl(e, "백엔드 재시작", () => api.serverControl("restart"),
+                                        "재시작 동안 몇 초간 접속이 끊깁니다")}>⟳ 백엔드</button>
           </span>
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -273,6 +299,18 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
                   <span style={{ fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     🏥 {h.name || h.code} <span style={{ color: "var(--text-secondary)", fontWeight: 400 }}>#{h.id}</span>
                   </span>
+                  {/* 자식 서버 강제 On/Off — 프로비저닝된 병원 컨테이너만 (클릭 시 탭 이동 방지) */}
+                  {provisioned && (
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
+                      <button style={ctlBtnStyle} title={`${inf!.entry!.container} 시작`}
+                              onClick={(e) => ctl(e, `${h.name || h.code} 컨테이너 시작`, () => api.infraHospitalAction(h.id, "start"))}>▶</button>
+                      <button style={ctlBtnStyle} title={`${inf!.entry!.container} 재시작`}
+                              onClick={(e) => ctl(e, `${h.name || h.code} 컨테이너 재시작`, () => api.infraHospitalAction(h.id, "restart"))}>⟳</button>
+                      <button style={ctlBtnStyle} title={`${inf!.entry!.container} 중지`}
+                              onClick={(e) => ctl(e, `${h.name || h.code} 컨테이너 중지`, () => api.infraHospitalAction(h.id, "stop"),
+                                                  "이 병원의 DICOM 수신·조회가 중단됩니다")}>■</button>
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
                   {provisioned ? <>
