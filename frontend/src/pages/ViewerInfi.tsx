@@ -2182,7 +2182,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const shownUids = new Set(panes.map((p) => p.series?.series_uid).filter(Boolean) as string[]);
   const selUids = new Set([...selPanes].map((i) => panes[i]?.series?.series_uid)
     .filter(Boolean) as string[]);
-  const activeUid = panes[active]?.series?.series_uid;
+  // 현재 표시 이미지의 '원본' 시리즈 — Combine 결합본이면 스크롤 중인 인스턴스의 원 시리즈를 추적
+  const _ap = panes[active];
+  const _ai = _ap?.series?.instances[_ap.index];
+  const activeUid = _ai?.series_uid ?? _ap?.series?.series_uid;
   const thumbBorder = (uid: string, fallback: string) =>
     selUids.has(uid) ? `2px solid ${selColor}`
       : uid === activeUid ? "2px solid #4ade80"

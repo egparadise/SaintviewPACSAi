@@ -2961,6 +2961,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     () => thumbSeries.flatMap((s) => s.instances.map((i, idx) => ({ s, i, idx }))),
     [thumbSeries],
   );
+  // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
+  const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
+  const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
+
   const thumbs = thumbOpen && (
     <div style={{
       display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 4, padding: 4,
@@ -3009,7 +3013,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                }}
                onDoubleClick={() => patch(activePane, { ...initPane(uidOfSeries(s.series_uid)), series: s, index: Math.floor(s.instances.length / 2) })}
                title={`${s.series_desc || s.modality}\n· 드래그 → 원하는 페인에 놓으면 그 페인에 표시\n· 더블클릭: 활성 페인 로드 (Ctrl=페인 선택 토글 · Shift=범위 선택)`}
-               style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)" : "1px solid var(--border)",
+               style={{ border: selSeries === s.series_uid ? "2px solid var(--accent)"
+                          : s.series_uid === curOriginUid ? "2px solid #4ade80"   // 현재 표시 중(Combine 스크롤 추적)
+                          : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
             {s.instances[Math.floor(s.instances.length / 2)] && (
               <img src={s.instances[Math.floor(s.instances.length / 2)].preview_url} alt=""
@@ -3036,7 +3042,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   <img src={inst.preview_url} alt="" title={`Img ${inst.instance_number}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""}`}
                        onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                        style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
-                                border: panes[activePane].series?.series_uid === s.series_uid && panes[activePane].index === idx
+                                border: inst.sop_uid === curInstAP?.sop_uid
+                                  ? "2px solid #4ade80"   // 현재 표시 이미지(Combine 포함)
+                                  : panes[activePane].series?.series_uid === s.series_uid && panes[activePane].index === idx
                                   ? "2px solid var(--anno-keyimage)"
                                   : keyMarks.has(inst.sop_uid) ? "2px solid rgba(250,204,21,0.9)" : "1px solid var(--border)" }} />
                   {/* 키이미지 — 우상단 🔑 미니 배지(뷰어 KEY 마크와 동기) */}
@@ -3054,7 +3062,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           <img src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}${keyMarks.has(i.sop_uid) ? " · 🔑 KEY" : ""}`}
                onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
-                        border: keyMarks.has(i.sop_uid) ? "2px solid rgba(250,204,21,0.9)" : "1px solid var(--border)" }} />
+                        border: i.sop_uid === curInstAP?.sop_uid ? "2px solid #4ade80"
+                              : keyMarks.has(i.sop_uid) ? "2px solid rgba(250,204,21,0.9)" : "1px solid var(--border)" }} />
           {/* 키이미지 — 우상단 🔑 미니 배지(뷰어 KEY 마크와 동기) */}
           {keyMarks.has(i.sop_uid) && (
             <div style={{ position: "absolute", top: 1, right: 1, padding: "0 3px", borderRadius: 5, pointerEvents: "none",
