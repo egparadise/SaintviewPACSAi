@@ -201,7 +201,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     always_report_window: false, phrase_backup_min: 10,
     open_next_after_save: false, save_alert: false, auto_insert_prior: false,
     cvr_notice: false, sidebar_tab: "history", panel_tab: "shortcut",
-    insert_pos: "end", key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A",
+    insert_pos: "end", key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A", key_mic: "Ctrl+M",
   });
   // 뷰어 닫기 동작 (닫기 다이얼로그 "기본으로" 체크와 동일 설정)
   const [closeMode, setCloseMode] = useState<"ask" | "save_current" | "save_all" | "discard">("ask");
@@ -958,7 +958,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </Group>
                     <Group title="시스템 단축키" right={
                       <button style={{ padding: "1px 8px", fontSize: 11 }}
-                              onClick={() => setRdOpts((p) => ({ ...p, key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A" }))}>
+                              onClick={() => setRdOpts((p) => ({ ...p, key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A", key_mic: "Ctrl+M" }))}>
                         기본값으로 초기화
                       </button>
                     }>
@@ -969,6 +969,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       <Row label="리포트 승인">
                         <KeyCaptureInput value={String(rdOpts.key_approve ?? "Ctrl+Shift+A")}
                                          onChange={(v) => setRdOpts((p) => ({ ...p, key_approve: v }))} />
+                      </Row>
+                      <Row label="음성 판독 (STT) 토글">
+                        <KeyCaptureInput value={String(rdOpts.key_mic ?? "Ctrl+M")}
+                                         onChange={(v) => setRdOpts((p) => ({ ...p, key_mic: v }))} />
                       </Row>
                       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                         옵션·단축키는 OK(저장) 시 계정에 저장(로밍) — 뷰어 판독 창에 즉시 적용됩니다.

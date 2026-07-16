@@ -35,7 +35,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   // Setting>판독(Reading) 옵션 — report.prefs
   const [rdOpts, setRdOpts] = useState<{
     cvr_notice?: boolean; save_alert?: boolean; panel_tab?: string; sidebar_tab?: string;
-    insert_pos?: string; key_save?: string; key_approve?: string;
+    insert_pos?: string; key_save?: string; key_approve?: string; key_mic?: string;
   }>({});
   // 유효 권한(perm/me, 레인 W) — report.write 없으면 Reading/Conclusion readOnly + Save/Approve 비활성(조회 가능).
   // 서버가 403 을 강제하므로 이 게이트는 UX(사전 안내) 목적. 로드 실패=null → 전 기능 허용 폴백
@@ -198,12 +198,14 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   const dockSaveRef = useRef(dockSave); dockSaveRef.current = dockSave;
   const dockApproveRef = useRef(dockApprove); dockApproveRef.current = dockApprove;
   const dockInsertRef = useRef(dockInsert); dockInsertRef.current = dockInsert;
+  const dictToggleRef = useRef(dictation.toggle); dictToggleRef.current = dictation.toggle;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { rdOpts: o, dockPhrases: ph } = dockKeysRef.current;
       const combo = comboOf(e);
       if (combo === (o.key_save ?? "Ctrl+S")) { e.preventDefault(); void dockSaveRef.current(); return; }
       if (combo === (o.key_approve ?? "Ctrl+Shift+A")) { e.preventDefault(); void dockApproveRef.current(); return; }
+      if (combo === (o.key_mic ?? "Ctrl+M")) { e.preventDefault(); dictToggleRef.current(); return; }
       if (e.altKey && !e.ctrlKey && e.key.length === 1) {
         const hit = ph.find((p) => p.kind === "phrase" && p.shortcut === e.key.toUpperCase());
         if (hit) { e.preventDefault(); dockInsertRef.current(hit); }

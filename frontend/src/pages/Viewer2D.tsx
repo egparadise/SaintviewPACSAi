@@ -3197,6 +3197,33 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         break;
       case "save": void saveAnnos(); break;
       case "refresh": act("rfsh"); break;
+      case "img_first": patch(activePane, { index: 0 }); break;
+      case "img_last": {
+        const pl = panes[activePane]?.series?.instances.length ?? 0;
+        if (pl > 0) patch(activePane, { index: pl - 1 });
+        break;
+      }
+      case "rotate_l": act("rotL"); break;
+      case "flip_h": act("flipH"); break;
+      case "flip_v": act("flipV"); break;
+      case "reset": act("reset"); break;
+      case "zoom_in": updMany(targetsOf(activePane), (p) => ({ zoom: Math.min(20, p.zoom * 1.2) })); break;
+      case "zoom_out": updMany(targetsOf(activePane), (p) => ({ zoom: Math.max(0.2, p.zoom * 0.8) })); break;
+      case "maximize": setMaximized((m) => (m === null ? activePane : null)); break;
+      case "overlay": toggleOverlay(); break;
+      case "combine": act("comb"); break;
+      case "key_image": void toggleKeyImage(); break;
+      case "capture": act("capture"); break;
+      case "print": act("print"); break;
+      case "report_open":
+        void (async () => {
+          const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
+          const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
+          const features = await screenFeatures(mon != null && mon >= 0 ? [mon] : null, "width=980,height=800");
+          window.open(`${window.location.origin}${window.location.pathname}?report=1&study=${detail.id}`, "sv_report", features);
+        })();
+        break;
+      case "m_scroll": setMouseMode("scroll"); break;
       case "m_select": setMouseMode("select"); break;
       case "m_zoom": setMouseMode("zoom"); break;
       case "m_pan": setMouseMode("pan"); break;
