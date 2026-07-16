@@ -700,6 +700,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => { panesRef.current = panes; }, [panes]);
   const annosRef = useRef(annos);
   useEffect(() => { annosRef.current = annos; }, [annos]);
+  // 저장 기준선 — 서버에 저장된 주석의 JSON 집합. 툴 Off/Rfsh 시 '미저장 작업'만 지우는 판별 기준.
+  // Save 성공 시 현재 상태로 갱신(그 시점이 새 초기 상태), 로드 시 서버 주석으로 초기화.
+  const savedAnnosRef = useRef<Set<string>>(new Set());
+  const isSavedAnno = (a: Anno) => savedAnnosRef.current.has(JSON.stringify(a));
   const histRef = useRef<Snap[]>([]);
   const histIdx = useRef(-1);
   const [histTick, setHistTick] = useState(0);
@@ -908,7 +912,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       window.setTimeout(pushHist, 300);   // TY-3(1): 로드 완료 후 초기 스냅샷
     }).catch(() => setStatus("시리즈 조회 실패"));
     // 리포트/상용구/판독설정 로드는 ReportDock 내부로 이동 (detail.id 변경 시 자체 재로드)
-    api.annotations(detail.id).then((r) => { setAnnos(r.items); schedHist(); }).catch(() => {});
+    api.annotations(detail.id).then((r) => {
+      setAnnos(r.items);
+      savedAnnosRef.current = new Set(r.items.map((a) => JSON.stringify(a)));  // 서버 주석 = 저장 기준선
+      schedHist();
+    }).catch(() => {});
     return () => {
       // 검사 전환/언마운트 — 전역 시네 정지 시 ref·표시 상태까지 재정렬(재생 버튼 잔상 방지)
       if (cineRef.current) { window.clearInterval(cineRef.current); cineRef.current = null; }
@@ -1084,7 +1092,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const ns = imgSeries.find((s) => s.series_uid === p.series!.series_uid);
         return [k, ns ? { ...p, series: ns, index: Math.min(p.index, ns.instances.length - 1) } : p];
       })));
-      setStatus("Refresh Exam — 활성 검사 시리즈를 재조회했습니다");
+      // Rfsh 라이프사이클 — 기능 툴 전부 Off + 미저장 작업 삭제(저장 기준선 복원). ◀ 이전으로 저장 전까지 복원 가능
+      setTool(null); setDraft(null); setSelAnno(null); setSelAnnos(null);
+      const unsaved = annosRef.current.filter((a) => !isSavedAnno(a)).length;
+      if (unsaved > 0) {
+        setAnnos((prev) => prev.filter((a) => isSavedAnno(a)));
+        schedHist();
+      }
+      setStatus(`Refresh Exam — 시리즈 재조회${unsaved ? ` · 미저장 작업 ${unsaved}건 삭제(◀ 이전으로 복원)` : ""}`);
     } catch { setStatus("Refresh Exam 실패"); }
   };
 
@@ -1341,6 +1356,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const drop = new Set(sel);
     setAnnos((prev) => prev.filter((_, i) => !drop.has(i)));
     setSelAnnos(null); setSelAnno(null);
+    setTool(null); setDraft(null);   // 삭제 시 기능 툴 Off (◀ 이전으로 복원 가능)
     schedHist();
     setStatus(`선택한 ${sel.length}개 주석을 지웠습니다`);
     return true;
@@ -1415,6 +1431,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (!selAnno) return;
     setAnnos((prev) => prev.filter((_, i) => i !== selAnno.idx));
     setSelAnno(null);
+    setTool(null); setDraft(null);   // 삭제 시 기능 툴 Off (◀ 이전으로 복원 가능)
     schedHist();
   };
 
@@ -1710,6 +1727,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         };
       }
       await Promise.all([...pstateByExam].map(([id, s]) => api.savePresentation(id, s).catch(() => {})));
+      // 저장 시점 = 새 기준선 — 이후 툴 Off/Rfsh 에도 이 상태는 보존(과거 상태로 되돌려 재저장하면 그때가 새 기준선)
+      savedAnnosRef.current = new Set(annos.map((a) => JSON.stringify(a)));
       setStatus(`주석 ${annos.length}건 + 표시상태 저장됨 (서버) — 재오픈 시 재현`);
     } catch { setStatus("주석 저장 실패"); }
   };
@@ -1722,7 +1741,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       schedHist();
       return;
     }
-    setTool(tool === tk ? null : tk);
+    if (tool === tk) {
+      // 툴 Off — 이 툴로 작업한 '미저장' 주석 삭제(저장분은 유지). ◀ 이전 버튼으로 저장 전까지 복원 가능
+      const dropped = annosRef.current.filter((a) => a.kind === tk && !isSavedAnno(a)).length;
+      if (dropped > 0) {
+        setAnnos((prev) => prev.filter((a) => a.kind !== tk || isSavedAnno(a)));
+        schedHist();
+        setStatus(`${tk} Off — 미저장 작업 ${dropped}건 삭제 (◀ 이전으로 복원, Save 시 보존)`);
+      }
+      setTool(null); setDraft(null);
+      return;
+    }
+    setTool(tk);
     setDraft(null);
   };
 
