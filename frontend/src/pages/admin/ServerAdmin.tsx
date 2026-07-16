@@ -1,5 +1,6 @@
 // 서버 관리(Admin) 1단계 — 가입자 병원 · 계정/역할 · 등록 장비(SCU/SCP)·수신 제어
 import { useEffect, useState } from "react";
+import { showToast } from "../../lib/toast";
 import {
   api,
   type AccountRow,
@@ -178,7 +179,7 @@ export function HospitalsPanel() {
     try {
       if (editId) await api.updateHospital(editId, form);
       else await api.createHospital(form);
-      setForm(null); setEditId(null); setMsg("저장됨"); load();
+      setForm(null); setEditId(null); showToast("저장 되었습니다."); setMsg("저장됨"); load();
     } catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const del = async (h: HospitalRow) => {
@@ -261,7 +262,7 @@ export function UsersPanel() {
       } else {
         await api.createAccount({ username: String(form.username), password: String(form.password), role: String(form.role), hospital_id: hid, display_name: String(form.display_name ?? ""), license_no: String(form.license_no ?? ""), email: String(form.email ?? ""), enabled: form.enabled !== false });
       }
-      setForm(null); setEditId(null); setMsg("저장됨"); load();
+      setForm(null); setEditId(null); showToast("저장 되었습니다."); setMsg("저장됨"); load();
     } catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const del = async (a: AccountRow) => {
@@ -352,7 +353,7 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
     try {
       if (editId) await api.updateModality(editId, body);
       else await api.createModality(body);
-      setForm(null); setEditId(null); setMsg("저장됨"); load();
+      setForm(null); setEditId(null); showToast("저장 되었습니다."); setMsg("저장됨"); load();
     } catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const del = async (m: ModalityRow) => {
@@ -494,7 +495,7 @@ export function StoragePanel() {
 
   const savePolicy = async () => {
     if (!policy) return;
-    try { const p = await api.putBackupPolicy(policy); setPolicy(p); setMsg("백업 정책 저장됨"); loadOv(); }
+    try { const p = await api.putBackupPolicy(policy); setPolicy(p); showToast("저장 되었습니다."); setMsg("백업 정책 저장됨"); loadOv(); }
     catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const run = async () => {

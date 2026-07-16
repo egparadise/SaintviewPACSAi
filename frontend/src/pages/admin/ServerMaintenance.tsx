@@ -1,6 +1,7 @@
 // 서버 유지보수 패널(레인 F) — ①서버 설정(임베드) ②저장 공간 ③백업·미러링 ④복원 ⑤데이터 관리(wipe)
 // 백엔드 계약(/api/maintenance/*)은 레인 B가 병렬 구현 — 미구현 응답은 '⚠ 준비 중' 우아 처리.
 import { useEffect, useState } from "react";
+import { showToast } from "../../lib/toast";
 import {
   api, type HospitalRow, type MaintBackupItem, type MaintBackupPolicy, type MaintRepeat,
   type MaintRestoreResult, type MaintStorage, type PortalStatus, type ServerNetwork,
@@ -64,7 +65,7 @@ export function ServerConfigPanel() {
 
   const save = async () => {
     if (!web) return;
-    try { await persistNetwork(); setMsg("저장됨 (전역 server.network — 뷰어 설정>서버 네트워크와 동일 키)"); }
+    try { await persistNetwork(); showToast("저장 되었습니다."); setMsg("저장됨 (전역 server.network — 뷰어 설정>서버 네트워크와 동일 키)"); }
     catch (e) { setMsg(pendMsg(e)); }
   };
   const saveApply = async () => {
@@ -72,6 +73,7 @@ export function ServerConfigPanel() {
     setBusy(true);
     try {
       await persistNetwork();
+      showToast("저장 되었습니다.");
       const r = await api.portalApply(web.ip, Number(web.port) || 0);
       setPortal(r);
       setMsg(r.running
@@ -148,7 +150,7 @@ export function MaintStoragePanel() {
 
   const savePolicy = async () => {
     if (!policy) return;
-    try { const p = await api.putMaintBackupPolicy(policy); setPolicy(p); setPMsg("저장됨"); load(); }
+    try { const p = await api.putMaintBackupPolicy(policy); setPolicy(p); showToast("저장 되었습니다."); setPMsg("저장됨"); load(); }
     catch (e) { setPMsg(pendMsg(e)); }
   };
 
@@ -235,7 +237,7 @@ export function BackupMirrorPanel() {
 
   const save = async () => {
     if (!policy) return;
-    try { const p = await api.putMaintBackupPolicy(policy); setPolicy(p); setMsg("백업 정책 저장됨"); }
+    try { const p = await api.putMaintBackupPolicy(policy); setPolicy(p); showToast("저장 되었습니다."); setMsg("백업 정책 저장됨"); }
     catch (e) { setMsg(pendMsg(e)); }
   };
   const run = async (kind: "dicom" | "db" | "both") => {

@@ -1,6 +1,7 @@
 // 서버 인사이트 패널(레인 F) — ⑥DB 구조 ⑦가입 환경 설정 ⑧관리자 계정 ⑨시스템 로그 ⑩사용량 통계 ⑪AI 등록
 // 백엔드 계약(/api/insights/*, settings 키)은 레인 B가 병렬 구현 — 미구현 응답은 '⚠ 준비 중' 우아 처리.
 import { useEffect, useRef, useState } from "react";
+import { showToast } from "../../lib/toast";
 import {
   api, downloadLogsCsv, downloadStatsXlsx, sttStatus, sttTranscribe,
   type AiProvider, type DbSchemaResp, type LogItem,
@@ -34,7 +35,7 @@ export function DbSchemaPanel() {
   useEffect(() => { load(); }, []);
 
   const saveTool = async () => {
-    try { await api.putSetting("server.dbtool", { path: toolPath }, "global"); setMsg("DB 도구 경로 저장됨"); }
+    try { await api.putSetting("server.dbtool", { path: toolPath }, "global"); showToast("저장 되었습니다."); setMsg("DB 도구 경로 저장됨"); }
     catch (e) { setMsg(pendMsg(e)); }
   };
   const openTool = async () => {
@@ -154,7 +155,7 @@ function SignupFieldsSection({ kind, title }: { kind: SignupKind; title: string 
   const save = async () => {
     try {
       await api.putSetting(`signup.fields.${kind}`, { fields } as unknown as Record<string, unknown>, "global");
-      setDirty(false); setMsg("저장됨");
+      setDirty(false); showToast("저장 되었습니다."); setMsg("저장됨");
     } catch (e) { setMsg(pendMsg(e)); }
   };
   return (
@@ -582,7 +583,7 @@ export function AiProvidersPanel() {
   const save = async () => {
     try {
       await api.putSetting("ai.providers", { items } as unknown as Record<string, unknown>, "global");
-      setDirty(false); setMsg("저장됨");
+      setDirty(false); showToast("저장 되었습니다."); setMsg("저장됨");
     } catch (e) { setMsg(pendMsg(e)); }
   };
 
@@ -663,7 +664,7 @@ export function SttServerPanel() {
       // 기존 ai.policy 필드 보존 + STT 필드만 갱신 → 전역 저장(stt.py 가 읽는 스코프)
       await api.putSetting("ai.policy", { ...policy, stt_engine: engine, stt_model: model }, "global");
       setPolicy((p) => ({ ...p, stt_engine: engine, stt_model: model }));
-      setDirty(false); setMsg("저장됨 — 모든 병원·Client 에 즉시 적용");
+      setDirty(false); showToast("저장 되었습니다."); setMsg("저장됨 — 모든 병원·Client 에 즉시 적용");
       loadStatus();
     } catch (e) { setMsg(pendMsg(e)); }
   };

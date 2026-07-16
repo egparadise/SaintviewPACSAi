@@ -5,6 +5,7 @@
 //   (①계정·등급 ②권한 매트릭스 ③Modality(SCP) ④병원 설정(SCU) ⑤사용량 ⑥연결 대시보드 ⑦DB·영상 관리
 //    ⑧로그 ⑨통계 ⑩데이터 ⑪연동(HL7·원격판독·MWL·가상환자) ⑫컨테이너(Orthanc))
 import { useEffect, useState } from "react";
+import { showToast } from "../lib/toast";
 import {
   api, setToken, type HospitalNetResult, type HospitalRow, type ServerStatusAll,
 } from "../api";
@@ -58,11 +59,11 @@ function HospitalInfoView({ hid }: { hid: number }) {
   const f = (k: keyof HospitalRow, v: unknown) => setH((p) => p ? { ...p, [k]: v } as HospitalRow : p);
   const save = async () => {
     if (!h) return;
-    try { await api.updateHospital(hid, h); setMsg("저장됨"); } catch (e) { setMsg("⚠ " + (e as Error).message); }
+    try { await api.updateHospital(hid, h); showToast("저장 되었습니다."); setMsg("저장됨"); } catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const test = async () => {
     if (!h) return;
-    try { await api.updateHospital(hid, h); setNet(await api.hospitalNetTest(hid)); }
+    try { await api.updateHospital(hid, h); showToast("저장 되었습니다."); setNet(await api.hospitalNetTest(hid)); }
     catch (e) { setMsg("⚠ " + (e as Error).message); }
   };
   const epLabel = (e: { tcp: boolean | null; echo: boolean | null; detail?: string }) =>

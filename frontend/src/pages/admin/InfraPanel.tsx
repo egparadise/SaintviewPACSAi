@@ -1,6 +1,7 @@
 // 인프라 패널(레인 O) — ① OHIF 뷰어 관리 ② saintview-* 컨테이너 ③ 병원별 Orthanc 프로비저닝 ④ DDNS
 // 백엔드 계약: /api/infra/* (api/infra.py). fetch 는 api.ts 공용 panelFetch 사용(통합 단계 승격 — 동작 무변경).
 import { useCallback, useEffect, useState } from "react";
+import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
 
 // ── 공용 헬퍼 위임 — 오류 문구는 기존 형식(`상태 · 상세` / `상태 상태문구`) 유지(= panelFetch 기본값) ──
@@ -266,7 +267,7 @@ export function DdnsSection() {
     try {
       const r = await ifetch<{ config: DdnsConfig }>("/api/infra/ddns", { method: "PUT", body: JSON.stringify(cfg) });
       setCfg(r.config);
-      setMsg("저장됨" + (cfg.enabled ? " — 주기 갱신 활성" : ""));
+      showToast("저장 되었습니다."); setMsg("저장됨" + (cfg.enabled ? " — 주기 갱신 활성" : ""));
     } catch (e) { setMsg(errMsg(e)); }
   };
   const updateNow = async () => {

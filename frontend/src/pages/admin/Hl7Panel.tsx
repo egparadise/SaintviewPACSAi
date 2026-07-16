@@ -2,6 +2,7 @@
 // ① HL7 설정 + inbox/outbox 표·재처리 ② 원격판독 설정 + 최근 수신 ③ MWL 설정 + 상태 ④ 가상환자 생성
 // 백엔드는 /api/hl7/* (app/api/hl7.py). fetch 는 api.ts 공용 panelFetch 사용(통합 단계 승격 — 동작 무변경).
 import { useCallback, useEffect, useState } from "react";
+import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
 import { OrderEntryRis, OrderList, type RisExam, type RisPatient } from "../../components/OrderEntryRis";
 
@@ -91,7 +92,7 @@ export function Hl7ConfigSection({ hid }: { hid: number }) {
           oru_retry_max: Number(cfg.retryMax) || 3,
         },
       });
-      setMsg("저장됨 (병원 스코프 hl7.config)");
+      showToast("저장 되었습니다."); setMsg("저장됨 (병원 스코프 hl7.config)");
     } catch (e) { setMsg(errMsg(e)); }
   };
   const listenerRunning = cfg ? listeners.some((l) => l.port === Number(cfg.port)) : false;
@@ -211,7 +212,7 @@ export function RemoteReadingSection({ hid }: { hid: number }) {
     if (!cfg) return;
     try {
       await PUT(`/api/hl7/hospitals/${hid}/config/remote.reading`, { value: { enabled: cfg.enabled, api_key: cfg.apiKey } });
-      setMsg("저장됨 — 외부 원격판독사는 POST /api/hl7/remote-report 에 이 키로 판독문을 입력합니다");
+      showToast("저장 되었습니다."); setMsg("저장됨 — 외부 원격판독사는 POST /api/hl7/remote-report 에 이 키로 판독문을 입력합니다");
     } catch (e) { setMsg(errMsg(e)); }
   };
   const genKey = () => {
@@ -278,7 +279,7 @@ export function MwlSection({ hid }: { hid: number }) {
       await PUT(`/api/hl7/hospitals/${hid}/config/mwl.config`, {
         value: { enabled: cfg.enabled, port: Number(cfg.port) || 0, aet: cfg.aet, registered_only: cfg.registeredOnly },
       });
-      setMsg("저장됨 (병원 스코프 mwl.config)");
+      showToast("저장 되었습니다."); setMsg("저장됨 (병원 스코프 mwl.config)");
     } catch (e) { setMsg(errMsg(e)); }
   };
   const toggle = async () => {
@@ -350,7 +351,7 @@ export function TestgenSection({ hid }: { hid: number }) {
           age_min: Number(cfg.ageMin) || 20, age_max: Number(cfg.ageMax) || 80,
         },
       });
-      setMsg("생성 규칙 저장됨 (testgen.config)");
+      showToast("저장 되었습니다."); setMsg("생성 규칙 저장됨 (testgen.config)");
     } catch (e) { setMsg(errMsg(e)); }
   };
 

@@ -2,6 +2,7 @@
 // 백엔드 /api/security/* (api/security.py). fetch 는 api.ts 공용 panelFetch 사용(통합 단계 승격 — 동작 무변경).
 // 전부 방어적(탐지·설정·경고) 기능 — 자동 차단 없음.
 import { useEffect, useState } from "react";
+import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
 
 // ── 공용 헬퍼 위임 — 오류 문구는 기존 형식(상세만, 없으면 상태코드) 유지 ──
@@ -89,7 +90,7 @@ export function SecurityPanel() {
       const r = await req<{ ok: boolean; value: Policy; warning: string }>(
         "/api/security/policy", { method: "PUT", body: JSON.stringify({ value }) });
       setPolicy(r.value);
-      setPMsg(r.warning ? r.warning : "저장됨 (security.policy — 전역)");
+      showToast("저장 되었습니다."); setPMsg(r.warning ? r.warning : "저장됨 (security.policy — 전역)");
       load();
     } catch (e) { setPMsg("⚠ " + (e as Error).message); }
   };

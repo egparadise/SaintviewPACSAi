@@ -2,6 +2,7 @@
 // ① 계정(등급) ② 권한 매트릭스 ③ Modality(SCP) ④ 병원 설정(SCU) ⑤ 사용량 ⑥ 연결 대시보드 ⑦ DB·영상 관리
 // 백엔드 계약(usage/perm-matrix/modalities/scu/admin-action)은 레인 B가 병렬 구현 — 계약 기준 코딩.
 import { useEffect, useRef, useState, useCallback } from "react";
+import { showToast } from "../../lib/toast";
 import {
   api, type ClientRow, type HospitalRow, type HospitalScu, type HospitalUsage,
   type ModalityNode, type PermMatrixResp, type StudyAdminActionKind, type StudyRow,
@@ -220,7 +221,7 @@ export function PermMatrixTab({ hid }: { hid: number }) {
     setDirty(true);
   };
   const save = async () => {
-    try { const r = await api.putPermMatrix(hid, matrix); setData(r); setMatrix(r.matrix); setDirty(false); setMsg("저장됨 — 등급별 유효 권한에 즉시 반영"); }
+    try { const r = await api.putPermMatrix(hid, matrix); setData(r); setMatrix(r.matrix); setDirty(false); showToast("저장 되었습니다."); setMsg("저장됨 — 등급별 유효 권한에 즉시 반영"); }
     catch (e) { setMsg(errMsg(e)); }
   };
   const restore = () => { setMatrix(DEFAULT_MATRIX); setDirty(true); setMsg("기본값 적용됨 — [저장]을 눌러 반영하세요"); };
@@ -295,7 +296,7 @@ export function HospitalModalityTab({ hid }: { hid: number }) {
     setDirty(true);
   };
   const save = async () => {
-    try { const r = await api.putHospitalModalities(hid, items); setItems(r.items); setDirty(false); setMsg("저장됨"); }
+    try { const r = await api.putHospitalModalities(hid, items); setItems(r.items); setDirty(false); showToast("저장 되었습니다."); setMsg("저장됨"); }
     catch (e) { setMsg(errMsg(e)); }
   };
   const test = async (i: number, mode: "ping" | "echo") => {
@@ -369,7 +370,7 @@ export function ScuTab({ hid }: { hid: number }) {
 
   const save = async () => {
     if (!scu) return;
-    try { const r = await api.putHospitalScu(hid, { ...scu, port: Number(scu.port) }); setScu(r); setMsg("저장됨 (병원명·AE는 병원 정보에도 반영)"); }
+    try { const r = await api.putHospitalScu(hid, { ...scu, port: Number(scu.port) }); setScu(r); showToast("저장 되었습니다."); setMsg("저장됨 (병원명·AE는 병원 정보에도 반영)"); }
     catch (e) { setMsg(errMsg(e)); }
   };
   const row = (label: string, node: React.ReactNode) => (
@@ -864,7 +865,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
         </div>
         <button className="primary" style={{ fontSize: 12 }}
                 onClick={async () => {
-                  try { await api.hospImageFormatPut(hid, fmt); setMsg("전송 형식 저장됨 — 뷰어 재접속/새로고침 시 적용"); }
+                  try { await api.hospImageFormatPut(hid, fmt); showToast("저장 되었습니다."); setMsg("전송 형식 저장됨 — 뷰어 재접속/새로고침 시 적용"); }
                   catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
                 }}>형식 저장</button>
       </fieldset>
@@ -898,7 +899,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
         </SRow>
         <button className="primary" style={{ fontSize: 12 }}
                 onClick={async () => {
-                  try { await api.hospStoragePolicyPut(hid, pol); setMsg("정책 저장됨"); reload(); }
+                  try { await api.hospStoragePolicyPut(hid, pol); showToast("저장 되었습니다."); setMsg("정책 저장됨"); reload(); }
                   catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
                 }}>정책 저장</button>
       </fieldset>
