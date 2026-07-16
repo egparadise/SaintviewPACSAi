@@ -1533,6 +1533,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   };
 
   const onPaneMouseDown = (e: React.MouseEvent, i: number) => {
+    // 우클릭 — mousedown 전파 차단: Linkclump 류 브라우저 확장이 document 레벨에서 우드래그를
+    // 가로채 빨간 링크선택 박스를 그리는 것을 방지(우리 드래그는 window/자체 리스너라 무영향)
+    if (e.button === 2) { e.preventDefault(); e.stopPropagation(); }
     if (e.shiftKey) {
       // 처음(첫 페인)부터 클릭한 페인까지 순서대로 범위 선택
       setSelPanes(new Set(Array.from({ length: i + 1 }, (_, k) => k)));

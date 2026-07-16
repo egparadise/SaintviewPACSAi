@@ -1328,6 +1328,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (mouseMode === "select") { startMarquee(pid, e); return; }
     }
     if (ctxMenu) setCtxMenu(null);   // 메뉴 열려 있으면 먼저 닫음
+    // 우클릭 드래그(W/L) — mousedown 전파 차단: Linkclump 류 브라우저 확장이 document 레벨에서
+    // 우드래그를 가로채 빨간 링크선택 박스를 그리는 것을 방지(우리 드래그는 window 리스너라 무영향)
+    if (e.button === 2) { e.preventDefault(); e.stopPropagation(); }
     dragRef.current = { pid, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, moved: false, shift: e.shiftKey };
   };
 
