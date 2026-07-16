@@ -84,10 +84,12 @@ export async function buildVolumeImageIds(studyUid: string): Promise<string[]> {
 
 // ── 병원별 클라이언트 영상 전송 형식(관리자 설정) — rendered 호출에 accept/quality 파라미터 부여 ──
 // default=서버 기본(JPEG) / png=무손실 표시 / jpeg=품질 지정(저대역 원격 최적화)
-let IMG_FMT: { format: string; quality: number } = { format: "default", quality: 90 };
-export function setImageFormat(f: { format?: string; quality?: number }): void {
-  IMG_FMT = { format: f.format ?? "default", quality: f.quality ?? 90 };
+let IMG_FMT: { format: string; quality: number; wado_ts?: string } = { format: "default", quality: 90, wado_ts: "" };
+export function setImageFormat(f: { format?: string; quality?: number; wado_ts?: string }): void {
+  IMG_FMT = { format: f.format ?? "default", quality: f.quality ?? 90, wado_ts: f.wado_ts ?? "" };
 }
+/** 원본 픽셀 전송(3D·정밀) 전송구문 — ""=원본 그대로 */
+export function getWadoTs(): string { return IMG_FMT.wado_ts ?? ""; }
 /** rendered URL 뒤에 붙일 형식 파라미터 — hasQuery: 이미 ?window= 등이 있는지 */
 export function renderedParams(hasQuery: boolean): string {
   const sep = hasQuery ? "&" : "?";

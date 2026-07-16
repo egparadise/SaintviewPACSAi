@@ -784,7 +784,8 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [msg, setMsg] = useState("");
-  const [fmt, setFmt] = useState({ format: "default", quality: 90 });   // 클라이언트 영상 전송 형식
+  const [fmt, setFmt] = useState({ format: "default", quality: 90, wado_ts: "" });   // 클라이언트 영상 전송 형식
+  const [tsOpts, setTsOpts] = useState<{ uid: string; label: string; supported: boolean }[]>([]);
 
   const reload = useCallback(() => {
     api.hospStorageSummary(hid).then(setSum).catch(() => {});
@@ -794,7 +795,8 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
     reload();
     api.hospStoragePolicy(hid).then((p) => setPol(p)).catch(() => {});
     api.hospStorageCompressions(hid).then((r) => setComps(r.items)).catch(() => {});
-    api.hospImageFormat(hid).then((f) => setFmt({ format: f.format, quality: f.quality })).catch(() => {});
+    api.hospImageFormat(hid).then((f) => setFmt({ format: f.format, quality: f.quality, wado_ts: f.wado_ts ?? "" })).catch(() => {});
+    api.hospImageFormatTsSupport(hid).then((r) => setTsOpts(r.options)).catch(() => {});
   }, [hid, reload]);
 
   const F: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 6, padding: 12, marginBottom: 14 };
@@ -846,6 +848,20 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>50=고압축(빠름) ~ 100=최고화질</span>
           </SRow>
         )}
+        <SRow label="원본 픽셀 전송구문">
+          <select value={fmt.wado_ts} style={{ minWidth: 260 }}
+                  onChange={(e) => setFmt((p2) => ({ ...p2, wado_ts: e.target.value }))}>
+            {tsOpts.map((o) => (
+              <option key={o.uid} value={o.uid} disabled={!o.supported}>
+                {o.label}{o.supported ? "" : " — 서버 Orthanc 미지원"}
+              </option>
+            ))}
+          </select>
+        </SRow>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 8 }}>
+          3D·볼륨 뷰어가 원본 픽셀(16bit)을 받을 때의 압축 전송구문입니다. HTJ2K 는 디코딩이 10배+ 빠르고
+          16bit 를 유지해 판독용에 최적 — 서버 Orthanc 가 지원하면 자동 활성화됩니다(미지원 항목은 비활성 표시).
+        </div>
         <button className="primary" style={{ fontSize: 12 }}
                 onClick={async () => {
                   try { await api.hospImageFormatPut(hid, fmt); setMsg("전송 형식 저장됨 — 뷰어 재접속/새로고침 시 적용"); }

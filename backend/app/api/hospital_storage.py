@@ -22,12 +22,25 @@ router = APIRouter(prefix="/api/hospitals/{hid}/storage", tags=["hospital-storag
 # ── 병원별 클라이언트 영상 전송 형식 — 뷰어가 rendered 호출 시 사용할 포맷/품질 ──
 fmt_router = APIRouter(prefix="/api/hospitals/{hid}", tags=["hospital-imgfmt"])
 
-IMGFMT_DEFAULT = {"format": "default", "quality": 90}   # default=서버 기본(JPEG) / png=무손실 / jpeg=품질 지정
+IMGFMT_DEFAULT = {"format": "default", "quality": 90, "wado_ts": ""}
+# wado_ts: 원본 픽셀 전송(3D·정밀 뷰어) 전송구문 — ""=원본 그대로. Orthanc 트랜스코딩 지원 여부는 프로브로 판정.
+WADO_TS_OPTIONS = [
+    {"uid": "", "label": "기본 (저장된 원본 그대로)"},
+    {"uid": "1.2.840.10008.1.2.1", "label": "비압축 (Explicit VR LE)"},
+    {"uid": "1.2.840.10008.1.2.4.90", "label": "JPEG2000 무손실"},
+    {"uid": "1.2.840.10008.1.2.4.91", "label": "JPEG2000 (손실)"},
+    {"uid": "1.2.840.10008.1.2.4.80", "label": "JPEG-LS 무손실"},
+    {"uid": "1.2.840.10008.1.2.4.70", "label": "JPEG 무손실"},
+    {"uid": "1.2.840.10008.1.2.4.201", "label": "HTJ2K 무손실 (고속 디코딩·16bit)"},
+    {"uid": "1.2.840.10008.1.2.4.202", "label": "HTJ2K RPCL (Progressive)"},
+]
+_TS_SUPPORT: dict[str, bool] = {}   # 프로브 캐시(서버 기동 단위)
 
 
 class ImgFmtBody(BaseModel):
     format: str = "default"   # default | jpeg | png
     quality: int = 90         # jpeg 품질(50~100)
+    wado_ts: str = ""         # 원본 픽셀 전송구문("" = 원본 그대로)
 
 
 @fmt_router.get("/image-format")
@@ -47,7 +60,9 @@ def imgfmt_put(hid: int, body: ImgFmtBody, db: Session = Depends(get_db),
     _require_admin(user, hid)
     if body.format not in ("default", "jpeg", "png"):
         raise HTTPException(status_code=400, detail="format 은 default/jpeg/png 중 하나여야 합니다")
-    merged = {"format": body.format, "quality": max(50, min(100, body.quality))}
+    if body.wado_ts and body.wado_ts not in [o["uid"] for o in WADO_TS_OPTIONS]:
+        raise HTTPException(status_code=400, detail="지원 목록에 없는 전송구문입니다")
+    merged = {"format": body.format, "quality": max(50, min(100, body.quality)), "wado_ts": body.wado_ts}
     from app.services.settings_service import set_setting
 
     set_setting(db, f"viewer.image_format.h{hid}", merged, scope="global")
@@ -55,6 +70,41 @@ def imgfmt_put(hid: int, body: ImgFmtBody, db: Session = Depends(get_db),
                     target_type="setting", target_id=f"viewer.image_format.h{hid}", detail=merged))
     db.commit()
     return merged
+
+
+@fmt_router.get("/image-format/ts-support")
+def imgfmt_ts_support(hid: int, user: dict = Depends(current_user)):
+    """전송구문별 Orthanc 트랜스코딩 지원 여부 — 첫 인스턴스 프레임으로 실측 프로브(기동 단위 캐시)."""
+    if not (user.get("role") == "admin" and not user.get("hid")) and user.get("hid") != hid:
+        raise HTTPException(status_code=403, detail="다른 병원의 설정입니다")
+    global _TS_SUPPORT
+    if not _TS_SUPPORT:
+        from app.dicom.orthanc import OrthancClient
+
+        client = OrthancClient()
+        try:
+            if client.alive():
+                r = client._client.get("/dicom-web/instances?limit=1")  # noqa: SLF001 — 내부 프로브
+                items = r.json() if r.status_code == 200 else []
+                if items:
+                    d = items[0]
+                    stu = d["0020000D"]["Value"][0]
+                    ser = d["0020000E"]["Value"][0]
+                    sop = d["00080018"]["Value"][0]
+                    url = f"/dicom-web/studies/{stu}/series/{ser}/instances/{sop}/frames/1"
+                    for o in WADO_TS_OPTIONS:
+                        if not o["uid"]:
+                            _TS_SUPPORT[""] = True
+                            continue
+                        try:
+                            pr = client._client.get(url, headers={  # noqa: SLF001
+                                "Accept": f'multipart/related; type="application/octet-stream"; transfer-syntax={o["uid"]}'})
+                            _TS_SUPPORT[o["uid"]] = pr.status_code == 200
+                        except Exception:  # noqa: BLE001
+                            _TS_SUPPORT[o["uid"]] = False
+        finally:
+            client.close()
+    return {"options": [{**o, "supported": _TS_SUPPORT.get(o["uid"], False)} for o in WADO_TS_OPTIONS]}
 
 
 def _require_admin(user: dict, hid: int) -> None:

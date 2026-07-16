@@ -33,6 +33,7 @@ import {
   init as toolsInit,
 } from "@cornerstonejs/tools";
 import { init as dicomImageLoaderInit, wadors } from "@cornerstonejs/dicom-image-loader";
+import { getWadoTs } from "../lib/cornerstone";
 
 const DICOMWEB_ROOT = import.meta.env.VITE_DICOMWEB_ROOT ?? "http://localhost:3000/dicom-web";
 
@@ -62,7 +63,15 @@ async function ensureInit() {
   // useNorm16Texture: CT/MR 16비트 픽셀을 저정밀 텍스처로 양자화하지 않도록 — 계조 뭉개짐(banding) 방지
   // 설치된 @cornerstonejs 타입 정의엔 없으나 런타임 옵션은 유효 — 인자 캐스팅으로 타입만 통과
   await csInit({ rendering: { useNorm16Texture: true } } as unknown as Parameters<typeof csInit>[0]);
-  dicomImageLoaderInit();
+  dicomImageLoaderInit({
+    // 병원 설정(wado_ts)이 있으면 프레임 요청 Accept 에 해당 전송구문 지정 — Orthanc 가 트랜스코딩해 전달
+    beforeSend: (_xhr: XMLHttpRequest, imageId: string) => {
+      const ts = getWadoTs();
+      if (ts && imageId.includes("/frames/")) {
+        return { Accept: `multipart/related; type="application/octet-stream"; transfer-syntax=${ts}` };
+      }
+    },
+  } as Parameters<typeof dicomImageLoaderInit>[0]);
   toolsInit();
   addTool(WindowLevelTool);
   addTool(PanTool);

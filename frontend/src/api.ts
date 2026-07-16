@@ -273,8 +273,11 @@ export const api = {
     req<{ uploaded: number; done: boolean; series_uid: string }>(`/api/mobile-capture/${token}/status`),
   // 병원별 뷰어 영상 전송 형식 — rendered 호출 포맷/품질
   hospImageFormat: (hid: number) =>
-    req<{ format: string; quality: number }>(`/api/hospitals/${hid}/image-format`),
-  hospImageFormatPut: (hid: number, body: { format: string; quality: number }) =>
+    req<{ format: string; quality: number; wado_ts?: string }>(`/api/hospitals/${hid}/image-format`),
+  hospImageFormatTsSupport: (hid: number) =>
+    req<{ options: { uid: string; label: string; supported: boolean }[] }>(
+      `/api/hospitals/${hid}/image-format/ts-support`),
+  hospImageFormatPut: (hid: number, body: { format: string; quality: number; wado_ts?: string }) =>
     req(`/api/hospitals/${hid}/image-format`, { method: "PUT", body: JSON.stringify(body) }),
   // 병원별 Storage — 현황/정책/수동백업/이력/보존
   hospStorageSummary: (hid: number) =>
