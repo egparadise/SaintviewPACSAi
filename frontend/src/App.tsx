@@ -14,6 +14,7 @@ import { Landing } from "./pages/Landing";
 import { Signup } from "./pages/Signup";
 import { ClientLogin } from "./pages/ClientLogin";
 import { SessionGuard } from "./pages/SessionGuard";
+import { MobileCapture } from "./pages/MobileCapture";
 import { AdminConsole } from "./pages/AdminConsole";
 
 // 이 오리진의 포털 역할(포트 기반) — 모듈 로드 시 1회 판정
@@ -119,6 +120,10 @@ export default function App() {
     localStorage.setItem("sv_hname", r.hospital_name ?? "");
     setSession({ name: r.username, role: r.role, mode: "client", hospitalId: r.hospital_id ?? null, hospitalName: r.hospital_name ?? "" });
   };
+
+  // 휴대폰 촬영 페이지 — 토큰이 자격증명(로그인 불필요), QR 로 진입
+  const captureToken = new URLSearchParams(window.location.search).get("capture");
+  if (captureToken) return <MobileCapture token={captureToken} />;
 
   // 미인증 — 포털 역할별 강제 라우팅
   if (!session) {

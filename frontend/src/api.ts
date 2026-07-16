@@ -265,6 +265,12 @@ export const api = {
     req<{ ok: boolean; password: string }>(`/api/hospitals/${hid}/clients/${cid}/reset`, { method: "PUT" }),
   resetAllClientPasswords: (hid: number) =>
     req<{ ok: boolean; count: number; password: string }>(`/api/hospitals/${hid}/clients/reset-all`, { method: "POST" }),
+  // 휴대폰 촬영(QR) — 세션 생성/상태 폴링
+  mobileCapture: (studyId: number, origin: string) =>
+    req<{ token: string; url: string; qr: string; expires_in: number }>(
+      `/api/studies/${studyId}/mobile-capture`, { method: "POST", body: JSON.stringify({ origin }) }),
+  mobileCaptureStatus: (token: string) =>
+    req<{ uploaded: number; done: boolean; series_uid: string }>(`/api/mobile-capture/${token}/status`),
   // 병원·계정 설정 백업/복원 — 항목 선택 → JSON export/import
   backupHospital: (hid: number, items: string[]) =>
     req<{ meta: { hospital: string; hospital_id: number; code: string; generated_at: string; version: number; items: string[] }; data: Record<string, unknown> }>(

@@ -22,3 +22,4 @@ openpyxl>=3.1               # 사용량 통계 Excel(.xlsx) 내보내기 (/api/i
 
 # pytesseract>=0.3           # (선택) 번인 OCR 마스킹 — tesseract 바이너리 필요, 미설치 시 스트립 마스킹 폴백
 # faster-whisper>=1.0       # (선택) 음성판독 STT — Whisper 오픈소스 로컬 엔진 (설정>AI 정책 stt_engine=whisper_local)
+qrcode

@@ -18,6 +18,7 @@ from app.api import (
     hospitals,
     localpacs,
     maintenance,
+    mobile,
     management,
     orders,
     phrases,
@@ -103,7 +104,8 @@ app.include_router(management.router)
 app.include_router(signup.router)
 app.include_router(hospitals.router)
 app.include_router(hospital_admin.router)
-app.include_router(backup.router)  # 병원·계정 설정 백업/복원(/api/hospitals/{hid}/backup·restore)
+app.include_router(backup.router)
+app.include_router(mobile.router)  # 휴대폰 사진 촬영(QR) — 검사 새 시리즈 등록  # 병원·계정 설정 백업/복원(/api/hospitals/{hid}/backup·restore)
 app.include_router(settings_api.router)
 app.include_router(orders.router)
 app.include_router(phrases.router)

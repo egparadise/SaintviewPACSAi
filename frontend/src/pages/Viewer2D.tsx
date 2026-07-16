@@ -519,6 +519,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 사용자 단축키(설정>단축키, 계정별) — 액션→키 맵 + 디스패처(함수는 렌더마다 최신화)
   const scKeysRef = useRef<Record<string, string>>({ ...SC_DEFAULTS });
   const scRunRef = useRef<(id: string) => void>(() => {});
+  const refreshExamRef = useRef<null | (() => Promise<void>)>(null);  // 휴대폰 촬영 폴링용
 
   // 3D Cursor 홀드-드래그 — 버튼을 누른 채 움직이면 rAF 스로틀로 연속 재배치(모든 페인 동기 추적)
   const c3DragRef = useRef<{ pid: string } | null>(null);
@@ -1121,6 +1122,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setStatus(`Refresh Exam — 시리즈 재조회${unsaved ? ` · 미저장 작업 ${unsaved}건 삭제(◀ 이전으로 복원)` : ""}`);
     } catch { setStatus("Refresh Exam 실패"); }
   };
+
+  refreshExamRef.current = refreshExam;   // 휴대폰 촬영 폴링에서 최신 참조
 
   /* Combine all — 현재 검사의 (영상)시리즈 전체를 하나의 논리적 시리즈로 결합해 활성 페인에 표시(연속 스크롤).
      INFINITT 'Combine all' 등가: 서버 병합이 아니라 판독 화면 표시 결합. (레이아웃 그리드는 상단 레이아웃 콤보 사용) */
@@ -3108,6 +3111,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 현재 표시 이미지의 원본 시리즈/SOP — Combine 결합본 스크롤 시 썸네일에서 위치 추적용
   const curInstAP = panes[activePane]?.series?.instances[panes[activePane].index];
   const curOriginUid = curInstAP?.series_uid ?? panes[activePane]?.series?.series_uid;
+  // 휴대폰 촬영(QR) — 다이얼로그 + 업로드 폴링(완료 시 refreshExam → 새 시리즈 표시)
+  const [qrCap, setQrCap] = useState<{ token: string; url: string; qr: string } | null>(null);
+  useEffect(() => {
+    if (!qrCap) return;
+    const iv = setInterval(() => {
+      api.mobileCaptureStatus(qrCap.token).then((st) => {
+        if (st.done && st.uploaded > 0) {
+          clearInterval(iv);
+          setQrCap(null);
+          void refreshExamRef.current?.();
+          setStatus(`휴대폰 사진 ${st.uploaded}장 — 새 시리즈로 등록됨 (썸네일에서 확인)`);
+        }
+      }).catch(() => { clearInterval(iv); setQrCap(null); setStatus("촬영 세션 만료"); });
+    }, 2500);
+    return () => clearInterval(iv);
+  }, [qrCap]);
+
   // 팔레트/썸네일 드래그 도킹 — 그립을 잡고 화면 가장자리 쪽으로 끌어 좌/우/상/하 위치 변경(계정 저장)
   const dockDragRef = useRef<{ kind: "palette" | "thumb"; sx: number; sy: number } | null>(null);
   const dockSide = (kind: "palette" | "thumb", side: "left" | "right" | "top" | "bottom") => {
@@ -3444,6 +3464,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                  patch(activePane, { media: { url: URL.createObjectURL(f), kind, name: f.name } });
                  e.target.value = "";
                }} />
+        <button title="휴대폰 촬영 — QR 을 찍으면 카메라가 열리고, 업로드한 사진이 이 검사의 새 시리즈로 등록됩니다"
+                onClick={() => { void (async () => {
+                  try { setQrCap(await api.mobileCapture(detail.id, window.location.origin)); }
+                  catch { setStatus("QR 세션 생성 실패"); }
+                })(); }}>📱</button>
         <button onClick={() => setSettingsOpen(true)} title="설정 — 뷰어에서 바로 Setting 진입">Settings</button>
         <button title="Reading — 전용 판독 창(새 페이지) 열기 · 모니터 배치는 Setting>모니터"
                 onClick={() => {
@@ -3633,6 +3658,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </div>
       {prefs.thumbSide === "bottom" && thumbs}
       {prefs.paletteSide === "bottom" && palette}
+      {/* 휴대폰 촬영 QR 다이얼로그 */}
+      {qrCap && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 600 }}
+             onMouseDown={(e) => { if (e.target === e.currentTarget) setQrCap(null); }}>
+          <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
+                        padding: 20, width: 340, textAlign: "center", display: "flex", flexDirection: "column", gap: 10 }}>
+            <b style={{ fontSize: 14 }}>📱 휴대폰으로 사진 촬영</b>
+            <img src={qrCap.qr} alt="QR" style={{ width: 220, height: 220, margin: "0 auto", background: "#fff", borderRadius: 8, padding: 6 }} />
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              휴대폰 카메라로 QR 을 찍으면 촬영 페이지가 열립니다.<br />
+              촬영 → ⬆ 업로드하면 이 검사의 <b>새 시리즈</b>로 등록되고 뷰어에 자동 반영됩니다. (15분 유효)
+            </div>
+            <code style={{ fontSize: 10, wordBreak: "break-all", color: "var(--text-secondary)" }}>{qrCap.url}</code>
+            <button onClick={() => setQrCap(null)}>닫기</button>
+          </div>
+        </div>
+      )}
       {/* ── Profile — 두 점 선의 픽셀값 그래프 모달 (In Viewer 이식, ≈근사값) ── */}
       {profileData && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 500,
