@@ -15,7 +15,7 @@ import { ReportDock } from "../components/ReportDock";
 import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { IN_MOUSE_OPS } from "../lib/infiConfig";
-import { DICOMWEB_ROOT } from "../lib/cornerstone";
+import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
 import { rawAt, samplePixels } from "../lib/pixelTools";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
@@ -247,7 +247,7 @@ function renderedUrlAt(p: PaneState, idx: number): string | null {
   const wl = p.wl ? `?window=${p.wl},linear` : "";
   const su = inst.series_uid ?? p.series.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID
   const stu = inst.study_uid ?? p.studyUid;
-  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${wl}`;
+  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${wl}${renderedParams(!!wl)}`;
 }
 // Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙임(서버 병합 아님, 표시 결합).
 // 원본 시리즈(검사+시리즈 UID)별로 그룹화(첫 등장 순서 유지) → 그룹 내 instance_number 정렬·sop 중복 제거 →
@@ -455,6 +455,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   skin?: "ty" | "saint";             // SAINT VIEW 스킨 — 상단 가로 메뉴 툴바 + 세로 팔레트 숨김 (엔진·기능 동일)
 }) {
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
+  // 병원별 영상 전송 형식 로드 — 관리자 설정(JPEG 품질/PNG)을 rendered 호출에 반영
+  useEffect(() => {
+    const hid = Number(localStorage.getItem("sv_active_hospital") || 0);
+    if (hid) api.hospImageFormat(hid).then(setImageFormat).catch(() => {});
+  }, []);
   // OHIF 표시 — 기본 숨김, 설정>뷰어>OHIF 허용 시에만 (viewer.prefs.ohif_enabled)
   const [ohifOn, setOhifOn] = useState(false);
   useEffect(() => {

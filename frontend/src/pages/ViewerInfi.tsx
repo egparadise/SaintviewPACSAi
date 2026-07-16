@@ -15,7 +15,7 @@ const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ defaul
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
-import { DICOMWEB_ROOT } from "../lib/cornerstone";
+import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { GridPicker } from "../lib/GridPicker";
 import { ReportDock } from "../components/ReportDock";
@@ -158,7 +158,7 @@ function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string
   const q = wl ? `?window=${wl},linear` : "";
   const su = inst.series_uid ?? s.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID 로 요청
   const stu = inst.study_uid ?? studyUid;
-  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${q}`;
+  return `${DICOMWEB_ROOT}/studies/${stu}/series/${su}/instances/${inst.sop_uid}/rendered${q}${renderedParams(!!q)}`;
 }
 // Combine — 여러 SeriesNode 를 하나의 논리적 시리즈로 이어붙인다(서버 병합 아님, 표시 결합).
 // 원본 시리즈(검사+시리즈 UID)별로 그룹화(첫 등장 순서 유지) → 그룹 내 instance_number 정렬·sop 중복 제거 →
@@ -357,6 +357,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [toast, setToast] = useState("");
   // §3.1 툴바 상단(원본): Report 도크(ReportDock — TY 와 동일 기능) + Prev/Next 워크리스트 내비게이션
   // 열림 상태는 viewer.prefs.infi_report_dock 로 계정 로밍
+  // 병원별 영상 전송 형식 로드 — rendered 호출에 반영
+  useEffect(() => {
+    const hid = Number(localStorage.getItem("sv_active_hospital") || 0);
+    if (hid) api.hospImageFormat(hid).then(setImageFormat).catch(() => {});
+  }, []);
   const [reportDock, setReportDock] = useState(false);
   const [reportCollapsed, setReportCollapsed] = useState(false);  // 판독창 오른쪽 접기/펼치기
   // Setting — 앱 공통 설정 창(SettingsModal)과 동일 동작. role 은 프로필에서

@@ -784,6 +784,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [msg, setMsg] = useState("");
+  const [fmt, setFmt] = useState({ format: "default", quality: 90 });   // 클라이언트 영상 전송 형식
 
   const reload = useCallback(() => {
     api.hospStorageSummary(hid).then(setSum).catch(() => {});
@@ -793,6 +794,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
     reload();
     api.hospStoragePolicy(hid).then((p) => setPol(p)).catch(() => {});
     api.hospStorageCompressions(hid).then((r) => setComps(r.items)).catch(() => {});
+    api.hospImageFormat(hid).then((f) => setFmt({ format: f.format, quality: f.quality })).catch(() => {});
   }, [hid, reload]);
 
   const F: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: 6, padding: 12, marginBottom: 14 };
@@ -823,6 +825,32 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
             </SRow>
           </>
         ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>로딩…</div>}
+      </fieldset>
+
+      <fieldset style={F}>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>클라이언트 영상 전송 형식 (뷰어 화질)</legend>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 8 }}>
+          이 병원의 뷰어가 영상을 불러올 때의 표시 형식입니다(원본 DICOM 은 영향 없음). 원격·저대역 환경은 품질을 낮춰 전송 속도를 높이고(50≈품질90 대비 40% 용량), 진단실은 100으로 최고 화질을 쓸 수 있습니다.
+        </div>
+        <SRow label="형식">
+          <select value={fmt.format} onChange={(e) => setFmt((p2) => ({ ...p2, format: e.target.value }))}>
+            <option value="default">기본 (JPEG 품질 90)</option>
+            <option value="jpeg">JPEG 품질 지정 (50~100)</option>
+          </select>
+        </SRow>
+        {fmt.format === "jpeg" && (
+          <SRow label="JPEG 품질">
+            <input type="range" min={50} max={100} step={5} value={fmt.quality}
+                   onChange={(e) => setFmt((p2) => ({ ...p2, quality: Number(e.target.value) }))} />
+            <b style={{ width: 40 }}>{fmt.quality}</b>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>50=고압축(빠름) ~ 100=최고화질</span>
+          </SRow>
+        )}
+        <button className="primary" style={{ fontSize: 12 }}
+                onClick={async () => {
+                  try { await api.hospImageFormatPut(hid, fmt); setMsg("전송 형식 저장됨 — 뷰어 재접속/새로고침 시 적용"); }
+                  catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
+                }}>형식 저장</button>
       </fieldset>
 
       <fieldset style={F}>

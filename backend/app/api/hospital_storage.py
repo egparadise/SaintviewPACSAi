@@ -19,6 +19,43 @@ from app.models import AuditLog, BackupJob, Study
 
 router = APIRouter(prefix="/api/hospitals/{hid}/storage", tags=["hospital-storage"])
 
+# ── 병원별 클라이언트 영상 전송 형식 — 뷰어가 rendered 호출 시 사용할 포맷/품질 ──
+fmt_router = APIRouter(prefix="/api/hospitals/{hid}", tags=["hospital-imgfmt"])
+
+IMGFMT_DEFAULT = {"format": "default", "quality": 90}   # default=서버 기본(JPEG) / png=무손실 / jpeg=품질 지정
+
+
+class ImgFmtBody(BaseModel):
+    format: str = "default"   # default | jpeg | png
+    quality: int = 90         # jpeg 품질(50~100)
+
+
+@fmt_router.get("/image-format")
+def imgfmt_get(hid: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """뷰어 영상 전송 형식 조회 — 그 병원 소속 사용자(뷰어)와 시스템 관리자."""
+    if not (user.get("role") == "admin" and not user.get("hid")) and user.get("hid") != hid:
+        raise HTTPException(status_code=403, detail="다른 병원의 설정입니다")
+    from app.services.settings_service import get_setting
+
+    return {**IMGFMT_DEFAULT, **(get_setting(db, f"viewer.image_format.h{hid}", default={}) or {})}
+
+
+@fmt_router.put("/image-format")
+def imgfmt_put(hid: int, body: ImgFmtBody, db: Session = Depends(get_db),
+               user: dict = Depends(current_user)):
+    """뷰어 영상 전송 형식 설정 — 관리자 전용. jpeg 품질은 50~100 로 보정."""
+    _require_admin(user, hid)
+    if body.format not in ("default", "jpeg", "png"):
+        raise HTTPException(status_code=400, detail="format 은 default/jpeg/png 중 하나여야 합니다")
+    merged = {"format": body.format, "quality": max(50, min(100, body.quality))}
+    from app.services.settings_service import set_setting
+
+    set_setting(db, f"viewer.image_format.h{hid}", merged, scope="global")
+    db.add(AuditLog(account_id=user.get("uid"), action="hosp_image_format",
+                    target_type="setting", target_id=f"viewer.image_format.h{hid}", detail=merged))
+    db.commit()
+    return merged
+
 
 def _require_admin(user: dict, hid: int) -> None:
     if user.get("role") == "admin" and not user.get("hid"):
