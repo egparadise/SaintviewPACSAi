@@ -28,5 +28,11 @@ pause
 exit /b 1
 
 :open
-start "" https://localhost:5173
+rem 실제 응답하는 스킴(https→http 순)으로 연다 — http 서버에 https 를 열면 SSL 오류로 "실행 안 됨"처럼 보임
+curl -sk -o nul -m 3 https://localhost:5173 >nul 2>&1
+if %errorlevel%==0 (
+  start "" https://localhost:5173
+) else (
+  start "" http://localhost:5173
+)
 exit /b 0
