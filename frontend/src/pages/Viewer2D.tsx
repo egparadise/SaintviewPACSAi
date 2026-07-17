@@ -16,7 +16,8 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { IN_MOUSE_OPS } from "../lib/infiConfig";
 import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
-import { onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
+import { isWasmPipeline, onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
+import { cancelWarm, prefetchAround, warmSeries } from "../lib/framePrefetch";
 import { rawAt, samplePixels } from "../lib/pixelTools";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
@@ -1317,6 +1318,64 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     });
   }, [xmode, layout]);
 
+  // ── 인접 슬라이스 프리페치 — 인덱스/시리즈가 바뀔 때만 진행 방향 앞 8·뒤 3장 선제 로드.
+  //    (W/L·zoom 등 다른 페인 상태 변경에는 발동하지 않음 — 드래그 중 요청 폭주 방지) ──
+  const lastIdxRef = useRef<Record<string, { idx: number; uid: string }>>({});
+  useEffect(() => {
+    if (isWasmPipeline()) return;   // WASM 모드는 자체 픽셀 캐시 사용 — 서버 rendered 이중 다운로드 방지
+    const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+    for (const pid of vis) {
+      const p = panes[pid];
+      if (!p?.series) continue;
+      const len = p.series.instances.length;
+      const prev = lastIdxRef.current[pid];
+      const changed = !prev || prev.idx !== p.index || prev.uid !== p.series.series_uid;
+      if (!changed) continue;
+      const dir = !prev || prev.uid !== p.series.series_uid ? 1 : (p.index - prev.idx >= 0 ? 1 : -1);
+      lastIdxRef.current[pid] = { idx: p.index, uid: p.series.series_uid };
+      prefetchAround((i) => renderedUrlAt(p, i), p.index, len, dir);
+    }
+  }, [panes, layout]);
+  // 활성 시리즈 전체 워밍 — 초기 페인트 후 백그라운드 예열(시리즈·W/L 변경 시 토큰으로 이전 워밍 중단).
+  // wl 을 의존성에 포함 — W/L 드래그 중엔 1.2s 지연+토큰 취소가 디바운스 역할(구 window URL 낭비 방지).
+  const activeP = panes[activePane];
+  const activeSeriesUid = activeP?.series?.series_uid;
+  const activeWl = activeP?.wl ?? "";
+  useEffect(() => {
+    if (isWasmPipeline()) return;   // WASM 모드 — 서버 rendered 워밍은 이중 다운로드라 제외
+    const p = panesRef.current[activePane];
+    if (!p?.series) return;
+    // 대형 매트릭스(DX/MG 등)는 장당 수 MB — 시리즈 전체 워밍은 메모리·대역폭상 제외(±프리페치만)
+    const i0 = p.series.instances[0];
+    if (((i0?.rows ?? 0) * (i0?.cols ?? 0)) > 2_000_000) return;
+    warmSeries((i) => renderedUrlAt(p, i), p.series.instances.length, p.index);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSeriesUid, activePane, activeWl]);
+  useEffect(() => () => cancelWarm(), []);   // 뷰어 닫기 — 워밍 중단
+
+  // W/L 드래그 스로틀 누적기 — 델타 누적 후 80ms 간격 반영(최종값 동일, 요청 수만 감소)
+  const wlThrottleRef = useRef<{ dx: number; dy: number; tg: string[] | null; timer: number }>(
+    { dx: 0, dy: 0, tg: null, timer: 0 });
+
+  // ── 휠 rAF 코얼레싱 — 이벤트를 프레임 단위로 모아 스텝 '누적' 적용(요청은 최종 프레임 1장만).
+  //    스텝 수를 보존하므로 프리스핀 휠·트랙패드의 주파 속도(조작감)도 기존과 동일. ──
+  const wheelRaf = useRef<{ pid: string; net: number; raf: number } | null>(null);
+  const wheelStep = useCallback((pid: string, dir: number) => {
+    const w = wheelRaf.current;
+    if (w) { w.pid = pid; w.net += dir; return; }   // 이번 프레임 예약됨 — 스텝 누적
+    wheelRaf.current = {
+      pid, net: dir,
+      raf: requestAnimationFrame(() => {
+        const cur = wheelRaf.current;
+        wheelRaf.current = null;
+        if (!cur || cur.net === 0) return;
+        const s = Math.sign(cur.net);
+        // React 18 자동 배칭 — 여러 step 이 한 번의 렌더로 합쳐져 최종 인덱스만 그린다
+        for (let k = 0; k < Math.abs(cur.net); k++) step(cur.pid, s);
+      }),
+    };
+  }, [step]);
+
   /* 뷰어 단축키: ←→=이미지, I=반전, R=회전, F=Fit, L=Link, 1/2/4=분할, Space=Cine, Esc=닫기 */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2056,16 +2115,29 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       else if (mode === "zoom") updMany(tg, (p) => ({ zoom: Math.max(0.2, p.zoom * (1 - dy * 0.005)) }));
       else if (mode === "pan") updMany(tg, (p) => ({ tx: p.tx + dx, ty: p.ty + dy }));
       else if (mode === "wl") {
-        // 드래그 W/L — 서버 /rendered?window=C,W 라운드트립(가로=Width, 세로=Center)
-        updMany(tg, (p) => {
-          const cur = p.wl ? p.wl.split(",").map(Number) : null;
-          const base = cur && cur.length >= 2 && !Number.isNaN(cur[0])
-            ? [cur[0], cur[1]]
-            : (p.series?.modality === "CT" ? [40, 400] : [128, 256]);
-          const w = Math.max(1, base[1] + dx * 2);
-          const c = base[0] - dy * 2;
-          return { wl: `${Math.round(c)},${Math.round(w)}` };
-        });
+        // 드래그 W/L — 80ms 스로틀(leading+trailing)로 서버 /rendered?window 요청 폭주 방지.
+        // 델타는 누적되므로 최종 W/L 값은 기존과 동일(조작감 불변, 요청 수만 감소).
+        const acc = wlThrottleRef.current;
+        acc.dx += dx; acc.dy += dy; acc.tg = tg;
+        const apply = () => {
+          const a = wlThrottleRef.current;   // 반드시 in-place — 객체 교체 시 timer 플래그가 사장됨
+          const adx = a.dx, ady = a.dy, atg = a.tg;
+          a.dx = 0; a.dy = 0;
+          if (!atg || (adx === 0 && ady === 0)) return;
+          updMany(atg, (p) => {
+            const cur = p.wl ? p.wl.split(",").map(Number) : null;
+            const base = cur && cur.length >= 2 && !Number.isNaN(cur[0])
+              ? [cur[0], cur[1]]
+              : (p.series?.modality === "CT" ? [40, 400] : [128, 256]);
+            const w = Math.max(1, base[1] + adx * 2);
+            const c = base[0] - ady * 2;
+            return { wl: `${Math.round(c)},${Math.round(w)}` };
+          });
+        };
+        if (!acc.timer) {
+          apply();   // leading — 즉시 1회 반영
+          acc.timer = window.setTimeout(() => { wlThrottleRef.current.timer = 0; apply(); }, 80);
+        }
       }
     };
     const up = (e: MouseEvent) => {
@@ -2522,7 +2594,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                persistPrefsPatch({ ty_overlay_font: nf });
                return;
              }
-             step(pid, e.deltaY > 0 ? 1 : -1);
+             wheelStep(pid, e.deltaY > 0 ? 1 : -1);
            }}
            onDoubleClick={() => {
              if (tool && OPEN_ENDED.has(tool)) { finishOpenEnded(); return; }  // 수집 종료 — 최대화 충돌 회피
@@ -3386,7 +3458,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                           : "1px solid var(--border)",
                         borderRadius: 4, overflow: "hidden", cursor: "pointer", position: "relative", width: ts }}>
             {s.instances[Math.floor(s.instances.length / 2)] && (
-              <img src={s.instances[Math.floor(s.instances.length / 2)].preview_url} alt=""
+              <img src={s.instances[Math.floor(s.instances.length / 2)].preview_url} alt="" loading="lazy" decoding="async"
                    style={{ width: ts, height: ts * 0.78, objectFit: "cover", display: "block" }} />
             )}
             {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 페인 KEY 마크와 동기) */}
@@ -3407,7 +3479,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             <div style={{ display: "flex", flexDirection: thumbHoriz ? "row" : "column", gap: 2, padding: 2 }}>
               {s.instances.slice(0, 60).map((inst, idx) => (
                 <div key={inst.sop_uid} data-sop={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
-                  <img src={inst.preview_url} alt="" title={`Img ${inst.instance_number}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""}`}
+                  <img src={inst.preview_url} alt="" loading="lazy" decoding="async" title={`Img ${inst.instance_number}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""}`}
                        onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                        style={{ width: ts * 0.6, height: ts * 0.45, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
                                 border: inst.sop_uid === curInstAP?.sop_uid
@@ -3427,7 +3499,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         </div>
       )) : allInstances.slice(0, 200).map(({ s, i, idx }) => (
         <div key={i.sop_uid} data-sop={i.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
-          <img src={i.preview_url} alt="" title={`S${s.series_number} Img${i.instance_number}${keyMarks.has(i.sop_uid) ? " · 🔑 KEY" : ""}`}
+          <img src={i.preview_url} alt="" loading="lazy" decoding="async" title={`S${s.series_number} Img${i.instance_number}${keyMarks.has(i.sop_uid) ? " · 🔑 KEY" : ""}`}
                onClick={() => patch(activePane, { studyUid: uidOfSeries(s.series_uid), series: s, index: idx })}
                style={{ width: ts * 0.8, height: ts * 0.6, objectFit: "cover", borderRadius: 2, cursor: "pointer", display: "block",
                         border: i.sop_uid === curInstAP?.sop_uid ? "2px solid #4ade80"

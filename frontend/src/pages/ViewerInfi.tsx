@@ -16,7 +16,8 @@ const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewe
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
 import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
-import { onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
+import { isWasmPipeline, onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
+import { cancelWarm, prefetchAround, warmSeries } from "../lib/framePrefetch";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
 import { GridPicker } from "../lib/GridPicker";
 import { ReportDock } from "../components/ReportDock";
@@ -486,14 +487,18 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         for (const ps of psList) Object.assign(merged, ps.series || {});
         pstateRef.current = merged;
       } catch { /* 표시상태 로드 실패 시 원본대로 */ }
-      // Modality 기본 레이아웃(설정>뷰어 — 행잉과 별도) 로드
-      const prefsV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value as
+      // Modality 기본 레이아웃 + 행잉 규칙 — 병렬 로드(첫 화면 표시 지연 단축, 동작 동일)
+      const [prefsRes, hpRes] = await Promise.all([
+        api.getSetting("viewer.prefs").catch(() => ({ value: {} })),
+        api.getSetting("viewer.hp").catch(() => ({ value: {} })),
+      ]);
+      const prefsV = prefsRes.value as
         { infi_default_layout?: Record<string, { s?: { r: number; c: number } | null;
                                                  i?: { r: number; c: number } | null }> };
       const defMap = prefsV.infi_default_layout ?? {};
       // IN-2 ①: 규칙 기반 행잉 프로토콜(viewer.hp) — 모달리티×부위×Projection 첫 일치 자동 적용
       //          (TY hpRules/applyHp 등가 — 단독 검사에서 Modality 기본 레이아웃보다 우선)
-      const hpv = (await api.getSetting("viewer.hp").catch(() => ({ value: {} }))).value as
+      const hpv = hpRes.value as
         { rules?: HpRule[] };
       const rules = hpv.rules ?? [];
       setHpRules(rules);
@@ -711,6 +716,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const targetsOf = (pi: number): number[] =>
     xlink.crosslink && selPanes.size > 1 && selPanes.has(pi) ? [...selPanes] : [pi];
 
+  // W/L 드래그 스로틀 누적기 — 델타 누적 후 80ms 간격 반영(최종값 동일, 요청 수만 감소)
+  const wlThrottleRef = useRef<{ dx: number; dy: number; tg: number[] | null; timer: number }>(
+    { dx: 0, dy: 0, tg: null, timer: 0 });
+
   const scroll = useCallback((i: number, delta: number) => {
     setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §B: 이미지 전환 시 편집·마퀴 선택 해제
     setPanes((ps) => {
@@ -728,6 +737,60 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       });
     });
   }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
+
+  // ── 인접 슬라이스 프리페치 — 인덱스/시리즈가 바뀔 때만 진행 방향 앞 8·뒤 3장 선제 로드.
+  //    (W/L·zoom 등 다른 페인 상태 변경에는 발동하지 않음 — 드래그 중 요청 폭주 방지) ──
+  const lastIdxRef = useRef<Record<number, { idx: number; uid: string }>>({});
+  useEffect(() => {
+    if (isWasmPipeline()) return;   // WASM 모드는 자체 픽셀 캐시 사용 — 서버 rendered 이중 다운로드 방지
+    panes.forEach((p, k) => {
+      if (!p?.series) return;
+      const len = p.series.instances.length;
+      const prev = lastIdxRef.current[k];
+      const changed = !prev || prev.idx !== p.index || prev.uid !== p.series.series_uid;
+      if (!changed) return;
+      const dir = !prev || prev.uid !== p.series.series_uid ? 1 : (p.index - prev.idx >= 0 ? 1 : -1);
+      lastIdxRef.current[k] = { idx: p.index, uid: p.series.series_uid };
+      prefetchAround((idx) => {
+        const inst = p.series!.instances[idx];
+        return inst ? instUrl(p.studyUid, p.series!, inst, p.wl || "") : null;
+      }, p.index, len, dir);
+    });
+  }, [panes]);
+  // 활성 시리즈 전체 워밍 — 초기 페인트 후 백그라운드 예열(시리즈·W/L 변경 시 토큰으로 이전 워밍 중단).
+  // wl 의존 — W/L 드래그 중엔 1.2s 지연+토큰 취소가 디바운스 역할(구 window URL 낭비 방지).
+  const activeSeriesUid = panes[active]?.series?.series_uid;
+  const activeWl = panes[active]?.wl ?? "";
+  useEffect(() => {
+    if (isWasmPipeline()) return;   // WASM 모드 — 서버 rendered 워밍은 이중 다운로드라 제외
+    const p = panes[active];
+    if (!p?.series) return;
+    // 대형 매트릭스(DX/MG 등)는 장당 수 MB — 시리즈 전체 워밍 제외(±프리페치만)
+    const i0 = p.series.instances[0];
+    if (((i0?.rows ?? 0) * (i0?.cols ?? 0)) > 2_000_000) return;
+    warmSeries((idx) => {
+      const inst = p.series!.instances[idx];
+      return inst ? instUrl(p.studyUid, p.series!, inst, p.wl || "") : null;
+    }, p.series.instances.length, p.index);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSeriesUid, active, activeWl]);
+  useEffect(() => () => cancelWarm(), []);
+
+  // ── 휠 rAF 코얼레싱 — 이벤트를 프레임 단위로 모아 델타 '누적' 적용(요청은 최종 프레임 1장만).
+  //    델타 합을 보존하므로 프리스핀 휠·트랙패드의 주파 속도(조작감)도 기존과 동일. ──
+  const wheelRaf = useRef<{ i: number; net: number; raf: number } | null>(null);
+  const wheelScroll = useCallback((i: number, delta: number) => {
+    const w = wheelRaf.current;
+    if (w) { w.i = i; w.net += delta; return; }   // 이번 프레임 예약됨 — 델타 누적
+    wheelRaf.current = {
+      i, net: delta,
+      raf: requestAnimationFrame(() => {
+        const cur = wheelRaf.current;
+        wheelRaf.current = null;
+        if (cur && cur.net !== 0) scroll(cur.i, cur.net);
+      }),
+    };
+  }, [scroll]);
 
   // ── 시네 엔진 — 페인별 독립 재생(playing/cineSec), 100ms 틱에서 각 페인의 간격 경과 시 전진 ──
   const cineLast = useRef<Record<number, number>>({});
@@ -1629,10 +1692,24 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     if (mode === "pan") updMany(tg, (q) => ({ tx: q.tx + dx, ty: q.ty + dy }));
     else if (mode === "zoom") updMany(tg, (q) => ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (1 - dy / 200))) }));
     else if (mode === "wl") {
-      updMany(tg, (q) => {
-        const [c0, w0] = q.wl ? q.wl.split(",").map(Number) : [128, 256];
-        return { wl: `${Math.round(c0 + dy)},${Math.max(1, Math.round(w0 + dx))}` };
-      });
+      // W/L 드래그 — 80ms 스로틀(leading+trailing)로 서버 /rendered?window 요청 폭주 방지.
+      // 델타 누적이라 최종 W/L 값은 기존과 동일(조작감 불변, 요청 수만 감소).
+      const acc = wlThrottleRef.current;
+      acc.dx += dx; acc.dy += dy; acc.tg = tg;
+      const apply = () => {
+        const a = wlThrottleRef.current;   // 반드시 in-place — 객체 교체 시 timer 플래그가 사장됨
+        const adx = a.dx, ady = a.dy, atg = a.tg;
+        a.dx = 0; a.dy = 0;
+        if (!atg || (adx === 0 && ady === 0)) return;
+        updMany(atg, (q) => {
+          const [c0, w0] = q.wl ? q.wl.split(",").map(Number) : [128, 256];
+          return { wl: `${Math.round(c0 + ady)},${Math.max(1, Math.round(w0 + adx))}` };
+        });
+      };
+      if (!acc.timer) {
+        apply();
+        acc.timer = window.setTimeout(() => { wlThrottleRef.current.timer = 0; apply(); }, 80);
+      }
     }
   };
   const endDrag = (e?: React.MouseEvent) => {
@@ -1695,7 +1772,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) }));
     } else {
       const p = panes[i];
-      scroll(i, (e.deltaY > 0 ? 1 : -1) * (p && tilesOf(p) > 1 ? p.il.c : 1));
+      wheelScroll(i, (e.deltaY > 0 ? 1 : -1) * (p && tilesOf(p) > 1 ? p.il.c : 1));
     }
   };
 
@@ -2243,7 +2320,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         .slice(0, 200)
         .map(({ s, inst, idx }) => (
           <div key={inst.sop_uid} data-sop={inst.sop_uid} style={{ position: "relative", flexShrink: 0 }}>
-            <img src={inst.preview_url} alt=""
+            <img src={inst.preview_url} alt="" loading="lazy" decoding="async"
                  title={`S${s.series_number} Img${inst.instance_number ?? idx + 1}${keyMarks.has(inst.sop_uid) ? " · 🔑 KEY" : ""} — 클릭=활성 페인 표시`}
                  onClick={() => upd(active, { series: s, index: idx, studyUid: curD.study_uid })}
                  style={{ width: "100%", display: "block", borderRadius: 3, cursor: "pointer",
@@ -2286,7 +2363,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       border: thumbBorder(s.series_uid, "1px solid var(--border)"),
                       borderRadius: 3, background: "#000" }}>
           {s.instances[0] && (
-            <img src={s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
+            <img src={s.instances[0].preview_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", display: "block" }} />
           )}
           {/* 키이미지 포함 시리즈 — 우상단 🔑 배지(뷰어 KEY 마크와 동기) */}
           {(() => { const kn = s.instances.filter((i2) => keyMarks.has(i2.sop_uid)).length; return kn > 0 && (
@@ -2316,7 +2393,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       border: thumbBorder(e.s.series_uid, "1px solid #854d0e"),
                       borderRadius: 3, background: "#000" }}>
         {e.s.instances[0] && (
-          <img src={e.s.instances[0].preview_url} alt="" style={{ width: "100%", display: "block" }} />
+          <img src={e.s.instances[0].preview_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", display: "block" }} />
         )}
         <div style={{ color: "#facc15", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
           P·{e.label.slice(4)}

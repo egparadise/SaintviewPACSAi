@@ -231,11 +231,19 @@ def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depen
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
         return {"study_uid": study.study_uid, "series": []}
+    import logging
+
+    import httpx as _httpx
+
     client = OrthancClient()
     try:
-        if not client.alive():
-            return {"study_uid": study.study_uid, "series": []}
+        # alive() 사전 왕복 제거 — 실패는 아래 호출이 곧바로 드러난다(열기당 GET /system 1회 절감)
         tree = client.series_tree(study.orthanc_id)
+    except _httpx.HTTPError as e:
+        # Orthanc 미가용/HTTP 오류만 우아 강등(빈 트리) — 코드 버그류는 그대로 500 으로 노출
+        logging.getLogger("saintview.worklist").warning(
+            "series-tree Orthanc 실패(study=%s, orthanc=%s): %s", study_id, study.orthanc_id, e)
+        return {"study_uid": study.study_uid, "series": []}
     finally:
         client.close()
     # Exam Control 오버레이 — 소프트 삭제·재귀속(이동) 반영(DB 행 없으면 원본 그대로)

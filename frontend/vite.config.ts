@@ -50,6 +50,14 @@ export default defineConfig({
       '/orthanc': {                            // 썸네일 프리뷰 — Orthanc 네이티브 /instances/.../preview
         target: 'http://localhost:8042',
         rewrite: (p) => p.replace(/^\/orthanc/, ''),
+        // preview 캐시 1시간 — 200 응답에만(오류 캐시 고정 방지), immutable 금지(동일 SOP 재전송 대비)
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, req) => {
+            if (proxyRes.statusCode === 200 && /\/instances\/[^/]+\/preview/.test(req.url ?? '')) {
+              proxyRes.headers['cache-control'] = 'private, max-age=3600'
+            }
+          })
+        },
       },
     },
   },

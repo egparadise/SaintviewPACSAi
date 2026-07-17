@@ -106,7 +106,8 @@ async function listSeries(studyUid: string): Promise<SeriesCand[]> {
       desc: String((s["0008103E"]?.Value?.[0] as string) ?? ""),
     }))
     .filter((s) => s.uid && !["SR", "KO", "PR", "SEG"].includes(s.modality));
-  // 각 후보의 매트릭스(Rows×Cols)를 QIDO 인스턴스 1건으로 조회 — 해상도 가중치(실패 시 0=순서 영향 없음)
+  // 각 후보의 매트릭스(Rows×Cols)를 QIDO 인스턴스 1건으로 조회 — 해상도 가중치(실패 시 0=순서 영향 없음).
+  // 검사 단위 일괄 QIDO 는 Rows/Columns 가 Orthanc 인덱스 밖이라 전 인스턴스 파일 접근을 유발(실측 더 느림) — 시리즈별 limit=1 병렬 유지.
   const area = await Promise.all(cands.map(async (s) => {
     try {
       const r = await fetch(
@@ -378,7 +379,26 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
         const volumeId = `cornerstoneStreamingImageVolume:sv-${selSeries.slice(-24)}`;
         volumeIdRef.current = volumeId;
         const volume = await volumeLoader.createAndCacheVolume(volumeId, { imageIds });
-        await (volume as { load: () => Promise<unknown> | unknown }).load?.();
+        // 점진 스트리밍 — 전량 로드를 기다리지 않고 뷰포트를 먼저 부착(슬라이스가 도착하는 대로 표시).
+        // ⚠ cs3d v5 의 load(callback) 은 void 반환 — 완료 감지는 콜백 카운터로만 한다.
+        const total = imageIds.length;
+        let done = 0;
+        try {
+          (volume as { load: (cb?: (evt: unknown) => void) => unknown }).load?.(() => {
+            done += 1;
+            if (disposed) return;
+            if (done >= total) {
+              setStatus("");
+              engineRef.current?.render();   // 전량 도착 후 최종 렌더(잔여 슬라이스 반영)
+            } else if (done % 10 === 0) {
+              setStatus(`볼륨 로딩… ${Math.round((done / total) * 100)}% (${done}/${total})`);
+            }
+          });
+        } catch { /* 스트리밍 시작 실패 — 아래 뷰포트 부착은 진행(코어가 재시도) */ }
+        // 안전망 — 일부 슬라이스 수신 실패로 100% 에 못 미치면 진행률 라벨이 남지 않게 정리
+        window.setTimeout(() => {
+          if (!disposed) setStatus((s) => (s.startsWith("볼륨 로딩") ? "" : s));
+        }, 120_000);
         await setVolumesForViewports(
           engine,
           [{ volumeId }],
@@ -414,7 +434,7 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
           ro.observe(gridRef.current);
           resizeObserverRef.current = ro;
         }
-        if (!disposed) setStatus("");
+        // status 는 스트리밍 완료 시(loadPromise.then) 비운다 — 진행률 표시 유지
       } catch (e) {
         if (!disposed) {
           setError(e instanceof Error ? e.message : String(e));

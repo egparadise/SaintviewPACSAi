@@ -13,8 +13,11 @@ del "%~dp0restart.pid" >nul 2>&1
 if /i "%MODE%"=="stop" exit /b 0
 
 ping -n 2 127.0.0.1 >nul
-rem DB env - reuse the line from start_saintview.bat (single source)
-for /f "tokens=1,* delims==" %%a in ('findstr /b /c:"set SAINTVIEW_DATABASE_URL=" "%~dp0..\start_saintview.bat"') do set "SAINTVIEW_DATABASE_URL=%%b"
+rem DB env - reuse the line from start_saintview.bat (single source).
+rem Handles both forms:  set VAR=...  and  set "VAR=..."  (trailing quote stripped)
+for /f "tokens=1,* delims==" %%a in ('findstr /c:"SAINTVIEW_DATABASE_URL=" "%~dp0..\start_saintview.bat"') do set "SVDB=%%b"
+if defined SVDB set "SVDB=%SVDB:"=%"
+if defined SVDB set "SAINTVIEW_DATABASE_URL=%SVDB%"
 cd /d %~dp0
 start "Saintview Backend" /min py -3.11 -m uvicorn app.main:app --port 8000 --log-level warning
 exit /b 0

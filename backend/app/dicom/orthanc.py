@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 import httpx
 
@@ -9,16 +10,30 @@ from app.config import get_settings
 
 logger = logging.getLogger("saintview.orthanc")
 
+# 연결 풀 — base_url 별 공유 httpx.Client(keep-alive 재사용, 스레드 안전).
+# 기존에는 요청마다 새 Client(새 TCP)를 만들어 프레임/열기 지연에 셋업 비용이 누적됐다.
+# ⚠ 전역 자격증명 전제(모든 컨테이너가 동일 계정) — 병원별 자격증명 도입 시 풀 키에 auth 포함 필요.
+_POOL: dict[str, httpx.Client] = {}
+_POOL_LOCK = threading.Lock()
+
+
+def _pooled_client(base_url: str, auth: tuple[str, str]) -> httpx.Client:
+    with _POOL_LOCK:
+        c = _POOL.get(base_url)
+        if c is None or c.is_closed:
+            # 상한 여유(64) — htj2k 프레임 프록시·3D 볼륨 폭주·백그라운드 프리인코딩이 같은 풀을
+            # 나눠 쓰므로 낮은 상한은 PoolTimeout(500 연쇄)을 만든다
+            c = httpx.Client(base_url=base_url, auth=auth, timeout=30,
+                             limits=httpx.Limits(max_keepalive_connections=16, max_connections=64))
+            _POOL[base_url] = c
+        return c
+
 
 class OrthancClient:
     def __init__(self, base_url: str | None = None) -> None:
         # base_url 미지정 = 기존 공유 Orthanc 그대로(무회귀) — 병원별 컨테이너는 명시 주입
         s = get_settings()
-        self._client = httpx.Client(
-            base_url=base_url or s.orthanc_url,
-            auth=(s.orthanc_user, s.orthanc_password),
-            timeout=30,
-        )
+        self._client = _pooled_client(base_url or s.orthanc_url, (s.orthanc_user, s.orthanc_password))
 
     def alive(self) -> bool:
         try:
@@ -68,7 +83,11 @@ class OrthancClient:
         return r.json()
 
     def series_tree(self, orthanc_study_id: str) -> list[dict]:
-        """시리즈 → 인스턴스 2단 트리 — 뷰어 썸네일 + 측정/Reference line용 기하 태그."""
+        """시리즈 → 인스턴스 2단 트리 — 뷰어 썸네일 + 측정/Reference line용 기하 태그.
+
+        전 인스턴스를 requestedTags 배치 1회로 조회(기존 인스턴스별 N+1 왕복 제거 —
+        실측 700+장 검사 열기 7~16s → 1~2s). 배치 실패 시 기존 인스턴스별 경로 폴백.
+        """
 
         def _floats(v: str) -> list[float]:
             try:
@@ -76,28 +95,61 @@ class OrthancClient:
             except ValueError:
                 return []
 
+        def _node(iid: str, itags: dict) -> dict:
+            return {
+                "orthanc_id": iid,
+                "sop_uid": itags.get("SOPInstanceUID", ""),
+                "instance_number": int(itags.get("InstanceNumber") or 0),
+                # 측정(mm)·Reference line 계산용 — 없으면 빈 값(프론트에서 px 폴백)
+                "rows": int(itags.get("Rows") or 0),
+                "cols": int(itags.get("Columns") or 0),
+                "pixel_spacing": _floats(itags.get("PixelSpacing", "")),       # [row, col] mm
+                "position": _floats(itags.get("ImagePositionPatient", "")),    # [x,y,z]
+                "orientation": _floats(itags.get("ImageOrientationPatient", "")),  # [rx..cz] 6개
+            }
+
         r = self._client.get(f"/studies/{orthanc_study_id}/series")
         r.raise_for_status()
+        series_list = r.json()
+
+        # 배치: 검사 전 인스턴스 + 필요한 태그를 한 번에 (인덱스 밖 태그는 Orthanc 가 파일에서 채움)
+        by_series: dict[str, list[dict]] = {}
+        batch_ok = False
+        try:
+            ir = self._client.get(
+                f"/studies/{orthanc_study_id}/instances",
+                params={"requestedTags": "SOPInstanceUID;InstanceNumber;Rows;Columns;"
+                                         "PixelSpacing;ImagePositionPatient;ImageOrientationPatient"},
+                timeout=120,
+            )
+            if ir.status_code == 200:
+                items = ir.json()
+                # requestedTags 미지원(구버전 Orthanc)이면 기하태그가 무음 강등되므로 폴백으로
+                if not items or "RequestedTags" in items[0]:
+                    for inst in items:
+                        itags = {**inst.get("MainDicomTags", {}), **inst.get("RequestedTags", {})}
+                        by_series.setdefault(inst.get("ParentSeries", ""), []).append(
+                            _node(inst["ID"], itags))
+                    batch_ok = True
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            # 네트워크뿐 아니라 파싱류(JSONDecodeError=ValueError, 키 결측)도 폴백으로
+            by_series = {}
+            batch_ok = False
+            logger.warning("series_tree 배치 조회 실패 — 인스턴스별 폴백(orthanc=%s)", orthanc_study_id)
+
         out = []
-        for s in r.json():
+        for s in series_list:
             tags = s.get("MainDicomTags", {})
-            instances = []
-            for iid in s.get("Instances", []):
-                ir = self._client.get(f"/instances/{iid}/tags?simplify")
-                if ir.status_code != 200:
-                    continue
-                itags = ir.json()
-                instances.append({
-                    "orthanc_id": iid,
-                    "sop_uid": itags.get("SOPInstanceUID", ""),
-                    "instance_number": int(itags.get("InstanceNumber") or 0),
-                    # 측정(mm)·Reference line 계산용 — 없으면 빈 값(프론트에서 px 폴백)
-                    "rows": int(itags.get("Rows") or 0),
-                    "cols": int(itags.get("Columns") or 0),
-                    "pixel_spacing": _floats(itags.get("PixelSpacing", "")),       # [row, col] mm
-                    "position": _floats(itags.get("ImagePositionPatient", "")),    # [x,y,z]
-                    "orientation": _floats(itags.get("ImageOrientationPatient", "")),  # [rx..cz] 6개
-                })
+            if batch_ok:
+                instances = by_series.get(s.get("ID", ""), [])
+            else:
+                # 폴백 — 기존 인스턴스별 조회(호환 유지)
+                instances = []
+                for iid in s.get("Instances", []):
+                    fr = self._client.get(f"/instances/{iid}/tags?simplify")
+                    if fr.status_code != 200:
+                        continue
+                    instances.append(_node(iid, fr.json()))
             instances.sort(key=lambda x: x["instance_number"])
             out.append({
                 "series_uid": tags.get("SeriesInstanceUID", ""),
@@ -180,7 +232,7 @@ class OrthancClient:
             return None
 
     def close(self) -> None:
-        self._client.close()
+        """no-op — 풀 공유 클라이언트는 keep-alive 유지(호출부의 기존 close 패턴과 호환)."""
 
 
 def orthanc_url_for_hospital(db, hospital_id) -> str | None:

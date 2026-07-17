@@ -18,7 +18,7 @@ const urlCache = new Map<string, string>();      // `${sop}|${wl}` → blob URL 
 const pixelPending = new Set<string>();          // 진행 중 sop (중복 로드 방지)
 const listeners = new Set<() => void>();         // 프레임 준비 알림(뷰어 재렌더 트리거)
 const LRU: string[] = [];                        // blob URL 정리용 키 순서
-const LRU_MAX = 400;
+const LRU_MAX = 1200;   // 대형 CT/MR 시리즈 전체가 캐시에 머물도록(시리즈 워머와 연동)
 
 export function setWasmPipeline(on: boolean): void { wasmOn = on; }
 export function isWasmPipeline(): boolean { return wasmOn; }
