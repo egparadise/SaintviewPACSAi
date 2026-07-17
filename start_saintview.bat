@@ -1,19 +1,27 @@
 @echo off
-rem Saintview PACS AI 원클릭 실행 — docker(DB/Orthanc/OHIF) + 백엔드 + 프론트(포털 3종)
+rem Saintview PACS AI 원클릭 실행 — docker(DB/Orthanc/OHIF) + 백엔드 + 프론트(포털 3종, HTTPS 전용)
 rem 이 파일은 UTF-8 + CRLF 로 저장한다(chcp 65001 전제 — CP949 로 재저장 금지).
 chcp 65001 >nul
 setlocal EnableExtensions
 cd /d %~dp0
 title Saintview PACS AI 실행
 
-rem ── 0. 서빙 스킴 결정: certs/dev.{key,crt} 있으면 HTTPS ──
-rem    주의: "set VAR=1 && ..." 처럼 && 앞에 공백을 두면 값에 공백이 포함돼
-rem    vite 의 VITE_HTTPS === '1' 비교가 깨진다(과거 장애 원인). 반드시 set "VAR=1" 형태 사용.
-set "SCHEME=http"
-if exist "frontend\certs\dev.key" if exist "frontend\certs\dev.crt" (
-  set "SCHEME=https"
-  set "VITE_HTTPS=1"
-)
+rem ── 0. HTTPS 인증서 확인(없으면 자동 생성) ──
+rem    프론트는 HTTPS 전용 — vite.config.ts 가 http 폴백 없이 강제한다.
+rem    (원격 PC 다중 모니터 감지 getScreenDetails 는 secure context=https 에서만 동작)
+if exist "frontend\certs\dev.key" if exist "frontend\certs\dev.crt" goto certs_ok
+echo [0/4] HTTPS 인증서가 없어 자동 생성합니다(frontend\certs\dev.key/crt)...
+if not exist "frontend\certs" mkdir "frontend\certs"
+set "OPENSSL=openssl"
+where openssl >nul 2>&1
+if errorlevel 1 set "OPENSSL=%ProgramFiles%\Git\usr\bin\openssl.exe"
+"%OPENSSL%" req -x509 -newkey rsa:2048 -nodes -keyout frontend\certs\dev.key -out frontend\certs\dev.crt -days 3650 -subj "/CN=saintview-dev" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" >nul 2>&1
+if exist "frontend\certs\dev.key" if exist "frontend\certs\dev.crt" goto certs_ok
+echo    [!] 인증서 생성 실패 - openssl 설치 후 재실행하거나 vite.config.ts 상단 명령으로 수동 생성하세요.
+echo        (HTTPS 전용 - 인증서 없이는 프론트가 기동하지 않습니다)
+pause
+exit /b 1
+:certs_ok
 
 echo [1/4] Docker(DB/Orthanc/OHIF) 확인...
 docker info >nul 2>&1
@@ -48,25 +56,17 @@ if not errorlevel 1 (
   start "Saintview Backend" /min cmd /c "cd /d %~dp0backend && py -3.11 -m uvicorn app.main:app --port 8000 --log-level warning"
 )
 
-echo [3/4] 프론트엔드 3종(:5173 Landing / :5174 관리자 / :5175 Client, %SCHEME%) 확인...
+echo [3/4] 프론트엔드 3종(:5173 Landing / :5174 관리자 / :5175 Client, HTTPS 전용) 확인...
 rem 자식 창 출력은 %TEMP%\sv_517x.log 에 남는다(창이 사라져도 원인 추적)
 call :start_front 5173 "Saintview Landing"
 call :start_front 5174 "Saintview Admin"
 call :start_front 5175 "Saintview Client"
 
 echo [4/4] Landing 페이지 응답 대기(최대 60초)...
-rem 실제 응답하는 스킴(https→http 순)을 감지해 그 주소로 브라우저를 연다.
-rem 과거에는 https 고정이라, 서버가 http 로 떠 있으면 SSL 오류 페이지가 열려 "실행 안 됨"처럼 보였다.
 set /a _try=0
-set "OPEN_URL="
 :wait_landing
 curl -sk -o NUL -m 2 https://localhost:5173 >nul 2>&1
-if not errorlevel 1 set "OPEN_URL=https://localhost:5173"
-if not defined OPEN_URL (
-  curl -s -o NUL -m 2 http://localhost:5173 >nul 2>&1
-  if not errorlevel 1 set "OPEN_URL=http://localhost:5173"
-)
-if defined OPEN_URL goto open_landing
+if not errorlevel 1 goto open_landing
 set /a _try+=1
 if %_try% geq 60 goto landing_fail
 ping -n 2 127.0.0.1 >nul
@@ -74,23 +74,29 @@ goto wait_landing
 
 :landing_fail
 echo    [!] Landing이 응답하지 않습니다 - 로그 확인: %TEMP%\sv_5173.log
-set "OPEN_URL=%SCHEME%://localhost:5173"
 
 :open_landing
 echo.
-echo   Saintview PACS AI Landing : %OPEN_URL%
-echo   관리자 포털               : %SCHEME%://localhost:5174  (admin / admin1234)
-echo   Client 포털               : %SCHEME%://localhost:5175  (SAMPLE01 + 개별 ID)
+echo   Saintview PACS AI Landing : https://localhost:5173
+echo   관리자 포털               : https://localhost:5174  (admin / admin1234)
+echo   Client 포털               : https://localhost:5175  (SAMPLE01 + 개별 ID)
+echo   ※ 자체서명 인증서 - 최초 접속 시 브라우저 경고는 [고급]-[계속]으로 1회 통과
 echo.
-start "" %OPEN_URL%
+start "" https://localhost:5173
 exit /b 0
 
-rem ── 서브루틴: 포트가 비어 있을 때만 vite 인스턴스 기동(중복 기동·로그 덮어쓰기 방지) ──
+rem ── 서브루틴: 포트별 vite 기동 — https 로 응답 중이면 유지, 비-https 점유는 종료 후 재기동 ──
 :start_front
 netstat -an | findstr /c:":%~1 " | findstr /c:"LISTENING" >nul 2>&1
-if not errorlevel 1 (
-  echo    :%~1 이미 실행 중 - 건너뜁니다.
-  goto :eof
-)
+if errorlevel 1 goto spawn_front
+curl -sk -o NUL -m 2 https://localhost:%~1 >nul 2>&1
+if errorlevel 1 goto kill_front
+echo    :%~1 이미 실행 중(https) - 건너뜁니다.
+goto :eof
+:kill_front
+echo    :%~1 포트를 비-https 프로세스가 점유 중 - 종료 후 https 로 재기동합니다.
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /c:":%~1 " ^| findstr /c:"LISTENING"') do taskkill /f /t /pid %%p >nul 2>&1
+ping -n 2 127.0.0.1 >nul
+:spawn_front
 start "%~2 (%~1)" /min cmd /c "cd /d %~dp0frontend && npm run dev -- --host 0.0.0.0 --port %~1 --strictPort > %TEMP%\sv_%~1.log 2>&1"
 goto :eof

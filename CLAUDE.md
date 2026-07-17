@@ -147,7 +147,7 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
   - **TY 팔레트 아이콘 3배**(17→51px, 팔레트 폭 200), 설정 슬라이더 13~64, 구값 자동 승격
   - **STT 음성 판독**: 판독창(ReportWindow·ReportDock) Font 왼쪽 마이크 버튼 — 공용 `useDictation` 훅(browser=WebSpeech / whisper_local·openai_api=녹음→`/api/stt`), 마지막 포커스 필드 삽입 · Settings 'AI 정책'→'AI 기능' 탭 + 설치/키 상태 · Server AI 등록 하단 `SttServerPanel`(엔진/모델·상태·마이크 테스트, 전역 ai.policy) · `GET /api/stt/status` · 전역 ai.policy 라 모든 병원·Client 공통 구동(연동)
 - [ ] 남은 것(차기): 서버 Whisper 설치(`pip install faster-whisper`)/OPENAI_API_KEY · Client 좌석 접속 실시간 연동 · 가입 결재 실연동 · OCR 현장 튜닝 · 딕테이션 결과 서버 저장 · In 뷰어 아이콘 확대(infi_tool_size) · deploy/generated 런타임 아티팩트 gitignore
-- 실행: **`start_saintview.bat`(바탕화면 'Saintview PACS AI' 아이콘)** 또는 수동: `docker compose -f deploy/docker-compose.yml up -d` → `cd backend && py -3.11 -m uvicorn app.main:app --port 8000` → vite 3종(5173 Landing·5174 관리자·5175 Client, `--strictPort`). admin/admin1234(운영 전 변경). DB 스키마는 `alembic upgrade head`(개발은 init_db의 `_sync_columns` 자가 보정)
+- 실행: **`start_saintview.bat`(바탕화면 'Saintview PACS AI' 아이콘)** 또는 수동: `docker compose -f deploy/docker-compose.yml up -d` → `cd backend && py -3.11 -m uvicorn app.main:app --port 8000` → vite 3종(5173 Landing·5174 관리자·5175 Client, `--strictPort`). **프론트는 HTTPS 전용**(원격 PC 다중 모니터 감지 `getScreenDetails`=secure context 필수) — vite가 `frontend/certs/dev.{key,crt}`로 https 고정(인증서 없으면 기동 거부, 런처가 자동 생성)·CORS도 https 오리진. admin/admin1234(운영 전 변경). DB 스키마는 `alembic upgrade head`(개발은 init_db의 `_sync_columns` 자가 보정)
 - **작업 마무리 규칙:** 코드 작업이 끝나면(커밋 후) 항상 백엔드(uvicorn:8000)·프론트엔드(vite:5173)를 재실행해 변경이 반영된 상태로 마친다. 재실행 후 `/api/health`와 5173 응답을 확인할 것. ⚠ `backend/.env`가 `AI_MODE=live`이므로 하네스·일괄 테스트는 `SAINTVIEW_AI_MODE=mock` 강제 후 실행(실 API 비용).
 
 ---

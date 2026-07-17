@@ -44,7 +44,8 @@ def _resolve_target(host_header: str) -> str:
     # 오픈 리다이렉트 차단 — 허용 문자셋을 벗어난 Host(외부 도메인·경로·userinfo 주입)는 로컬로 폴백.
     if not hostname or not _SAFE_HOST.match(hostname):
         hostname = "127.0.0.1"
-    return f"http://{hostname}:{DEFAULT_LANDING_PORT}/"
+    # 랜딩 포털은 HTTPS 전용(vite 자체서명 고정) — 리다이렉트 대상도 https 로 조립한다.
+    return f"https://{hostname}:{DEFAULT_LANDING_PORT}/"
 
 
 class _RedirectHandler(BaseHTTPRequestHandler):

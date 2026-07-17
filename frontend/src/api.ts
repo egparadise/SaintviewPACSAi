@@ -1,8 +1,8 @@
 // API 클라이언트 — 백엔드 FastAPI
 const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 const OHIF_BASE = import.meta.env.VITE_OHIF_BASE ?? "http://localhost:3000";
-/** 뷰어 창 베이스 — 별도 포트로 띄우려면 frontend/.env에 VITE_VIEWER_BASE=http://localhost:5176
- *  설정 후 `npm run dev:viewer`(5176)를 함께 실행. 빈값=같은 출처(포트) 사용.
+/** 뷰어 창 베이스 — 별도 포트로 띄우려면 frontend/.env에 VITE_VIEWER_BASE=https://localhost:5176
+ *  설정 후 `npm run dev:viewer`(5176)를 함께 실행(HTTPS 전용 — vite가 https로 고정). 빈값=같은 출처(포트) 사용.
  *  ⚠ 5173/5174/5175 는 포털 예약 포트(Landing/관리자/Client) — 뷰어 분리 포트로 쓰면 역할 가드와 충돌 */
 export const VIEWER_BASE: string = import.meta.env.VITE_VIEWER_BASE ?? "";
 

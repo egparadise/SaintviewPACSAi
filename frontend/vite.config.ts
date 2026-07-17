@@ -7,20 +7,22 @@ import { dirname, resolve } from 'node:path'
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
 
-// 자체서명 HTTPS — 원격(Tailscale) PC 의 '보안 컨텍스트' 확보용(모니터 감지 등 브라우저 API).
-// VITE_HTTPS=1 일 때만 certs/dev.{key,crt} 를 읽어 HTTPS 로 서빙(없으면 경고 후 http 폴백).
-// 인증서 생성(서버 PC): frontend 에서
+// 자체서명 HTTPS 전용 — 모니터 감지(getScreenDetails) 등 secure context 필수 API가
+// 원격 PC(다른 좌석·Tailscale) 접속에서도 동작해야 하므로 http 폴백 없이 HTTPS 로 고정한다.
+// (http 로 조용히 내려가면 원격 다중 모니터 인식이 소리 없이 죽는다 — 기동 거부가 낫다)
+// 인증서 생성: start_saintview.bat 이 없으면 자동 생성. 수동 생성은 frontend 에서
 //   openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/dev.key -out certs/dev.crt -days 3650 \
 //     -subj "/CN=saintview-dev" \
 //     -addext "subjectAltName=IP:<tailscaleIP>,IP:127.0.0.1,DNS:localhost,DNS:<host>.ts.net"
 // 클라이언트는 최초 1회 '안전하지 않음' 경고를 넘기면 secure context 로 동작(내부 tail넷 전용).
 function httpsOption() {
-  if (process.env.VITE_HTTPS !== '1') return undefined
   const key = resolve(rootDir, 'certs/dev.key')
   const cert = resolve(rootDir, 'certs/dev.crt')
   if (!existsSync(key) || !existsSync(cert)) {
-    console.warn('[vite] VITE_HTTPS=1 이지만 certs/dev.key|crt 를 찾지 못함 — HTTP 로 폴백합니다.')
-    return undefined
+    throw new Error(
+      '[vite] HTTPS 전용 — certs/dev.key|crt 가 없어 기동할 수 없습니다. ' +
+      'start_saintview.bat 실행(자동 생성) 또는 vite.config.ts 상단의 openssl 명령으로 생성하세요.',
+    )
   }
   return { key: readFileSync(key), cert: readFileSync(cert) }
 }
@@ -41,7 +43,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     allowedHosts: true,      // Vite Host 헤더 체크 우회(Tailscale IP·MagicDNS 호스트 허용)
-    https: httpsOption(),    // VITE_HTTPS=1 → 자체서명 HTTPS(원격 secure context), 그 외 http
+    https: httpsOption(),    // 항상 자체서명 HTTPS(원격 secure context 보장) — http 폴백 없음
     proxy: {
       '/api': 'http://localhost:8000',        // 백엔드 FastAPI
       '/dicom-web': 'http://localhost:3000',  // Orthanc DICOMweb (OHIF nginx 경유)

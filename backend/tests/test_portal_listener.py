@@ -80,8 +80,8 @@ def test_redirect_target_from_host_header_when_no_fixed():
         raise AssertionError("302 이어야 함")
     except urllib.error.HTTPError as e:
         assert e.code == 302
-        # Host = 127.0.0.1:{port} → 호스트명 127.0.0.1 + 랜딩 포트 5173
-        assert e.headers.get("Location") == f"http://127.0.0.1:{portal_listener.DEFAULT_LANDING_PORT}/"
+        # Host = 127.0.0.1:{port} → 호스트명 127.0.0.1 + 랜딩 포트 5173 (랜딩은 HTTPS 전용)
+        assert e.headers.get("Location") == f"https://127.0.0.1:{portal_listener.DEFAULT_LANDING_PORT}/"
 
 
 # ════════════════════════════════ 바인드 실패 우아 처리 ════════════════════════════════
@@ -123,11 +123,11 @@ def test_resolve_target_rejects_open_redirect():
     # 고정 target 없을 때 Host 헤더 기반 조립 — 외부 도메인/경로/userinfo 주입은 로컬로 폴백
     portal_listener._state["target"] = ""
     land = portal_listener.DEFAULT_LANDING_PORT
-    # 정상 호스트는 그대로 사용(스킴·포트 고정)
-    assert portal_listener._resolve_target("192.168.0.10:9000") == f"http://192.168.0.10:{land}/"
+    # 정상 호스트는 그대로 사용(스킴 https·포트 고정 — 랜딩은 HTTPS 전용)
+    assert portal_listener._resolve_target("192.168.0.10:9000") == f"https://192.168.0.10:{land}/"
     # 오픈 리다이렉트 시도는 모두 127.0.0.1 로 강등
     for hostile in ("evil.com/path", "user@evil.com", "evil.com\\@x", "ho st", "bad\x00x"):
-        assert portal_listener._resolve_target(hostile) == f"http://127.0.0.1:{land}/", hostile
+        assert portal_listener._resolve_target(hostile) == f"https://127.0.0.1:{land}/", hostile
 
 
 # ════════════════════════════════ 이중 apply(재기동) 안전 ════════════════════════════════

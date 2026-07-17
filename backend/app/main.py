@@ -92,7 +92,10 @@ app = FastAPI(title="Saintview PACS AI", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],  # Landing/관리자/Client 포털 오리진
+    allow_origins=[
+        # Landing/관리자/Client 포털 오리진 — 프론트는 HTTPS 전용(vite 자체서명, 원격 모니터 감지 secure context)
+        "https://localhost:5173", "https://localhost:5174", "https://localhost:5175",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
