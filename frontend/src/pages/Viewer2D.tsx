@@ -572,7 +572,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
   );
   const [selSeries, setSelSeries] = useState<string | null>(null);
-  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan" | "select" | "scroll">("zoom");
+  // 기본 툴은 항상 Select — 시작·해제 공통(In-View 정합). Zoom/Pan/W/L 은 사용자가 명시 선택 시에만
+  const [mouseMode, setMouseMode] = useState<"wl" | "zoom" | "pan" | "select" | "scroll">("select");
   // 팔레트 섹션 — 기본 전체 펼침(헤더 클릭으로 개별 접기)
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set(["common", "anno", "anatomy", "px", "shut", "2d", "etc"]));
   const toggleSec = (k: string) => setOpenSecs((p) => {
@@ -736,6 +737,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 3D Cursor Off(버튼 재클릭·다른 툴 선택·Esc 포함) → 십자 마커 전부 제거
   useEffect(() => {
     if (tool !== "cursor3d") setCross3d((m) => (Object.keys(m).length ? {} : m));
+  }, [tool]);
+  // 기능 툴 해제(재클릭·Esc·삭제 시 자동 Off 등 모든 경로) → 기본 툴은 항상 Select 로 복귀.
+  // 툴 활성 없이 Zoom/Pan/W/L 버튼만 고른 경우는 tool 변화가 없어 사용자의 선택이 유지된다.
+  useEffect(() => {
+    if (tool === null) setMouseMode((m) => (m === "select" ? m : "select"));
   }, [tool]);
   const [annos, setAnnos] = useState<Anno[]>([]);
   const [draft, setDraft] = useState<{ pid: string; sop_uid: string; series_uid: string; points: number[][] } | null>(null);
