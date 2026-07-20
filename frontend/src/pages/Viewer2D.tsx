@@ -2777,7 +2777,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     </span>
   );
   const ModeBtn = ({ k, label, title }: { k: "wl" | "zoom" | "pan" | "select"; label: string; title: string }) => (
-    <button onClick={() => { recordUse(k); setMouseMode(k); }} title={title}
+    // 재클릭 = 해제 — 기본(Select)으로 복귀해 버튼 색 원복(SaintView 메뉴 mkMode·In 팔레트와 정합)
+    <button onClick={() => { recordUse(k); setMouseMode(mouseMode === k && k !== "select" ? "select" : k); }} title={title}
             style={{ padding: "6px 0", fontSize: 12, width: paletteHoriz ? 60 : "100%",
                      background: mouseMode === k ? "var(--accent)" : undefined }}>
       <TyInner id={k} label={label} />
@@ -2798,9 +2799,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* ★ Quick 행 디스패치 — 기록된 사용 id → 실행 (툴/마우스모드/액션 공용) */
   const quickDefs: Record<string, { icon: string; label: string; anatomy?: boolean; run: () => void }> = {
-    zoom: { icon: "zoom", label: "Zoom", run: () => setMouseMode("zoom") },
-    pan: { icon: "pan", label: "Pan", run: () => setMouseMode("pan") },
-    wl: { icon: "wl", label: "W/L", run: () => setMouseMode("wl") },
+    // 재클릭 = 해제(Select 복귀) — 팔레트 ModeBtn 과 동일 토글
+    zoom: { icon: "zoom", label: "Zoom", run: () => setMouseMode((m) => (m === "zoom" ? "select" : "zoom")) },
+    pan: { icon: "pan", label: "Pan", run: () => setMouseMode((m) => (m === "pan" ? "select" : "pan")) },
+    wl: { icon: "wl", label: "W/L", run: () => setMouseMode((m) => (m === "wl" ? "select" : "wl")) },
     fit: { icon: "fit", label: "Fit", run: () => act("fit") },
     invert: { icon: "inv", label: "Inv", run: () => act("invert") },
     rotL: { icon: "rotL", label: "⟲90", run: () => act("rotL") },

@@ -1239,6 +1239,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           setTool("select"); setPend(null);
           say("셔터 해제 — 적용된 작업이 제거되었습니다");
           schedHist();
+        } else if (tool === id) {
+          // 무장만 하고 아직 그리지 않은 상태에서 재클릭 = 해제(버튼 색 원복 — V2D pickTool 정합)
+          setTool("select"); setPend(null);
+          say("셔터 도구 해제");
         } else {
           setTool(id as Tool); setPend(null);
           setSelAnno(null); setSelAnnos(null); setMarquee(null);
@@ -1251,6 +1255,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       default: {
         const item = PALETTE.find((t) => t.id === id);
         if (["select", "pan", "zoom", "wl"].includes(id) || item?.mode) {
+          if (tool === id && id !== "select") {
+            // 재클릭 = 해제 — 기본(Select)으로 복귀해 버튼 색 원복(V2D pickTool·SaintView 메뉴와 정합)
+            setTool("select"); setPend(null);
+            say(`${(item?.label ?? id).split("—")[0].trim()} 해제`);
+            break;
+          }
           setTool(id as Tool);
           setPend(null);
           setSelAnno(null); setSelAnnos(null); setMarquee(null);   // §D: 도구 전환 시 편집·마퀴 선택 해제(진행중 pend 정리)
