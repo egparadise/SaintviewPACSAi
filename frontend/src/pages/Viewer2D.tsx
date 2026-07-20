@@ -1503,6 +1503,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const mv = (e: PointerEvent) => {
       const d = c3DragRef.current;
       if (!d) return;
+      // 창 밖에서 버튼을 놓아 pointerup 이 유실돼도 좌버튼 해제가 감지되면 즉시 종료
+      if (!(e.buttons & 1)) { c3DragRef.current = null; return; }
       if (c3RafRef.current) return;   // rAF 스로틀(프레임당 1회)
       const { clientX, clientY } = e;
       c3RafRef.current = requestAnimationFrame(() => {

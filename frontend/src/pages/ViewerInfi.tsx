@@ -410,6 +410,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const marqueeRef = useRef<{ pi: number; sop: string; inst: InstanceNode; tileEl: HTMLElement; a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   // 3D Cursor 마커(페인별, 일시적) · 돋보기 위치 · 픽셀값 표 모달 · 딕테이션
   const [cross3d, setCross3d] = useState<Record<number, { sop: string; x: number; y: number }>>({});
+  // 3D Cursor 홀드-드래그 — 버튼을 누른 채 움직이면 rAF 스로틀로 연속 재배치(V2D 996b4b4 동형).
+  // sop=누른 시점 인스턴스 앵커 — 배치가 페인 index 를 바꿔도 드래그 내내 같은 슬라이스 평면에서
+  // 추적(Image Layout 타일 오프셋로 index 가 프레임마다 전진하는 발산 방지)
+  const c3DragRef = useRef<{ pi: number; sop: string; tileEl: HTMLElement } | null>(null);
+  const c3RafRef = useRef(0);
+  const c3PlaceRef = useRef<(cx: number, cy: number) => void>(() => {});
+  // 3D Cursor Off(다른 툴 선택·Esc 포함) → 십자 마커 전부 제거 (V2D 3ec2fcf 동형)
+  useEffect(() => {
+    if (tool !== "cursor3d") setCross3d((m) => (Object.keys(m).length ? {} : m));
+  }, [tool]);
   const [magPos, setMagPos] = useState<{ pi: number; t: number; mx: number; my: number;
                                          nx: number; ny: number; sc: number } | null>(null);
   const [tableData, setTableData] = useState<{ title: string; rows: string[][] } | null>(null);
@@ -1328,7 +1338,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       // ── 3D Cursor: 클릭 지점을 모든 페인의 동일 3D 위치로 ──
       case "cursor3d": {
         const g = geomOf(inst);
-        if (!g) { say("기하 정보가 없어 3D Cursor 를 쓸 수 없습니다"); break; }
+        if (!g) {
+          // 기하 정보 없음 — index 비율 근사 동기(V2D 동형: 합성·구형 장비 시리즈도 동작)
+          // 비율 기준은 클릭한 인스턴스(Image Layout 타일 t>0 클릭도 그 타일 기준 — 마커·동기 정합)
+          const src = p.series!;
+          const si = Math.max(0, src.instances.findIndex((q) => q.sop_uid === inst.sop_uid));
+          const ratio = src.instances.length > 1 ? si / (src.instances.length - 1) : 0;
+          const am: Record<number, { sop: string; x: number; y: number }> = {};
+          setPanes((ps) => ps.map((q, k) => {
+            const s = q.series;
+            if (!s) return q;
+            const ki = Math.round(ratio * (s.instances.length - 1));
+            const bi = s.instances[ki];
+            if (!bi) return q;
+            am[k] = { sop: bi.sop_uid,
+                      x: pts[0].x / (inst.cols || 1) * (bi.cols || 1),
+                      y: pts[0].y / (inst.rows || 1) * (bi.rows || 1) };
+            return { ...q, index: ki };
+          }));
+          setCross3d(am);
+          say("3D Cursor — 기하 정보 없음: index 비율 근사 동기");
+          break;
+        }
         const P: number[] = [0, 1, 2].map((k) =>
           g.pos[k] + pts[0].x * g.cs * g.row[k] + pts[0].y * g.rs * g.col[k]);
         const markers: Record<number, { sop: string; x: number; y: number }> = {};
@@ -1457,6 +1488,42 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       y: (clientY - (r.top + r.height / 2 + p.ty)) / s + inst.rows / 2,
     };
   };
+  // 3DC 홀드-드래그 배치 — 렌더마다 최신 상태·함수 캡처(stale closure 방지), pointermove 는 rAF 스로틀
+  c3PlaceRef.current = (cx: number, cy: number) => {
+    // 드래그 중 툴 전환(Esc·단축키) 시 finishTool 이 다른 케이스로 오배치되지 않게 종료
+    if (tool !== "cursor3d") { c3DragRef.current = null; return; }
+    const d = c3DragRef.current;
+    if (!d || !d.tileEl.isConnected) return;
+    const p = panesRef.current[d.pi];
+    const insts = p?.series?.instances;
+    if (!p?.series || !insts?.length) return;
+    const inst = insts.find((q) => q.sop_uid === d.sop);   // 앵커 인스턴스 — 드래그 내내 불변
+    if (!inst) { c3DragRef.current = null; return; }        // 드래그 중 시리즈 교체 — 종료
+    const pt = screenToImg(cx, cy, d.tileEl, p, inst);
+    // 이미지 밖 — 마지막 위치 유지(V2D 동일)
+    if (pt.x < 0 || pt.y < 0 || pt.x > (inst.cols || 1) || pt.y > (inst.rows || 1)) return;
+    finishTool(d.pi, p, inst, [pt]);
+  };
+  useEffect(() => {
+    const mv = (e: PointerEvent) => {
+      if (!c3DragRef.current) return;
+      // 창 밖에서 버튼을 놓아 pointerup 이 유실돼도 좌버튼 해제가 감지되면 즉시 종료
+      if (!(e.buttons & 1)) { c3DragRef.current = null; return; }
+      if (c3RafRef.current) return;
+      const { clientX, clientY } = e;
+      c3RafRef.current = requestAnimationFrame(() => { c3RafRef.current = 0; c3PlaceRef.current(clientX, clientY); });
+    };
+    const up = () => { c3DragRef.current = null; };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", mv);
+      window.removeEventListener("pointerup", up);
+      if (c3RafRef.current) cancelAnimationFrame(c3RafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 점→선분 최단거리(이미지 픽셀) — 히트테스트 본체 근접 판정용
   const distToSeg = (c: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number => {
     const vx = b.x - a.x, vy = b.y - a.y;
@@ -2199,7 +2266,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                      setPend({ sop: inst.sop_uid, pts: [start, start] });
                      return;
                    }
-                   if (isPointTool(tool)) { measureClick(e, e.currentTarget, pi, p, inst); return; }
+                   if (isPointTool(tool)) {
+                     measureClick(e, e.currentTarget, pi, p, inst);
+                     // 3D Cursor — 클릭 배치 + 버튼 홀드 중 연속 추적(자연스러운 드래그 탐색, V2D 동형)
+                     if (tool === "cursor3d") c3DragRef.current = { pi, sop: inst.sop_uid, tileEl: e.currentTarget };
+                     return;
+                   }
                    if (tool === "select") {
                      // 편집 히트테스트(§B) — 점 핸들(resize)·본체(move)·미스(선택해제, 기존 pan/zoom/wl 진행)
                      const sop = inst.sop_uid;
