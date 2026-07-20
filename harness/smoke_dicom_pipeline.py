@@ -5,11 +5,15 @@ Orthanc(docker compose) 미가동 시 SKIP으로 종료(회귀 기준선 — CLA
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+
+# AI 판독 초안은 운영 기본 보류(off) — 스모크는 생성 파이프라인 자체를 검증하므로 env 로 강제 활성
+os.environ.setdefault("SAINTVIEW_AI_DRAFT_ENABLED", "1")
 
 from make_sample_dicom import make_ct_instance  # noqa: E402
 

@@ -1524,7 +1524,10 @@ ${rows}
             리포트 없음
             <div style={{ marginTop: 6 }}>
               <MiniBtn disabled={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
-                       onClick={async () => { await api.analyze(detail.id); onChanged(); }}>AI 초안 생성</MiniBtn>
+                       onClick={async () => {
+                         try { await api.analyze(detail.id); onChanged(); }
+                         catch (e) { alert((e as Error).message); }   // AI 판독 보류(409) 등 안내
+                       }}>AI 초안 생성</MiniBtn>
             </div>
           </Empty>
         ) : (
@@ -1645,7 +1648,10 @@ ${rows}
             <div style={{ display: "flex", gap: 5, marginTop: "auto", paddingTop: 4 }}>
               {/* 판독 작성·변경(report.write)/판독 출력(report.print) 게이트 — 서버 403 이 최종 방어선 */}
               <MiniBtn disabled={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
-                       onClick={async () => { await api.analyze(detail.id); onChanged(); }}>초안 재생성</MiniBtn>
+                       onClick={async () => {
+                         try { await api.analyze(detail.id); onChanged(); }
+                         catch (e) { alert((e as Error).message); }   // AI 판독 보류(409) 등 안내
+                       }}>초안 재생성</MiniBtn>
               <MiniBtn disabled={!canPrint} title={canPrint ? undefined : PERM_DENIED_TIP}
                        onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
               {!finalized && (
@@ -2723,7 +2729,12 @@ export function Worklist() {
         if (reps.items[0]) downloadReportPdf(reps.items[0].id);
         break;
       }
-      case "regen": if (target) { await api.analyze(target.id); onChanged(); } break;
+      case "regen":
+        if (target) {
+          try { await api.analyze(target.id); onChanged(); }
+          catch (e) { alert((e as Error).message); }   // AI 판독 보류(409) 등 안내
+        }
+        break;
       case "copyreport": {
         // ③ report_copy(UBPACS-Z): 동일 환자 최근 확정 판독을 현재 초안 Conclusion에 복사
         if (!target) break;

@@ -361,7 +361,13 @@ def study_detail(db: Session, study_id: int) -> dict | None:
     return row
 
 
-def queue_ai_job(db: Session, study: Study, kind: str = "draft") -> AiJob:
+def queue_ai_job(db: Session, study: Study, kind: str = "draft") -> AiJob | None:
+    # AI 판독 보류 스위치 — 자동(Orthanc 동기화·Import)·수동(재생성) 모든 큐잉의 단일 관문.
+    # 보류 중이면 None 반환(호출부: 자동 경로는 조용히 건너뛰고, 수동 API 는 409 안내).
+    from app.services.settings_service import ai_draft_enabled
+
+    if not ai_draft_enabled(db):
+        return None
     job = AiJob(study_id=study.id, kind=kind, status="queued")
     db.add(job)
     db.commit()

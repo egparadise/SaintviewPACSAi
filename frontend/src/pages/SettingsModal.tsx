@@ -195,6 +195,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [department, setDepartment] = useState("");
   const [footer, setFooter] = useState("");
   const [autoGenerate, setAutoGenerate] = useState(true);
+  // AI 판독 초안 마스터 스위치 — RAG Structured Report 개편 전까지 기본 보류(off)
+  const [draftEnabled, setDraftEnabled] = useState(false);
   const [vision, setVision] = useState(false);
   // STT 엔진 (음성판독 — 브라우저/Whisper 오픈소스/상용 API)
   const [sttEngine, setSttEngine] = useState("browser");
@@ -410,6 +412,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       api.getSetting("ai.policy").then((r) => {
         const v = r.value as Record<string, boolean | string>;
         setAutoGenerate((v.auto_generate as boolean) ?? true);
+        setDraftEnabled((v.draft_enabled as boolean) ?? false);   // 기본 보류
         setVision((v.vision as boolean) ?? false);
         setSttEngine((v.stt_engine as string) ?? "browser");
         setSttModel((v.stt_model as string) ?? "");
@@ -494,7 +497,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       }
       await api.putSetting("pdf.template", { hospital, department, footer }, "global");
       await api.putSetting("ai.policy", {
-        auto_generate: autoGenerate, vision, stt_engine: sttEngine, stt_model: sttModel,
+        draft_enabled: draftEnabled, auto_generate: autoGenerate, vision,
+        stt_engine: sttEngine, stt_model: sttModel,
       }, "global");
     }
     setSaved("저장됨 — 왼쪽 ⟳ Refresh를 누르면 즉시 적용·확인됩니다");
@@ -1954,8 +1958,19 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             {page === "ai" && isAdmin && (
               <>
                 <Group title="AI 정책">
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                    <input type="checkbox" checked={autoGenerate} onChange={(e) => setAutoGenerate(e.target.checked)} />
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, fontWeight: 700 }}>
+                    <input type="checkbox" checked={draftEnabled} onChange={(e) => setDraftEnabled(e.target.checked)} />
+                    AI 판독 초안 생성 (Structured Report) — 마스터 스위치
+                  </label>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 22 }}>
+                    {draftEnabled
+                      ? "활성 — 자동/수동 초안 생성이 동작합니다."
+                      : "보류 중 — RAG 기반 Structured Report 개편 전까지 자동·수동 초안 생성이 전면 차단됩니다(기존 초안 열람은 가능)."}
+                  </div>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5,
+                                  opacity: draftEnabled ? 1 : 0.5 }}>
+                    <input type="checkbox" checked={autoGenerate} disabled={!draftEnabled}
+                           onChange={(e) => setAutoGenerate(e.target.checked)} />
                     검사 도착 시 초안 자동 생성
                   </label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>

@@ -11,6 +11,9 @@ os.environ["SAINTVIEW_EMBEDDING_BACKEND"] = "local"
 os.environ["SAINTVIEW_JWT_SECRET"] = "test-secret"
 # 앱 lifespan의 MPPS 리스너는 끄고(포트 충돌 방지), MPPS 테스트는 전용 포트로 직접 띄운다
 os.environ["SAINTVIEW_MPPS_ENABLED"] = "0"
+# AI 판독 초안은 운영 기본 보류(off) — 생성 기계를 검증하는 기존 테스트를 위해 env 로 강제 활성
+# (ai.policy 를 덮어쓰는 테스트가 있어도 env 가 우선이라 순서 무관. 보류 동작 자체는 test_ai_hold 가 검증)
+os.environ["SAINTVIEW_AI_DRAFT_ENABLED"] = "1"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

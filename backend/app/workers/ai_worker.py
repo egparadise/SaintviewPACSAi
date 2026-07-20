@@ -61,6 +61,17 @@ def process_once() -> int:
                 select(AiJob).where(AiJob.status == "queued").order_by(AiJob.id).limit(20)
             ).scalars()
         )
+        # AI 판독 보류 스위치 — 보류 중이면 생성하지 않고 대기 잡을 드레인(skipped)한다
+        # (보류 이전에 쌓인 잡·경합으로 새어 들어온 잡이 활성화 시점에 한꺼번에 실행되는 것 방지)
+        from app.services.settings_service import ai_draft_enabled
+
+        if jobs and not ai_draft_enabled(db):
+            for job in jobs:
+                job.status = "skipped"
+                job.error = "AI 판독 보류 중(ai.policy.draft_enabled=off) — 생성하지 않음"
+            db.commit()
+            logger.info("AI 판독 보류 — 대기 작업 %d건 skipped", len(jobs))
+            return 0
         for job in jobs:
             try:
                 run_draft_job(db, job)

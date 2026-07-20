@@ -154,6 +154,10 @@ def analyze(study_id: int, db: Session = Depends(get_db), user: dict = Depends(c
 
         raise HTTPException(status_code=409, detail=LOCKED_MSG)
     job = queue_ai_job(db, study, kind="regenerate")
+    if job is None:
+        # AI 판독 보류(ai.policy.draft_enabled=off) — RAG Structured Report 개편 전까지 기본 비활성
+        raise HTTPException(status_code=409,
+                            detail="AI 판독 초안 기능이 보류 중입니다 — 설정 > AI 에서 활성화할 수 있습니다")
     return {"job_id": job.id, "status": job.status}
 
 

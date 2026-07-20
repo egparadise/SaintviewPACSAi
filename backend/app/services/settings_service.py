@@ -48,6 +48,23 @@ def set_hospital_setting(db: Session, hospital_id: int, key: str, value: dict) -
     set_setting(db, key, value, scope="hospital", scope_id=str(hospital_id))
 
 
+def ai_draft_enabled(db: Session) -> bool:
+    """AI 판독 초안(Structured Report) 기능 마스터 스위치 — **기본 보류(off)**.
+
+    향후 RAG 기반 Structured Report 개편 전까지 기능을 보류한다(2026-07-20 결정).
+    - 운영: 설정 `ai.policy.draft_enabled`(관리자 GUI 설정>AI)로만 활성화.
+    - 테스트/하네스: env `SAINTVIEW_AI_DRAFT_ENABLED=1` 오버라이드(설정 덮어쓰기와 무관하게
+      생성 기계 자체를 검증) — env 가 설정보다 우선.
+    """
+    import os
+
+    env = os.getenv("SAINTVIEW_AI_DRAFT_ENABLED")
+    if env in ("0", "1"):
+        return env == "1"
+    policy = get_setting(db, "ai.policy", default={}) or {}
+    return bool(policy.get("draft_enabled", False))
+
+
 def set_setting(db: Session, key: str, value: dict, *, scope: str = "global", scope_id: str = "") -> None:
     row = db.execute(
         select(AppSetting).where(
