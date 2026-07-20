@@ -1635,7 +1635,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       drag.current = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, btn: e.button, pane: i, moved: false, shift: e.shiftKey };
     }
   };
-  const onMouseMove = (e: React.MouseEvent) => {
+  const onMouseMove = (e: { clientX: number; clientY: number }) => {
     // 드래그로 그리기(§A) — 두번째 점 실시간 갱신 → pend[start,cur] 러버밴드 미리보기
     const ad = annoDragRef.current;
     if (ad) {
@@ -1712,7 +1712,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       }
     }
   };
-  const endDrag = (e?: React.MouseEvent) => {
+  const endDrag = (e?: { type: string; clientX: number; clientY: number }) => {
     // 드래그로 그리기 종료(§A) — 이동거리 ≥ 3px(이미지px)면 finishTool([start,cur]), 미만이면 취소(클릭 오작동 방지)
     const ad = annoDragRef.current;
     if (ad) {
@@ -1760,6 +1760,58 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       else setCtxMenu({ x: e.clientX, y: e.clientY, pane: d.pane });
     }
   };
+  // ── 우클릭 확장(Linkclump 류) 링크박스 차단 — Viewer2D(358fbbd) 동형 이식 ──
+  // window CAPTURE pointerdown 에서 우클릭 preventDefault → 스펙상 compat mousedown/mousemove/mouseup 이
+  // 아예 생성되지 않아, mousedown 을 듣는 확장은 등록 순서와 무관하게 무력화된다.
+  // 그 결과 React(mouse) 핸들러도 우클릭 경로에서 발화하지 않으므로, 우드래그 W/L·우클릭 메뉴는
+  // 아래 window pointermove/pointerup 리스너가 최신 핸들러 ref 를 통해 구동한다(stale closure 방지).
+  const onMouseMoveRef = useRef(onMouseMove);
+  onMouseMoveRef.current = onMouseMove;
+  const endDragRef = useRef(endDrag);
+  endDragRef.current = endDrag;
+  useEffect(() => {
+    const cap = (e: PointerEvent) => {
+      if (e.button !== 2) return;
+      const target = e.target as HTMLElement | null;
+      const el = target?.closest?.("[data-pane]") as HTMLElement | null;
+      if (!el?.dataset.pane) {
+        // 컨텍스트 메뉴·Circle Menu 오버레이·빈 필러 페인은 [data-pane] 트리 밖 — 그 위에서 시작한
+        // 우클릭(드래그)을 막지 않으면 compat mousedown 이 생성되어 확장의 빨간 링크박스가 그려진다.
+        // ※ 한계: 좌드래그 중 우버튼 추가(chord)는 스펙상 pointerdown 이 생성되지 않아 차단 불가.
+        if (target?.closest?.("[data-sv-ctxmenu],[data-sv-rshield]")) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          setCtxMenu(null);
+        }
+        return;   // 그 외 페인 밖 우클릭은 관여 안 함(입력창 붙여넣기 메뉴 등 보존)
+      }
+      e.preventDefault(); e.stopImmediatePropagation();
+      const i = Number(el.dataset.pane);
+      setActive(i);
+      setCtxMenu(null);
+      // 선택 집합 밖 페인 우클릭 시 다중선택 해제(무수정자 경로 보존 — 함수형 갱신이라 stale 없음.
+      // Shift/Ctrl+우클릭의 선택 변이는 의도적으로 제외: 문서 동작 'Shift+우클릭=Zoom Out'·TY 정합)
+      setSelPanes((s) => (s.size && !s.has(i) ? new Set<number>() : s));
+      drag.current = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY,
+                       btn: 2, pane: i, moved: false, shift: e.shiftKey };
+    };
+    // 우클릭 드래그 구동 — compat mouse 이벤트 미생성 상태에서도 pointer 이벤트는 발화한다.
+    // btn===2 일 때만 개입(좌클릭 경로는 기존 React 핸들러 유지 — 이중 처리 없음).
+    const move = (e: PointerEvent) => { if (drag.current?.btn === 2) onMouseMoveRef.current(e); };
+    const up = (e: PointerEvent) => {
+      if (drag.current?.btn === 2)
+        endDragRef.current({ type: "mouseup", clientX: e.clientX, clientY: e.clientY });
+    };
+    window.addEventListener("pointerdown", cap, true);   // capture 단계(확장 무력화)
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointerdown", cap, true);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onWheel = (e: React.WheelEvent, i: number) => {
     if (tHeld.current) {   // T+스크롤 — 오버레이 글자 크기 (계정 저장)
       const nf = Math.min(24, Math.max(6, ovlFont + (e.deltaY < 0 ? 0.5 : -0.5)));
@@ -2076,11 +2128,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // Series 페인 렌더 — 뷰포트 중첩 flex(경계 스플리터) 안에서 사용
   const renderPane = (pi: number) => {
     const p = panes[pi];
-    if (!p) return <div style={{ flex: 1 }} />;
+    if (!p) return <div data-sv-rshield="" style={{ flex: 1 }} />;   // 빈 필러도 우클릭 확장 차단 대상
     // 로컬 미디어(이미지/동영상) 페인 — DICOM 외 JPEG/PNG/BMP/AVI/MP4/MPEG 표시·재생
     if (p.media) {
       return (
-        <div onMouseDown={() => setActive(pi)}
+        // data-sv-rshield — 미디어 페인 우클릭은 차단만(DICOM 컨텍스트 메뉴·W/L 드래그 부적합)
+        <div data-sv-rshield="" onMouseDown={() => setActive(pi)}
              style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, background: "#000",
                       outline: active === pi ? "2px solid #4ade80"
                         : selPanes.has(pi) ? `2px solid ${selColor}` : "1px solid #1e293b",
@@ -2102,7 +2155,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const insts = p.series?.instances ?? [];
     const wlText = p.wl ? p.wl.replace(",", " / ") : "기본";
     return (
-      <div onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
+      <div data-pane={pi} onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
            onWheel={(e) => onWheel(e, pi)}
            onDoubleClick={() => {
              // 열린 다각(polyline/셔터) 진행 중이면 더블클릭=완료, 아니면 최대화 토글
@@ -2523,7 +2576,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </button>
         );
         return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
+          <div data-sv-rshield="" style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
                onContextMenu={(e) => { e.preventDefault(); setCircle(null); }}>
             <div onClick={(e) => e.stopPropagation()}
                  style={{ position: "fixed", left: Math.min(c.x, window.innerWidth - 200), top: Math.min(c.y, window.innerHeight - 130),

@@ -1531,8 +1531,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => {
     const cap = (e: PointerEvent) => {
       if (e.button !== 2) return;
-      const el = (e.target as HTMLElement)?.closest?.("[data-pid]") as HTMLElement | null;
-      if (!el?.dataset.pid) return;   // 뷰어 페인 밖 우클릭은 관여 안 함
+      const target = e.target as HTMLElement | null;
+      const el = target?.closest?.("[data-pid]") as HTMLElement | null;
+      if (!el?.dataset.pid) {
+        // 컨텍스트 메뉴·Circle Menu 오버레이는 fixed 로 페인([data-pid]) 트리 밖에 렌더된다 —
+        // 그 위에서 시작한 우클릭(드래그)을 여기서 막지 않으면 compat mousedown 이 생성되어
+        // 확장(Linkclump 류)의 빨간 링크박스가 다시 그려진다(직전 우클릭으로 메뉴가 열린 직후가 전형).
+        // ※ 한계: 좌드래그 중 우버튼 추가(chord)는 스펙상 pointerdown 이 생성되지 않아 차단 불가.
+        if (target?.closest?.("[data-sv-ctxmenu],[data-sv-rshield]")) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          setCtxMenu(null);
+        }
+        return;   // 그 외 페인 밖 우클릭은 관여 안 함(입력창 붙여넣기 메뉴 등 보존)
+      }
       // pointerdown preventDefault → 스펙상 브라우저가 호환(compat) mousedown/mousemove/mouseup 을
       // 아예 생성하지 않음 — mousedown 을 듣는 확장(Linkclump 류)은 이벤트가 존재하지 않아 무력화.
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1540,7 +1551,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setActivePane(pid);
       setCtxMenu(null);
       if (e.shiftKey) {
-        // Shift+우드래그 — 빨간 박스로 영역 지정 → 놓으면 그 영역 픽셀(min/max) 기준으로 W/L 조정
+        // Shift+우드래그 — 황색 점선 박스로 영역 지정 → 놓으면 그 영역 픽셀(min/max) 기준으로 W/L 조정
+        // (확장 프로그램의 빨간 링크박스와 혼동되지 않도록 자체 박스는 빨간색을 쓰지 않는다)
         wlRegionRef.current = { pid, rect: el.getBoundingClientRect(), sx: e.clientX, sy: e.clientY,
                                 cx: e.clientX, cy: e.clientY };
         return;
@@ -2565,7 +2577,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     // TY-3(7): 로컬 미디어 페인 — jpg/png/bmp/avi/mp4 표시·재생 (In media 분기 이식)
     if (p.media) {
       return (
-        <div onMouseDown={() => setActivePane(pid)}
+        // data-sv-rshield — 미디어 페인 우클릭은 차단만(DICOM 컨텍스트 메뉴·W/L 드래그 부적합)
+        <div data-sv-rshield="" onMouseDown={() => setActivePane(pid)}
              style={{ position: "relative", overflow: "hidden", minHeight: 0, minWidth: 0, flex: 1,
                       background: "#000", display: "grid", placeItems: "center", outline }}>
           {p.media.kind === "video"
@@ -2677,11 +2690,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             filter: p.invert ? "invert(1)" : undefined,
           }} />
         )}
-        {/* Shift+우드래그 영역 W/L — 빨간 박스 러버밴드 */}
+        {/* Shift+우드래그 영역 W/L 러버밴드 — 확장(Linkclump 류) 빨간 박스와 구분되게 황색 점선+라벨 */}
         {wlBox?.pid === pid && (
           <div style={{ position: "absolute", left: wlBox.left, top: wlBox.top, width: wlBox.w, height: wlBox.h,
-                        border: "2px solid #ef4444", background: "rgba(239,68,68,0.10)", zIndex: 6,
-                        pointerEvents: "none" }} />
+                        border: "2px dashed #f59e0b", background: "rgba(245,158,11,0.10)", zIndex: 6,
+                        pointerEvents: "none" }}>
+            {/* 페인 상단 근처에서 시작하면 라벨이 overflow:hidden 에 잘리므로 박스 안쪽으로 */}
+            <span style={{ position: "absolute", top: wlBox.top < 20 ? 2 : -18, left: wlBox.top < 20 ? 3 : 0,
+                           fontSize: 10.5, fontWeight: 700, color: "#f59e0b", textShadow: "0 0 3px #000",
+                           whiteSpace: "nowrap" }}>영역 W/L</span>
+          </div>
         )}
         {/* 키이미지 마크 — 현재 표시 이미지가 키이미지면 상단 중앙에 🔑 배지 (overlay 토글과 무관) */}
         {p.series?.instances[p.index] && keyMarks.has(p.series.instances[p.index].sop_uid) && (
@@ -3588,7 +3606,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           </button>
         );
         return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
+          <div data-sv-rshield="" style={{ position: "fixed", inset: 0, zIndex: 300 }} onClick={() => setCircle(null)}
                onContextMenu={(e) => { e.preventDefault(); setCircle(null); }}>
             <div onClick={(e) => e.stopPropagation()}
                  style={{ position: "fixed", left: Math.min(c.x, window.innerWidth - 200), top: Math.min(c.y, window.innerHeight - 130),

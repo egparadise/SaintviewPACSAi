@@ -158,6 +158,48 @@ export function Viewer3D({ studyUid, onClose, embedded, seriesUid }: {
   const containerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const gridRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<RenderingEngine | null>(null);
+
+  // ── 우클릭 확장(Linkclump 류) 링크박스 차단 + 우드래그 Zoom 자체 구동 (2D 뷰어 358fbbd 동형) ──
+  // Cornerstone3D tools 는 compat mouse 이벤트(mousedown/mousemove)로 구동되므로, pointerdown
+  // preventDefault 로 compat 생성을 막으면 확장은 무력화되지만 ZoomTool(Secondary=우버튼)도 죽는다.
+  // → 우클릭에 한해 이벤트를 전면 차단하고 Zoom 을 viewport.setZoom 으로 직접 재구현한다.
+  //   (좌·중클릭·휠은 그대로 Cornerstone 이 처리. 우클릭 chord — 좌드래그 중 우버튼 추가 — 는
+  //    pointerdown 자체가 생성되지 않아 원천 차단 불가한 스펙 한계로 수용)
+  useEffect(() => {
+    let zdrag: { vpId: string; y: number } | null = null;
+    const cap = (e: PointerEvent) => {
+      if (e.button !== 2) return;
+      const t = e.target as Node | null;
+      const entry = Object.entries(containerRefs.current).find(([, el]) => el && t && el.contains(t));
+      if (!entry) return;   // 3D 뷰포트 밖 우클릭은 관여 안 함
+      e.preventDefault(); e.stopImmediatePropagation();
+      setActiveVp(entry[0]);   // compat mousedown 미발화 보완 — 활성 뷰포트 외곽선 유지
+      zdrag = { vpId: entry[0], y: e.clientY };
+    };
+    const move = (e: PointerEvent) => {
+      if (!zdrag) return;
+      const dy = e.clientY - zdrag.y;
+      zdrag.y = e.clientY;
+      if (!dy) return;
+      const vp = engineRef.current?.getViewport(zdrag.vpId) as unknown as
+        { getZoom: () => number; setZoom: (z: number) => void; render: () => void } | undefined;
+      if (!vp?.getZoom) return;
+      // ZoomTool 동등 — 아래로 드래그=확대, 감도 5/뷰포트높이(px당). (Viewer2D 자체 zoom 드래그와는 방향 반대지만
+      // 3D 뷰어의 기존 ZoomTool 체감을 보존하는 쪽을 따른다)
+      const h = Math.max(100, containerRefs.current[zdrag.vpId]?.clientHeight ?? 500);
+      vp.setZoom(Math.max(0.05, Math.min(30, vp.getZoom() * (1 + dy * (5 / h)))));
+      vp.render();
+    };
+    const up = (e: PointerEvent) => { if (e.button === 2) zdrag = null; };
+    window.addEventListener("pointerdown", cap, true);   // capture 단계(확장 무력화)
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointerdown", cap, true);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
   const [status, setStatus] = useState("초기화 중…");
   const [error, setError] = useState("");
   const [slabMm, setSlabMm] = useState(30);

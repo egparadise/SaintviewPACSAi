@@ -73,15 +73,17 @@ export function ViewerContextMenu({ x, y, items, onClose }:
   }, [x, y]);
 
   useEffect(() => {
-    const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    // mousedown 대신 pointerdown(capture) — 뷰어의 우클릭 차단(pointerdown preventDefault)으로
+    // compat mousedown 이 생성되지 않는 경우에도 바깥 클릭 닫기가 항상 동작해야 한다.
+    const down = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("mousedown", down, true);
+    window.addEventListener("pointerdown", down, true);
     window.addEventListener("keydown", key, true);
-    return () => { window.removeEventListener("mousedown", down, true); window.removeEventListener("keydown", key, true); };
+    return () => { window.removeEventListener("pointerdown", down, true); window.removeEventListener("keydown", key, true); };
   }, [onClose]);
 
   return (
-    <div ref={ref} style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 500 }}
+    <div ref={ref} data-sv-ctxmenu="" style={{ position: "fixed", left: pos.x, top: pos.y, zIndex: 500 }}
          onContextMenu={(e) => e.preventDefault()}>
       <MenuList items={items} onClose={onClose} />
     </div>
