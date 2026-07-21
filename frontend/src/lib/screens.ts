@@ -69,3 +69,42 @@ export async function screenFeaturesList(
     }));
   return out.length ? out : [{ index: -1, features: fallback }];
 }
+
+/** 비교(Compare) slave 검사를 "다음 모니터"에 배치 — 기준(master) 모니터를 제외하고 master 다음부터 순환
+ *  (끝번이면 첫 Viewer 모니터로, 단 master 모니터는 건너뜀 → 기준 영상이 파괴되지 않음).
+ *  slots 는 사전 감지값(screenFeaturesList 결과)을 넘겨 동기 실행 → window.open 이 사용자 클릭 활성화를
+ *  유지(팝업 차단 회피). 단일/미감지면 false 반환(호출부가 한 창 인플레이스 분할 처리). masterName 은
+ *  master 창의 window.name("sv_viewer" | "sv_viewer_slot{n}") — 그 모니터를 제외 대상으로 식별. */
+export function placeCompareSlaves(
+  slots: { index: number; features: string }[],
+  masterName: string,
+  slaveStudyIds: number[],
+): boolean {
+  if (!(slots.length > 1 && slots[0].index >= 0)) return false;
+  const nameFor = (idx: number) => (idx === slots[0].index ? "sv_viewer" : `sv_viewer_slot${idx}`);
+  // master 모니터 index — 창 이름에서 역산("sv_viewer"=최저번호 슬롯, "sv_viewer_slotN"=N)
+  const mMon = masterName === "sv_viewer"
+    ? slots[0].index
+    : Number((masterName.match(/^sv_viewer_slot(\d+)$/) ?? [])[1]);
+  const mi = Number.isFinite(mMon) ? slots.findIndex((s) => s.index === mMon) : -1;
+  // master 다음부터 순환하는 나머지 모니터(= master 제외). mi 미확인 시 첫 슬롯을 master 로 간주.
+  const order = mi >= 0 ? [...slots.slice(mi + 1), ...slots.slice(0, mi)] : slots.slice(1);
+  if (!order.length) return false;
+  const base = `${window.location.origin}${window.location.pathname}`;
+  let opened = false;
+  for (let k = 0; k < slaveStudyIds.length; k++) {
+    const slot = order[k % order.length];
+    const url = `${base}?viewer=2d&study=${slaveStudyIds[k]}&cmprole=${encodeURIComponent(`S${k + 1}`)}`;
+    const w = window.open(url, nameFor(slot.index), slot.features);
+    if (w) {
+      opened = true;
+      const m: Record<string, number> = {};
+      for (const kv of slot.features.split(",")) { const [kk, vv] = kv.split("="); m[kk] = Number(vv); }
+      if (![m.left, m.top, m.width, m.height].some((n) => n === undefined || Number.isNaN(n))) {
+        try { w.moveTo(m.left, m.top); w.resizeTo(m.width, m.height); } catch { /* 권한/브라우저 제약 */ }
+      }
+      try { w.focus(); } catch { /* 무시 */ }
+    }
+  }
+  return opened;
+}
