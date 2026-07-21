@@ -2700,10 +2700,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     return out;
   }, [panes, detail.study_uid]);
   const paneCmpRole = (uid?: string): string | null => {
-    if (!cmpLabelsOn || !cmpActive) return null;    // ⇄ Compare 명시 진입 시에만(Add View·Stack 제외)
-    if (cmpRole) return cmpRole;                    // 다중 모니터 창 — 창 전체 역할(M / S{k})
-    if (!cmpSlaveUids.length || !uid) return null;  // 인플레이스: 비교 중(과거검사 페인 존재)일 때만
-    if (uid === detail.study_uid) return "M";
+    if (!cmpLabelsOn || !cmpActive) return null;        // ⇄ Compare 명시 진입 시에만(Add View·Stack 제외)
+    // 이 창의 기준 검사(detail)=주 역할: 다중모니터 master 창은 "M"(URL cmprole 없음), slave 창은 URL cmprole(S{k}).
+    if (uid === detail.study_uid) return cmpRole || "M";
+    // 같은 창의 다른 검사(인플레이스 비교로 불러온 과거검사) → S1/S2… (기준 다음 번호). 없으면 라벨 없음.
+    if (!cmpSlaveUids.length || !uid) return null;
     const i = cmpSlaveUids.indexOf(uid);
     return i >= 0 ? `S${i + 1}` : null;
   };

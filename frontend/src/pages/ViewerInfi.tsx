@@ -722,10 +722,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     return out;
   }, [panes, detail.study_uid]);
   const paneCmpRole = (uid?: string): string | null => {
-    if (!cmpLabelsOn || !cmpActive) return null;    // ⇄ Compare 명시 진입 시에만(Add/Stack/드래그 제외)
-    if (cmpRole) return cmpRole;                    // 다중 모니터 창 — 창 전체 역할(M / S{k})
-    if (!cmpSlaveUids.length || !uid) return null;  // 인플레이스: 비교 중일 때만
-    if (uid === detail.study_uid) return "M";
+    if (!cmpLabelsOn || !cmpActive) return null;        // ⇄ Compare 명시 진입 시에만(Add/Stack/드래그 제외)
+    if (uid === detail.study_uid) return cmpRole || "M"; // 이 창 기준 검사 — master="M", slave 창=URL cmprole
+    if (!cmpSlaveUids.length || !uid) return null;
     const i = cmpSlaveUids.indexOf(uid);
     return i >= 0 ? `S${i + 1}` : null;
   };

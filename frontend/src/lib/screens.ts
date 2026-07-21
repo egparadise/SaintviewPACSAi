@@ -90,6 +90,9 @@ export function placeCompareSlaves(
   // master 다음부터 순환하는 나머지 모니터(= master 제외). mi 미확인 시 첫 슬롯을 master 로 간주.
   const order = mi >= 0 ? [...slots.slice(mi + 1), ...slots.slice(0, mi)] : slots.slice(1);
   if (!order.length) return false;
+  // 비교검사가 여유 모니터보다 많으면 각자 다른 모니터에 못 놓는다 → 같은 창을 덮어써 검사가 소실되므로
+  // 배치를 포기하고 false 반환(호출부가 한 창 인플레이스 분할로 모두 표시 — 무손실).
+  if (slaveStudyIds.length > order.length) return false;
   const base = `${window.location.origin}${window.location.pathname}`;
   let opened = false;
   for (let k = 0; k < slaveStudyIds.length; k++) {
