@@ -2448,12 +2448,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                     paneW: number; paneH: number; cols: number; rows: number; flipH: boolean;
                     ps: number };   // PixelSpacing row(mm/px) — 실제 크기 기준 배율 통일용(없으면 0)
       const items: Item[] = [];
+      let tiled = 0;   // Image 분할(타일) 때문에 건너뛴 페인 수
       const cur = panesRef.current;
       for (let pi = 0; pi < cur.length; pi++) {
         const p = cur[pi];
         const inst = p.series?.instances[p.index];
         if (!p.series || p.media || !inst) continue;
-        if (p.il.r * p.il.c > 1) continue;          // 타일 분할 페인은 단일 변환으로 정렬 불가
+        if (p.il.r * p.il.c > 1) { tiled++; continue; }   // 타일 분할 페인은 단일 변환으로 정렬 불가
         if (p.rot % 360 !== 0) continue;
         const el = document.querySelector<HTMLElement>(`[data-pane="${pi}"]`);
         const rc = el?.getBoundingClientRect();
@@ -2467,7 +2468,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                      cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH,
                      ps: inst.pixel_spacing?.[0] ?? 0 });
       }
-      if (dead || !items.length) return;
+      if (dead) return;
+      if (!items.length) {
+        if (tiled) say("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
+        return;
+      }
       /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 (Viewer2D 와 동일 규칙).
          zoom 배수만 같게 하면 매트릭스·픽셀 간격 차이로 화면상 크기가 어긋난다. */
       const zs = items.map((it) => mgZoom(it) ?? 1);

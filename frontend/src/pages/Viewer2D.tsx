@@ -1155,12 +1155,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               ? applyPState({ ...initPane(detail.study_uid), series: s,
                   // 타일 분할이 있으면 시작을 페이지 경계로 — 중앙에서 시작하면 마지막 칸만 채워진다
                   index: alignTileIndex(Math.floor(s.instances.length / 2),
-                                        ((userIlRef.current ?? hang2dImgRef.current)?.r ?? 1)
-                                          * ((userIlRef.current ?? hang2dImgRef.current)?.c ?? 1),
+                                        mammo ? 1
+                                          : ((userIlRef.current ?? hang2dImgRef.current)?.r ?? 1)
+                                            * ((userIlRef.current ?? hang2dImgRef.current)?.c ?? 1),
                                         s.instances.length),
                   wl: ai?.q ?? "",
-                  // 사용자가 직접 바꾼 Image 분할 우선, 없으면 모달리티 기본
-                  il: userIlRef.current ?? hang2dImgRef.current ?? undefined })
+                  // 사용자가 직접 바꾼 Image 분할 우선, 없으면 모달리티 기본.
+                  // ⚠ Mammo 는 페인당 1장 고정 — 타일로 나누면 2D-MG 맞붙임이 성립하지 않는다
+                  il: mammo ? undefined : (userIlRef.current ?? hang2dImgRef.current ?? undefined) })
               : initPane(detail.study_uid);
           });
           return next;
@@ -1301,6 +1303,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     ps: number };   // PixelSpacing row(mm/px) — 실제 크기 기준 배율 통일용(없으면 0)
       const items: Item[] = [];
       let cand = 0;   // 조직 감지를 시도한 페인 수 — 0이면 아직 로드 전이므로 안내를 띄우지 않는다
+      let tiled = 0;  // Image 분할(타일) 때문에 건너뛴 페인 수 — 이유를 알려주기 위함
       const ids = PANE_IDS.slice(0, L2.count);
       for (let i = 0; i < ids.length; i++) {
         const pid = ids[i];
@@ -1311,7 +1314,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const rc = el?.getBoundingClientRect();
         const sz = rc?.width ? { w: rc.width, h: rc.height } : paneSizes.current[pid];
         if (!p || !p.series || p.media || !inst || !sz?.w || !sz?.h) continue;
-        if ((p.il?.r ?? 1) * (p.il?.c ?? 1) > 1) continue;      // 타일 분할 페인은 단일 변환으로 정렬 불가
+        if ((p.il?.r ?? 1) * (p.il?.c ?? 1) > 1) { tiled++; continue; }   // 타일 분할 페인은 단일 변환으로 정렬 불가
         if ((p.rot ?? 0) % 360 !== 0) continue;
         const side = mgSide(mammoView(p.series.series_desc).lat, i % L2.cols, L2.cols);
         if (!side) continue;
@@ -1326,7 +1329,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                      ps: inst.pixel_spacing?.[0] ?? 0 });
       }
       if (dead) return;
-      if (!items.length) { if (cand) setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다"); return; }
+      if (!items.length) {
+        if (tiled) setStatus("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
+        else if (cand) setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다");
+        return;
+      }
       /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 띄운다.
          zoom 배수만 같게 하면 영상마다 매트릭스(rows/cols)·픽셀 간격이 달라 화면상 크기가 어긋난다
          (RCC 와 LCC 가 다른 크기로 보이던 원인). 화면 px/mm 를 모든 대상 페인에서 같게 맞춘다.
