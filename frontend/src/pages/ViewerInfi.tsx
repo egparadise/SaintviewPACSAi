@@ -28,6 +28,7 @@ import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewe
 import { alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
+import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -360,6 +361,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 (Viewer2D 와 동일 규칙) */
   const [mgOn, setMgOn] = useState(false);
   const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
+  // 오버레이 배치(모달리티별 귀퉁이) — 설정>뷰어 공통>영상 정보 표시
+  const ovCfgRef = useRef<OverlayCfg>(normOverlayCfg(undefined));
   const mgOnRef = useRef(false);                  // 비동기 적용 중 해제되었는지 즉시 판정
   const mgTouchedRef = useRef(false);             // 사용자가 직접 토글함 — 검사 전환 시 서버값이 덮어쓰지 않게
   // 해제 시 복원용 기준값(맞붙이기 전 상태) + 우리가 마지막으로 쓴 변환(기준값 오염 판정용)
@@ -569,6 +572,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         mg_join?: unknown; mg_join_on?: boolean;
       };
       // 2D-MG(맘모 좌우 맞붙임) — 분할·기본 체크. 이 effect 안에서 읽으므로 아래 행잉 계산과 순서 문제가 없다
+      ovCfgRef.current = normOverlayCfg((prefsRes.value as { overlay_fields?: unknown }).overlay_fields);
       mgCfgRef.current = normMgJoin(prefsV.mg_join);
       // 사용자가 이미 뷰어에서 직접 토글했으면 서버값으로 되돌리지 않는다(저장 디바운스 중 검사 전환 대비)
       if (!mgTouchedRef.current) {
@@ -2630,7 +2634,6 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       );
     }
     const insts = p.series?.instances ?? [];
-    const wlText = p.wl ? p.wl.replace(",", " / ") : "기본";
     return (
       <div data-pane={pi} onMouseDown={(e) => onPaneMouseDown(e, pi)} onMouseMove={onMouseMove}
            onWheel={(e) => onWheel(e, pi)}
@@ -2808,14 +2811,30 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       2D-MG {(p.zoom * 100).toFixed(0)}%
                     </div>
                   )}
-                  {ovlVisible && (
-                    <>
-                      <div style={ovl("tl", ovlFont)}>{pd.patient_name}<br />{pd.patient_key}</div>
-                      <div style={ovl("tr", ovlFont)}>{pd.modality} {pd.study_date}</div>
-                      <div style={ovl("bl", ovlFont)}>Se:{p.series.series_number} Im:{idx + 1}/{insts.length}<br />W/L: {wlText}</div>
-                      <div style={ovl("br", ovlFont)}>Zoom {(p.zoom * 100).toFixed(0)}%{p.fx ? ` · ${p.fx}` : ""}</div>
-                    </>
-                  )}
+                  {ovlVisible && (() => {
+                    // 4코너 오버레이 — 설정>뷰어 공통>영상 정보 표시(모달리티별 배치)를 따른다.
+                    // scope=image 는 칸마다, scope=series 는 첫 칸에만(페인당 한 번) 그린다.
+                    const place = overlayFor(ovCfgRef.current, p.series?.modality || pd.modality);
+                    const val = (k2: string) => ovFieldValue(k2, {
+                      meta: pd as unknown as Record<string, unknown>,
+                      series: p.series!, inst, index: idx, total: insts.length,
+                      zoom: p.zoom, wl: p.wl, fx: p.fx,
+                    });
+                    const box = (c2: "tl" | "tr" | "bl" | "br") => {
+                      const keys = [
+                        ...(t === 0 ? fieldsAt(place, c2, "series") : []),
+                        ...fieldsAt(place, c2, "image"),
+                      ];
+                      const lines = keys.map(val).filter(Boolean);
+                      if (!lines.length) return null;
+                      return (
+                        <div key={c2} style={ovl(c2, ovlFont)}>
+                          {lines.map((v2, i2) => <span key={i2}>{i2 > 0 && <br />}{v2}</span>)}
+                        </div>
+                      );
+                    };
+                    return <>{box("tl")}{box("tr")}{box("bl")}{box("br")}</>;
+                  })()}
                 </>
                 );
               })() : p.series ? null : (

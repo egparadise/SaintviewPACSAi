@@ -11,6 +11,7 @@ import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
+import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
@@ -506,6 +507,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
   /* 사용자가 화면에서 직접 바꾼 분할 — Setting 저장과 무관하게 **뷰어 창이 닫힐 때까지** 기억한다.
      Exam 전환·검사 재행잉에서도 모달리티 기본값보다 우선 적용(요구: 즉흥 화면 구성 지속). */
+  // 오버레이 배치(모달리티별 귀퉁이) — 설정>뷰어 공통>영상 정보 표시
+  const ovCfgRef = useRef<OverlayCfg>(normOverlayCfg(undefined));
   const userLayoutRef = useRef<string | null>(null);
   const userIlRef = useRef<{ r: number; c: number } | null>(null);
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
@@ -1052,6 +1055,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 2D-MG — MG 는 위에서 2D 행잉을 건너뛰므로 전용 키(mg_join)로 분할·기본 체크를 정한다.
       // 페인↔시리즈 배정은 레이아웃과 무관하게 전 페인에 미리 채워지므로 여기서 setLayout 만 해도 안전
       // (시리즈 로드 effect 와 순서가 뒤바뀌어도 같은 결과).
+      ovCfgRef.current = normOverlayCfg((r.value as { overlay_fields?: unknown }).overlay_fields);
       const mj = normMgJoin(v.mg_join);
       mgCfgRef.current = mj;
       // 사용자가 이미 뷰어에서 직접 토글했으면 서버값으로 되돌리지 않는다(저장 디바운스 중 검사 전환 대비)
@@ -3152,23 +3156,36 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                            transform: paneXf, filter: paneFilter(p),
                          }} />
                   )}
-                  {overlayOn && ti && (
-                    <div style={{ position: "absolute", top: dodge, right: 0, padding: "2px 4px", textAlign: "right",
-                                  pointerEvents: "none", fontSize: lf, lineHeight: 1.35,
-                                  color: "var(--text-primary)", textShadow: "0 0 4px #000", whiteSpace: "nowrap" }}>
-                      {keyMarks.has(ti.sop_uid) && <span style={{ color: "#facc15" }}>🔑 </span>}
-                      Img: {idx + 1}/{p.series?.instances.length}
-                      {(() => {
-                        // 슬라이스 위치 = DICOM 위치를 슬라이스 법선에 투영(nearestSliceIndex 와 동일 정의).
-                        // position[2](코너 Z)를 그대로 쓰면 sagittal/coronal 에서 전 타일이 같은 값이 된다.
-                        const g = geomOf(ti);
-                        if (!g) return null;
-                        const nn = Math.hypot(g.n[0], g.n[1], g.n[2]) || 1;
-                        const v = (g.pos[0] * g.n[0] + g.pos[1] * g.n[1] + g.pos[2] * g.n[2]) / nn;
-                        return <><br />SL: {(Math.abs(v) < 0.05 ? 0 : v).toFixed(1)}</>;
-                      })()}
-                    </div>
-                  )}
+                  {overlayOn && ti && (() => {
+                    // 칸(이미지) 범위 오버레이 — 설정의 scope=image 항목만 칸마다 그린다
+                    const meta = studyMeta[p.studyUid] ?? detail;
+                    const place = overlayFor(ovCfgRef.current, p.series?.modality || meta.modality);
+                    const val = (k2: string) => ovFieldValue(k2, {
+                      meta, series: p.series!, inst: ti, index: idx,
+                      total: p.series?.instances.length ?? 0, zoom: p.zoom, wl: p.wl, fx: p.fx,
+                    });
+                    const box = (c2: "tl" | "tr" | "bl" | "br") => {
+                      const keys = fieldsAt(place, c2, "image");
+                      const lines = keys.map((k2) => val(k2)).filter(Boolean);
+                      const showKey = c2 === "tr" && keyMarks.has(ti.sop_uid);
+                      if (!lines.length && !showKey) return null;
+                      const top = c2 === "tr" ? dodge : c2 === "tl" ? 0 : undefined;
+                      return (
+                        <div key={c2} style={{
+                          position: "absolute", pointerEvents: "none", padding: "2px 4px",
+                          fontSize: lf, lineHeight: 1.35, color: "var(--text-primary)",
+                          textShadow: "0 0 4px #000", whiteSpace: "nowrap",
+                          ...(c2 === "tl" || c2 === "tr" ? { top } : { bottom: 0 }),
+                          ...(c2 === "tl" || c2 === "bl" ? { left: 0, textAlign: "left" as const }
+                                                         : { right: 0, textAlign: "right" as const }),
+                        }}>
+                          {showKey && <span style={{ color: "#facc15" }}>🔑 </span>}
+                          {lines.map((v2, i2) => <span key={i2}>{i2 > 0 && <br />}{v2}</span>)}
+                        </div>
+                      );
+                    };
+                    return <>{box("tl")}{box("tr")}{box("bl")}{box("br")}</>;
+                  })()}
                 </div>
               );
             })}
@@ -3229,30 +3246,34 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             </div>
           );
         })()}
+        {/* 4코너 오버레이 — 설정>뷰어 공통>영상 정보 표시(모달리티별 배치)를 그대로 따른다 */}
         {overlayOn && p.series && (() => {
           const meta = studyMeta[p.studyUid] ?? detail;  // 페인의 검사 기준 — 다른 환자 영상에 주검사 환자명 오표기 방지
           const priorMark = isPrior && meta.patient_key === detail.patient_key;  // 같은 환자의 과거검사만 [비교/과거]
-          return (
-          <>
-            <div style={ov("tl", tyOvFont)}>
-              {meta.patient_name} ({meta.sex})<br />
-              {priorMark ? "[비교/과거] " : ""}{meta.study_desc}<br />{meta.study_date}
-              {priorMark && (() => {
-                // 현재 판독 검사(detail) 대비 이 과거영상이 얼마전인지 — 노란색
-                const t = durText(meta.study_date, detail.study_date);
-                return t ? <><br /><span style={{ color: "#fde047", fontWeight: 700 }}>{t}</span></> : null;
-              })()}
-            </div>
-            <div style={ov("tr", tyOvFont)}>
-              S{p.series.series_number} {p.series.series_desc || p.series.modality}<br />
-              Img: {p.index + 1}{tileCount > 1 && `~${Math.min(p.index + tileCount, p.series.instances.length)}`}/{p.series.instances.length}
-            </div>
-            <div style={ov("bl", tyOvFont)}>{meta.modality} · {meta.patient_key}</div>
-            <div style={ov("br", tyOvFont)}>
-              Z: {(p.zoom * 100).toFixed(0)}%{p.wl && <><br />W/L: {p.wl}</>}{p.fx && <><br />{p.fx}</>}
-            </div>
-          </>
-          );
+          const place = overlayFor(ovCfgRef.current, p.series.modality || meta.modality);
+          const inst0 = p.series.instances[p.index];
+          const val = (k: string) => ovFieldValue(k, {
+            meta, series: p.series!, inst: inst0, index: p.index,
+            total: p.series!.instances.length, tiles: tileCount,
+            zoom: p.zoom, wl: p.wl, fx: p.fx,
+          });
+          const corner = (c: "tl" | "tr" | "bl" | "br") => {
+            const keys = fieldsAt(place, c, "series");
+            const lines = keys.map((k) => ({ k, v: val(k) })).filter((x) => x.v);
+            if (!lines.length && !(c === "tl" && priorMark)) return null;
+            return (
+              <div style={ov(c, tyOvFont)}>
+                {c === "tl" && priorMark && <>[비교/과거]{" "}</>}
+                {lines.map((x, i) => <span key={x.k}>{i > 0 && <br />}{x.v}</span>)}
+                {c === "tl" && priorMark && (() => {
+                  // 현재 판독 검사(detail) 대비 이 과거영상이 얼마전인지 — 노란색
+                  const t = durText(meta.study_date, detail.study_date);
+                  return t ? <><br /><span style={{ color: "#fde047", fontWeight: 700 }}>{t}</span></> : null;
+                })()}
+              </div>
+            );
+          };
+          return <>{corner("tl")}{corner("tr")}{corner("bl")}{corner("br")}</>;
         })()}
         {/* TY-3(5): 페인별 독립 시네 — 호버(또는 재생 중) 시 ▶/⏸+간격(초) 미니 컨트롤 (In 이식) */}
         {tbOn("pcine") && p.series && p.series.instances.length > 1 && (hoverPane === pid || p.playing) && (

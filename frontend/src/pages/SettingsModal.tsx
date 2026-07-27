@@ -8,6 +8,8 @@ import {
 import { GridPicker } from "../lib/GridPicker";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, normMgJoin, type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
 import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, APP_VERSION, APP_VERSION_LABEL } from "../lib/version";
+import { normOverlayCfg, type OverlayCfg } from "../lib/overlayFields";
+import { OverlayLayoutEditor } from "../components/OverlayLayoutEditor";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_PALETTE } from "../lib/infiConfig";
 import { screenApiIssue } from "../lib/screens";
@@ -257,6 +259,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   // 2D-MG(맘모 좌우 맞붙임) — 2D 행잉 MG 행에서 편집. 전 뷰어(T/In/SaintView) 공통
   const [mgJoin, setMgJoin] = useState<MgJoinPrefs>(DEFAULT_MG_JOIN);
   const mgOnDefLoaded = useRef(DEFAULT_MG_JOIN.on_default);   // '기본 ON' 을 바꿨는지 판정용
+  // 영상 오버레이 배치 — 모달리티별 필드→귀퉁이 (viewer.prefs.overlay_fields)
+  const [ovCfg, setOvCfg] = useState<OverlayCfg>(() => normOverlayCfg(undefined));
   const [reportDock, setReportDock] = useState(false);  // 판독 도크 기본 숨김
   // 비교(Compare) 설정 — viewer.prefs.compare (뷰어·openV2 가 소비). 편집은 판독(Reading) 탭.
   //  enabled=기능 on/off · multi_monitor=Viewer 모니터 2개+면 비교검사를 다음 모니터에(끝번→첫번 순환) · labels=M/S 녹색 라벨
@@ -442,6 +446,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       if (vv.hanging2d_common_on !== undefined) setH2dCommonOn(!!vv.hanging2d_common_on);
       if (vv.hanging2d_by_viewer) setH2dByViewer(vv.hanging2d_by_viewer);
       { const mj = normMgJoin((v as { mg_join?: unknown }).mg_join); setMgJoin(mj); mgOnDefLoaded.current = mj.on_default; }
+      setOvCfg(normOverlayCfg((v as { overlay_fields?: unknown }).overlay_fields));
       if (v.reportDock !== undefined) setReportDock(v.reportDock);
       const tb = (v as { toolbar?: Record<string, boolean> }).toolbar;
       if (tb) setTbConfig(tb);
@@ -550,6 +555,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       hanging2d_common_on: h2dCommonOn,
       hanging2d_by_viewer: h2dByViewer,
       mg_join: mgJoin,
+      overlay_fields: ovCfg,
       // '기본 ON' 을 바꿨으면 뷰어에 남아 있는 마지막 사용 상태(mg_join_on)도 함께 맞춘다 —
       // 안 그러면 한 번이라도 뷰어에서 토글한 계정은 이 설정이 영영 반영되지 않는다
       ...(mgJoin.on_default !== mgOnDefLoaded.current ? { mg_join_on: mgJoin.on_default } : {}),
@@ -1669,6 +1675,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </div>
                 <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))}
                                  mg={mgJoin} onMg={setMgJoin} />
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="영상 정보 표시 (오버레이) — 모달리티별 귀퉁이 배치">
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  DICOM 헤더의 환자·검사·이미지 정보를 <b>상자의 네 귀퉁이</b> 중 어디에 띄울지 정합니다.
+                  아래 미리보기에서 위치가 바로 확인됩니다.
+                </div>
+                <OverlayLayoutEditor cfg={ovCfg} onChange={setOvCfg} />
               </Group>
             )}
             {(page === "viewerTy" || page === "viewerSv") && (
