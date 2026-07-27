@@ -486,6 +486,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [series, setSeries] = useState<SeriesNode[]>([]);
+  // 시리즈 페이지 — Series 분할보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음을 본다
+  const [seriesPage, setSeriesPage] = useState(0);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
   // Image Layout — 페인 내부 이미지 분할(연속 이미지 N×M 타일, UBPACS)
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
@@ -1170,6 +1172,47 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
      · 배율은 대상 페인 전체 동일(좌우 유방 크기 비교가 판독의 핵심).
      · 감지 실패·회전·타일 분할(il>1×1) 페인은 건드리지 않는다(원본 표시 유지).
      · deps 에서 zoom/tx/ty 를 뺀 paneSig 를 쓰므로 이 effect 자신의 setPanes 로 재실행되지 않는다. */
+  /* ── 시리즈 페이지 — Series 분할(페인 수)보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음 표시 ──
+     예: 시리즈 5개 · 2×2 분할 → 1페이지 S1~S4, 2페이지는 좌상단에 S5 한 개(나머지 빈 페인). */
+  const hangOrder = useMemo(() => {
+    const cnt = LAYOUTS[layout].count;
+    const slots = Math.max(cnt, Math.ceil(series.length / cnt) * cnt);
+    // MG 는 좌우 쌍 배치가 판독 규약이므로 그 순서를 유지한 채 나머지를 뒤로 이어붙인다
+    return isMg && hasMammoView(series)
+      ? mammoOrder(series, slots, LAYOUTS[layout].cols)
+      : Array.from({ length: slots }, (_, i) => series[i] ?? null);
+  }, [series, isMg, layout]);
+  const seriesPageMax = Math.max(0, Math.ceil(hangOrder.length / LAYOUTS[layout].count) - 1);
+  const hangOrderRef = useRef(hangOrder);
+  useEffect(() => { hangOrderRef.current = hangOrder; }, [hangOrder]);
+  useEffect(() => { setSeriesPage(0); }, [detail.id, layout]);   // 검사·분할이 바뀌면 1페이지부터
+
+  const pageSeries = useCallback((delta: number) => {
+    const L2 = LAYOUTS[layout];
+    const list = hangOrderRef.current;
+    const max = Math.max(0, Math.ceil(list.length / L2.count) - 1);
+    setSeriesPage((cur) => {
+      const np = Math.min(max, Math.max(0, cur + delta));
+      if (np === cur) return cur;
+      setPanes((prev) => {
+        const next = { ...prev };
+        PANE_IDS.slice(0, L2.count).forEach((pid, i) => {
+          const s = list[np * L2.count + i] ?? null;
+          const q = next[pid];
+          if (!q || q.series?.series_uid === s?.series_uid) return;
+          if (q.series && q.studyUid !== detail.study_uid) return;   // 다른 검사(비교) 페인은 보존
+          next[pid] = s
+            ? applyPState({ ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) })
+            : initPane(detail.study_uid);
+        });
+        return next;
+      });
+      setStatus(`시리즈 ${np + 1}/${max + 1} 페이지 (Shift+스크롤로 이동)`);
+      return np;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, detail.study_uid]);
+
   const mgPaneSig = PANE_IDS.slice(0, LAYOUTS[layout].count)
     .map((pid) => { const p = panes[pid];
       return `${p?.series?.series_uid ?? ""}:${p?.index ?? 0}:${p?.flipH ? 1 : 0}:${p?.rot ?? 0}:${p?.il?.r ?? 1}x${p?.il?.c ?? 1}`;
@@ -2942,6 +2985,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                persistPrefsPatch({ ty_overlay_font: nf });
                return;
              }
+             // Shift+스크롤 — 시리즈 페이지 이동(분할을 넘어가는 시리즈 보기). 이미지 스크롤은 그대로.
+             if (e.shiftKey) { pageSeries(e.deltaY > 0 ? 1 : -1); return; }
              wheelStep(pid, e.deltaY > 0 ? 1 : -1);
            }}
            onDoubleClick={() => {
@@ -4203,6 +4248,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           );
         })()}
         <span>Series {LAYOUTS[layout].rows}×{LAYOUTS[layout].cols} · Image {(panes[activePane]?.il ?? { r: 1, c: 1 }).r}×{(panes[activePane]?.il ?? { r: 1, c: 1 }).c} (활성 페인)</span>
+        {/* 분할을 넘어가는 시리즈가 있을 때 — Shift+스크롤로 페이지 이동 */}
+        {seriesPageMax > 0 && (
+          <span style={{ display: "flex", gap: 3, alignItems: "center", marginLeft: 8 }}
+                title="시리즈가 분할보다 많습니다 — Shift+스크롤로 다음/이전 시리즈 페이지 이동">
+            <button onClick={() => pageSeries(-1)} disabled={seriesPage <= 0} style={{ padding: "0 5px", fontSize: 11 }}>◀</button>
+            <b style={{ fontSize: 11 }}>Srs {seriesPage + 1}/{seriesPageMax + 1}</b>
+            <button onClick={() => pageSeries(1)} disabled={seriesPage >= seriesPageMax} style={{ padding: "0 5px", fontSize: 11 }}>▶</button>
+          </span>
+        )}
       </div>
 
       {skin === "saint" && prefs.paletteSide === "top" && saintBar}

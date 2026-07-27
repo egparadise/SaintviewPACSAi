@@ -351,6 +351,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [keyMarks, setKeyMarks] = useState<Set<string>>(new Set());
   const [activeExam, setActiveExam] = useState(0);
   const [sLayout, setSLayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
+  // 시리즈 페이지 — Series 분할보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음을 본다
+  const [seriesPage, setSeriesPage] = useState(0);
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 (Viewer2D 와 동일 규칙) */
   const [mgOn, setMgOn] = useState(false);
   const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
@@ -915,6 +917,30 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // ── 휠 rAF 코얼레싱 — 이벤트를 프레임 단위로 모아 델타 '누적' 적용(요청은 최종 프레임 1장만).
   //    델타 합을 보존하므로 프리스핀 휠·트랙패드의 주파 속도(조작감)도 기존과 동일. ──
   const wheelRaf = useRef<{ i: number; net: number; raf: number } | null>(null);
+  /* ── 시리즈 페이지 — Series 분할(페인 수)보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음 표시 ──
+     예: 시리즈 5개 · 2×2 분할 → 1페이지 S1~S4, 2페이지는 좌상단에 S5 한 개(나머지 빈 페인). */
+  const pageSeries = (delta: number) => {
+    const cnt = Math.max(1, sLayout.r * sLayout.c);
+    const src = exams[activeExam]?.series ?? [];
+    // 이 창에 다른 검사 페인이 섞여 있으면(비교) 페이지 개념이 성립하지 않는다
+    if (!panes.every((p) => !p.series || p.studyUid === curD.study_uid)) return;
+    const slots = Math.max(cnt, Math.ceil(src.length / cnt) * cnt);
+    const list = isMg && hasMammoView(src)
+      ? mammoOrder(src, slots, sLayout.c)
+      : Array.from({ length: slots }, (_, i) => src[i] ?? null);
+    const max = Math.max(0, Math.ceil(list.length / cnt) - 1);
+    const np = Math.min(max, Math.max(0, seriesPage + delta));
+    if (np === seriesPage) return;
+    setSeriesPage(np);
+    const suid = exams[activeExam]?.d.study_uid ?? detail.study_uid;
+    setPanes((ps) => Array.from({ length: cnt }, (_, i) => {
+      const s = list[np * cnt + i] ?? null;
+      const p = ps[i];
+      if (p && p.series?.series_uid === s?.series_uid) return p;
+      return applyPStateToPane({ ...initPane(suid), series: s });
+    }));
+    say(`시리즈 ${np + 1}/${max + 1} 페이지 (Shift+스크롤로 이동)`);
+  };
   const wheelScroll = useCallback((i: number, delta: number) => {
     const w = wheelRaf.current;
     if (w) { w.i = i; w.net += delta; return; }   // 이번 프레임 예약됨 — 델타 누적
@@ -2051,6 +2077,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       persistPrefs({ infi_overlay_font: nf });
       return;
     }
+    // Shift+스크롤 — 시리즈 페이지 이동(분할을 넘어가는 시리즈 보기). 이미지 스크롤은 그대로.
+    if (e.shiftKey) { pageSeries(e.deltaY > 0 ? 1 : -1); return; }
     if (e.ctrlKey) {
       updMany(targetsOf(i), (q) =>
         ({ zoom: Math.max(0.05, Math.min(30, q.zoom * (e.deltaY < 0 ? 1.1 : 0.9))) }));
@@ -2346,6 +2374,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     setColFr(Array(sLayout.c).fill(1));
     setRowFr(Array(sLayout.r).fill(1));
     setSelPanes(new Set());   // 레이아웃 변경 — 멀티 선택 초기화
+    setSeriesPage(0);         // 분할이 바뀌면 시리즈 페이지도 1페이지부터
   }, [sLayout.r, sLayout.c]);
 
   /* ── 2D-MG 적용 — 조직 경계를 찾아 각 페인을 안쪽(가운데)으로 붙인다 (Viewer2D 와 동일 규칙) ──
@@ -3056,6 +3085,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       onPick={(v) => applySLayout({ r: Math.min(v.r, 10), c: Math.min(v.c, 10) })} />
           <GridPicker label="Image" max={10} value={panes[active]?.il ?? { r: 1, c: 1 }}
                       onPick={(v) => upd(active, { il: { r: Math.min(v.r, 10), c: Math.min(v.c, 10) } })} />
+          {/* 분할을 넘어가는 시리즈가 있을 때 — Shift+스크롤로 페이지 이동 */}
+          {(() => {
+            const cnt = Math.max(1, sLayout.r * sLayout.c);
+            const tot = Math.max(1, Math.ceil((exams[activeExam]?.series.length ?? 0) / cnt));
+            return tot > 1 && (
+              <span style={{ display: "flex", gap: 3, alignItems: "center", marginLeft: 6 }}
+                    title="시리즈가 분할보다 많습니다 — Shift+스크롤로 다음/이전 시리즈 페이지 이동">
+                <button onClick={() => pageSeries(-1)} disabled={seriesPage <= 0} style={{ padding: "0 5px", fontSize: 11 }}>◀</button>
+                <b style={{ fontSize: 11 }}>Srs {seriesPage + 1}/{tot}</b>
+                <button onClick={() => pageSeries(1)} disabled={seriesPage >= tot - 1} style={{ padding: "0 5px", fontSize: 11 }}>▶</button>
+              </span>
+            );
+          })()}
           <button title="3D — 현재 검사의 MPR/MIP 볼륨 뷰어 열기"
                   onClick={() => setShow3d(true)}
                   style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
