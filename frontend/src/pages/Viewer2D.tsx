@@ -491,13 +491,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [series, setSeries] = useState<SeriesNode[]>([]);
+  // 판독 도크가 보는 검사 — Exam 탭 전환 시 현재 보고 있는 검사를 따라간다(창의 주 검사 고정 아님)
+  const [dockDetail, setDockDetail] = useState<StudyDetail>(detail);
+  const fullDetailRef = useRef<Record<number, StudyDetail>>({});
+  useEffect(() => { setDockDetail(detail); }, [detail]);   // 창의 주 검사가 바뀌면 도크도 초기화
   // 시리즈 페이지 — Series 분할보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음을 본다
   const [seriesPage, setSeriesPage] = useState(0);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
+  /** 사용자가 직접 고른 분할 — 세션 기억에 남긴다(모달리티 기본값보다 우선) */
+  const setLayoutByUser = (k: keyof typeof LAYOUTS) => { userLayoutRef.current = k; setLayout(k); };
   // Image Layout — 페인 내부 이미지 분할(연속 이미지 N×M 타일, UBPACS)
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 2D 행잉(모달리티→Image 분할) 기본 il — 검사 열 때 페인에 적용(prefs 로드에서 해석)
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
+  /* 사용자가 화면에서 직접 바꾼 분할 — Setting 저장과 무관하게 **뷰어 창이 닫힐 때까지** 기억한다.
+     Exam 전환·검사 재행잉에서도 모달리티 기본값보다 우선 적용(요구: 즉흥 화면 구성 지속). */
+  const userLayoutRef = useRef<string | null>(null);
+  const userIlRef = useRef<{ r: number; c: number } | null>(null);
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
   const isMg = detail.modality === "MG";
   const [mgOn, setMgOn] = useState(false);
@@ -1123,7 +1133,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         ? mammoOrder(imgSeries, mgL.count, mgL.cols) : null;
       const mammoSeries = ma;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
       // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일). prefs 로드가 늦으면 기본값으로 걸고, 로드 시 재적용된다
-      if (mammo) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); setOverlayOn(false); }
+      // Mammo 도 4코너 정보(환자·시리즈·W/L·배율)는 유지한다 — 판독에 필요. 표시 여부는 INFO 토글로만 제어
+      if (mammo) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); }
+      // 사용자가 이 창에서 직접 바꾼 분할이 있으면 모달리티 기본값보다 우선(창 닫힐 때까지 유지)
+      if (userLayoutRef.current && LAYOUTS[userLayoutRef.current]) setLayout(userLayoutRef.current);
       setSelSeries(null);   // 처음 열 때 썸네일 이미지 목록은 모두 접힘 — 더블클릭으로만 펼침
       if (imgSeries[0]) {
         // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
@@ -1142,10 +1155,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               ? applyPState({ ...initPane(detail.study_uid), series: s,
                   // 타일 분할이 있으면 시작을 페이지 경계로 — 중앙에서 시작하면 마지막 칸만 채워진다
                   index: alignTileIndex(Math.floor(s.instances.length / 2),
-                                        (hang2dImgRef.current?.r ?? 1) * (hang2dImgRef.current?.c ?? 1),
+                                        ((userIlRef.current ?? hang2dImgRef.current)?.r ?? 1)
+                                          * ((userIlRef.current ?? hang2dImgRef.current)?.c ?? 1),
                                         s.instances.length),
                   wl: ai?.q ?? "",
-                  il: hang2dImgRef.current ?? undefined })   // 모달리티 기본 Image 분할
+                  // 사용자가 직접 바꾼 Image 분할 우선, 없으면 모달리티 기본
+                  il: userIlRef.current ?? hang2dImgRef.current ?? undefined })
               : initPane(detail.study_uid);
           });
           return next;
@@ -1282,7 +1297,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const run = async () => {
       const cfg = mgCfgRef.current;
       type Item = { pid: string; key: string; side: "left" | "right"; bbox: MgBBox;
-                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean };
+                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean;
+                    ps: number };   // PixelSpacing row(mm/px) — 실제 크기 기준 배율 통일용(없으면 0)
       const items: Item[] = [];
       let cand = 0;   // 조직 감지를 시도한 페인 수 — 0이면 아직 로드 전이므로 안내를 띄우지 않는다
       const ids = PANE_IDS.slice(0, L2.count);
@@ -1306,19 +1322,37 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         if (dead) return;
         if (!bbox) continue;
         items.push({ pid, key: `${p.studyUid}|${p.series.series_uid}`, side, bbox, paneW: sz.w, paneH: sz.h,
-                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH });
+                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH,
+                     ps: inst.pixel_spacing?.[0] ?? 0 });
       }
       if (dead) return;
       if (!items.length) { if (cand) setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다"); return; }
-      let zoom = Infinity;
-      for (const it of items) { const z = mgZoom(it); if (z != null) zoom = Math.min(zoom, z); }
-      if (!isFinite(zoom) || zoom <= 0) zoom = 1;
+      /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 띄운다.
+         zoom 배수만 같게 하면 영상마다 매트릭스(rows/cols)·픽셀 간격이 달라 화면상 크기가 어긋난다
+         (RCC 와 LCC 가 다른 크기로 보이던 원인). 화면 px/mm 를 모든 대상 페인에서 같게 맞춘다.
+         PixelSpacing 이 없는 영상이 하나라도 있으면 종전처럼 zoom 배수만 통일(폴백). */
+      const zs = items.map((it) => mgZoom(it) ?? 1);
+      const s0 = items.map((it) => Math.min(it.paneW / it.cols, it.paneH / it.rows));
+      const haveMm = items.every((it) => it.ps > 0);
+      let zoomOf: (i: number) => number;
+      if (haveMm) {
+        // 각 페인이 낼 수 있는 최대 화면배율(px/mm) 중 가장 작은 값으로 통일
+        const mmScale = Math.min(...items.map((it, i) => s0[i] * zs[i] / it.ps));
+        zoomOf = (i) => {
+          const z = mmScale * items[i].ps / (s0[i] || 1);
+          return isFinite(z) && z > 0 ? z : 1;
+        };
+      } else {
+        const common = Math.min(...zs);
+        const z = isFinite(common) && common > 0 ? common : 1;
+        zoomOf = () => z;
+      }
       if (!mgOnRef.current) return;   // 비동기 진행 중 사용자가 해제 — 다시 맞붙이지 않는다
       setPanes((prev) => {
         const next = { ...prev };
-        for (const it of items) {
+        items.forEach((it, ii) => {
           const p = next[it.pid];
-          if (!p) continue;
+          if (!p) return;
           /* 기준값(맞붙이기 전 상태) 캡처 규칙 — 이 규칙이 없으면 재적용 시 '이미 맞붙인 값'이
              기준값이 되어 해제해도 원복되지 않는다.
               · 처음이면 현재 값을 잡는다.
@@ -1334,10 +1368,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               : applied ? { key: it.key, zoom: 1, tx: 0, ty: 0 }
               : { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
           }
+          const zoom = zoomOf(ii);
           const xf = { zoom, tx: mgTx({ ...it, zoom }), ty: 0 };
           mgAppliedRef.current[it.pid] = xf;
           if (!mgSameXf(p, xf)) next[it.pid] = { ...p, ...xf };
-        }
+        });
         return next;
       });
     };
@@ -1405,8 +1440,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       for (const pid2 of PANE_IDS) {
         const i = vis.indexOf(pid2);
         const s = i >= 0 ? list[i] : undefined;
+        const uil = userIlRef.current;   // 사용자가 바꾼 Image 분할은 검사 전환에도 유지
         next[pid2] = s
-          ? { ...initPane(uid), series: s, index: Math.floor(s.instances.length / 2) }
+          ? { ...initPane(uid), series: s, il: uil ?? undefined,
+              index: alignTileIndex(Math.floor(s.instances.length / 2),
+                                    (uil?.r ?? 1) * (uil?.c ?? 1), s.instances.length) }
           : initPane(uid);
       }
       return next;
@@ -1414,8 +1452,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     setSelPanes(new Set());
   };
 
+  /** 전체 StudyDetail 캐시 — 판독 도크가 현재 보는 검사를 따라가는 데 사용 */
+  const fullDetail = async (id: number): Promise<StudyDetail | null> => {
+    if (id === detail.id) return detail;
+    if (fullDetailRef.current[id]) return fullDetailRef.current[id];
+    try { const d = await api.study(id); fullDetailRef.current[id] = d; return d; } catch { return null; }
+  };
   const loadIntoActive = async (id: number) => {
     const isMain = id === detail.id;
+    void fullDetail(id).then((d) => { if (d) setDockDetail(d); });   // 판독 도크도 이 검사로 전환
     try {
       const tree = isMain ? { uid: detail.study_uid, series } : await getTree(id);
       if (!tree.series[0]) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
@@ -1441,7 +1486,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         return;
       }
       const s = tree.series[0];
-      patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+      const uil = userIlRef.current;
+      patch(activePane, { ...initPane(tree.uid), series: s, il: uil ?? undefined,
+                          index: alignTileIndex(Math.floor(s.instances.length / 2),
+                                                (uil?.r ?? 1) * (uil?.c ?? 1), s.instances.length) });
     } catch { setStatus("검사 전환 실패"); }
   };
   loadIntoActiveRef.current = loadIntoActive;  // 동기 리스너에서 최신 클로저 사용
@@ -2657,7 +2705,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const n = ids.length + 1;                       // 주 검사(p0) + 선택 검사들
     const c = n <= 2 ? 2 : n <= 4 ? 2 : 3;
     const key = `${Math.ceil(n / c)}x${c}`;
-    if (LAYOUTS[key]) setLayout(key as keyof typeof LAYOUTS);
+    if (LAYOUTS[key]) setLayoutByUser(key as keyof typeof LAYOUTS);
     for (let i = 0; i < ids.length; i++) {
       try {
         const tree = await getTree(ids[i]);
@@ -3119,6 +3167,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             })}
           </div>
         ))}
+        {/* 2D-MG 확대율 — 맞붙임으로 배율이 바뀌면 좌하단에 몇 %인지 표시(INFO 토글과 무관하게 항상) */}
+        {isMg && mgOn && p.series && Math.abs(p.zoom - 1) > 0.005 && (
+          <div style={{ position: "absolute", left: 5, bottom: overlayOn ? 24 : 5, zIndex: 3, pointerEvents: "none",
+                        fontSize: 11, fontWeight: 700, color: "var(--text-primary)", textShadow: "0 0 4px #000" }}>
+            2D-MG {(p.zoom * 100).toFixed(0)}%
+          </div>
+        )}
         {/* 확대경 렌즈 — 마우스 위치 3배 확대 (배경이미지 트릭, In Viewer 동일) */}
         {magOn && magPos && magPos.pid === pid && url && inst && tileCount <= 1 && (
           <div style={{
@@ -3429,7 +3484,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                 onClick={() => navPatient(1)} disabled={navTarget(1) === undefined}
                 style={{ flex: 1, padding: "5px 0", fontSize: 13, fontWeight: 700 }}>▶</button>
       </div>
-      <select value={layout} onChange={(e) => setLayout(e.target.value as keyof typeof LAYOUTS)}
+      <select value={layout} onChange={(e) => setLayoutByUser(e.target.value as keyof typeof LAYOUTS)}
               style={{ fontSize: 12, width: paletteHoriz ? 76 : "100%", padding: "4px 2px" }}>
         <option value="1x1">1 X 1</option><option value="1x2">1 X 2</option><option value="2x2">2 X 2</option>
       </select>
@@ -4094,10 +4149,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {/* 좌상단: Series Layout(뷰포트 분할) · Image Layout(페인 내 이미지 타일) — UBPACS p.14 */}
         <GridPicker label="Srs" max={10}
                     value={{ r: LAYOUTS[layout].rows, c: LAYOUTS[layout].cols }}
-                    onPick={(v) => setLayout(`${v.r}x${v.c}`)} />
+                    onPick={(v) => setLayoutByUser(`${v.r}x${v.c}`)} />
         <GridPicker label="Img" max={10} value={imgLay}
                     onPick={(v) => {
                       setImgLay(v);
+                      userIlRef.current = v;   // 세션 기억 — Exam 전환에도 유지
                       // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로 — 안 그러면 첫 칸이 시리즈 중간에서
                       // 시작해 마지막 한 장만 보인다(2장 시리즈를 1×2 로 나눌 때 특히)
                       setPanes((prev) => {
@@ -4155,7 +4211,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               2D-MG
             </label>
             {MG_LAYOUTS.map((k) => (
-              <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`} onClick={() => applyMgLayout(k)}
+              <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`}
+                      onClick={() => { userLayoutRef.current = k; applyMgLayout(k); }}
                       style={{ padding: "2px 7px", fontSize: 11,
                                ...(layout === k ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
                 {mgLayoutLabel(k)}
@@ -4274,7 +4331,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                    }))} />
         <TitleMenu id="hp" icon={`HP:${hpName}`} title="Hanging Protocol — 설정>행잉(HP)에서 규칙 관리" menu={menu} setMenu={setMenu}
                    items={[
-                     { label: "기본 (HP 해제)", onClick: () => { setHpName("기본"); setImgLay({ r: 1, c: 1 }); setLayout("1x1"); } },
+                     { label: "기본 (HP 해제)", onClick: () => {
+                       setHpName("기본"); setImgLay({ r: 1, c: 1 });
+                       userIlRef.current = { r: 1, c: 1 }; setLayoutByUser("1x1");
+                     } },
                      ...hpRules.map((r) => ({
                        label: `${r.name} — ${r.modality || "*"}/${r.body_part || "*"}/${r.projection || "*"} · S${r.s.r}×${r.s.c} I${r.i.r}×${r.i.c}${r.wl ? ` · W/L ${r.wl}` : ""}`,
                        onClick: () => applyHp(r),
@@ -4425,7 +4485,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         )}
         {/* 판독 도크 — 공유 컴포넌트 (리포트 로드/저장/승인/상용구/단축키 내장) */}
         {prefs.reportDock && !reportCollapsed && (
-          <ReportDock detail={detail} width={prefs.dockW}
+          <ReportDock detail={dockDetail} width={prefs.dockW}
                       onLoadPrior={(id) => {
                         // Setting>판독 '과거검사 비교 표시' — monitor: 인접 모니터(다음, 끝번이면 이전) 창.
                         // 실패/단일/미감지 시 Layout(1:2 분할 loadPrior)로 폴백. 라벨: 이 창=M, 인접 창=S1.

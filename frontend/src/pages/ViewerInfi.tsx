@@ -661,7 +661,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const ma = mammo && hasMammoView(hangList[0].series)
         ? mammoOrder(hangList[0].series, (mgLay[0] || 2) * (mgLay[1] || 2), mgLay[1] || 2) : null;
       const mammoSeries = ma;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
-      if (mammo) setOvlVisible(false);
+      // Mammo 도 4코너 정보(환자·시리즈·W/L·배율)는 유지 — 판독에 필요. 표시 여부는 토글로만 제어
       let r: number, c: number;
       // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일)
       if (mammo) { r = mgLay[0] || 2; c = mgLay[1] || 2; setHpName(`Mammo ${r}×${c}`); }
@@ -2445,7 +2445,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const run = async () => {
       const cfg = mgCfgRef.current;
       type Item = { pi: number; key: string; side: "left" | "right"; bbox: MgBBox;
-                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean };
+                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean;
+                    ps: number };   // PixelSpacing row(mm/px) — 실제 크기 기준 배율 통일용(없으면 0)
       const items: Item[] = [];
       const cur = panesRef.current;
       for (let pi = 0; pi < cur.length; pi++) {
@@ -2463,12 +2464,27 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         if (dead) return;
         if (!bbox) continue;
         items.push({ pi, key: `${p.studyUid}|${p.series.series_uid}`, side, bbox, paneW: rc.width, paneH: rc.height,
-                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH });
+                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH,
+                     ps: inst.pixel_spacing?.[0] ?? 0 });
       }
       if (dead || !items.length) return;
-      let zoom = Infinity;
-      for (const it of items) { const z = mgZoom(it); if (z != null) zoom = Math.min(zoom, z); }
-      if (!isFinite(zoom) || zoom <= 0) zoom = 1;
+      /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 (Viewer2D 와 동일 규칙).
+         zoom 배수만 같게 하면 매트릭스·픽셀 간격 차이로 화면상 크기가 어긋난다. */
+      const zs = items.map((it) => mgZoom(it) ?? 1);
+      const s0 = items.map((it) => Math.min(it.paneW / it.cols, it.paneH / it.rows));
+      const haveMm = items.every((it) => it.ps > 0);
+      let zoomOf: (i: number) => number;
+      if (haveMm) {
+        const mmScale = Math.min(...items.map((it, i) => s0[i] * zs[i] / it.ps));
+        zoomOf = (i) => {
+          const z = mmScale * items[i].ps / (s0[i] || 1);
+          return isFinite(z) && z > 0 ? z : 1;
+        };
+      } else {
+        const common = Math.min(...zs);
+        const z = isFinite(common) && common > 0 ? common : 1;
+        zoomOf = () => z;
+      }
       if (!mgOnRef.current) return;   // 비동기 진행 중 사용자가 해제 — 다시 맞붙이지 않는다
       setPanes((prev) => prev.map((p, i) => {
         const it = items.find((q) => q.pi === i);
@@ -2483,6 +2499,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
             : applied ? { key: it.key, zoom: 1, tx: 0, ty: 0 }
             : { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
         }
+        const zoom = zoomOf(items.indexOf(it));
         const xf = { zoom, tx: mgTx({ ...it, zoom }), ty: 0 };
         mgAppliedRef.current[i] = xf;
         return mgSameXf(p, xf) ? p : { ...p, ...xf };
@@ -2778,6 +2795,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       </div>
                     );
                   })()}
+                  {/* 2D-MG 확대율 — 맞붙임으로 배율이 바뀌면 좌하단에 몇 %인지 표시 */}
+                  {isMg && mgOn && Math.abs(p.zoom - 1) > 0.005 && (
+                    <div style={{ position: "absolute", left: 5, bottom: ovlVisible ? 24 : 5, zIndex: 3,
+                                  pointerEvents: "none", fontSize: 11, fontWeight: 700,
+                                  color: "var(--text-primary)", textShadow: "0 0 4px #000" }}>
+                      2D-MG {(p.zoom * 100).toFixed(0)}%
+                    </div>
+                  )}
                   {ovlVisible && (
                     <>
                       <div style={ovl("tl", ovlFont)}>{pd.patient_name}<br />{pd.patient_key}</div>
