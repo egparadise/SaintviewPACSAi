@@ -17,6 +17,18 @@ export function mammoAssign<T extends { series_desc: string }>(list: T[]): (T | 
     list.find((s) => { const v = mammoView(s.series_desc); return v.lat === lat && v.view === view; }) ?? null;
   return [pick("R", "CC"), pick("L", "CC"), pick("R", "MLO"), pick("L", "MLO")];
 }
+/** Image 분할(타일)에서 표시 시작 인덱스를 페이지 경계로 맞춘다.
+ *  안 맞추면 분할을 키운 순간 첫 칸이 시리즈 중간에서 시작해(기본 시작 인덱스=중앙)
+ *  2장짜리 시리즈를 1×2 로 나눴을 때 마지막 한 장만 보이는 식이 된다.
+ *  타일이 1개면 기존과 동일(범위 클램프만). */
+export function alignTileIndex(index: number, tiles: number, len: number): number {
+  if (len <= 0) return 0;
+  const t = Math.max(1, Math.floor(tiles) || 1);
+  const last = Math.floor((len - 1) / t) * t;                 // 마지막 페이지의 시작
+  const start = Math.floor(Math.max(0, index) / t) * t;
+  return Math.min(start, last);
+}
+
 /** 표준 4-view 가 하나라도 잡히는가 — 맘모 전용 배치를 쓸지(아니면 순서대로 폴백할지) 판정.
  *  mammoOrder 의 반환 길이(분할 칸수)와 무관해야 하므로 별도 함수로 둔다(1:2 에서 CC 만 보는 문제 방지). */
 export function hasMammoView<T extends { series_desc: string }>(list: T[]): boolean {

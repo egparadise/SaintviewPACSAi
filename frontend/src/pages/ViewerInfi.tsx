@@ -25,7 +25,7 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
-import { hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 
@@ -356,6 +356,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 (Viewer2D 와 동일 규칙) */
   const [mgOn, setMgOn] = useState(false);
   const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
+  // Image Layout 타일 더블클릭으로 1×1 파고들기 — 복귀용 원래 분할·시작 인덱스(페인별, 시리즈 검증)
+  const tileZoomRef = useRef<Record<number, { il: { r: number; c: number }; index: number; suid: string }>>({});
   const mgOnRef = useRef(false);                  // 비동기 적용 중 해제되었는지 즉시 판정
   const mgTouchedRef = useRef(false);             // 사용자가 직접 토글함 — 검사 전환 시 서버값이 덮어쓰지 않게
   // 해제 시 복원용 기준값(맞붙이기 전 상태) + 우리가 마지막으로 쓴 변환(기준값 오염 판정용)
@@ -824,11 +826,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const applyHpIn = (rule: HpRule) => {
     const vg = rule.displays?.find((d) => d.role === "viewer")?.grid ?? rule.s;
     applySLayout({ r: Math.min(vg.r, 10), c: Math.min(vg.c, 10) });
-    setPanes((ps) => ps.map((p) => ({
-      ...p,
-      il: { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) },
-      ...(rule.wl !== undefined ? { wl: rule.wl ?? "" } : {}),
-    })));
+    setPanes((ps) => ps.map((p) => {
+      const il = { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) };
+      return {
+        ...p, il,
+        index: alignTileIndex(p.index, il.r * il.c, p.series?.instances.length ?? 0),
+        ...(rule.wl !== undefined ? { wl: rule.wl ?? "" } : {}),
+      };
+    }));
     // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영)
     setXlink((x) => ({ ...x,
       crosslink: rule.cross_link ?? x.crosslink,
@@ -2611,6 +2616,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                const inst2 = p.series?.instances.find((x) => x.sop_uid === pend.sop);
                if (inst2 && finishOpenEnded(pi, p, inst2)) return;
              }
+             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀 — 같은 시리즈일 때만
+             const tz = tileZoomRef.current[pi];
+             if (tz && tilesOf(p) <= 1 && tz.suid === (p.series?.series_uid ?? "")) {
+               delete tileZoomRef.current[pi];
+               upd(pi, { il: tz.il, index: tz.index });
+               return;
+             }
              setMaximized((m) => (m === null ? pi : null));
            }}
            // 썸네일 시리즈 드롭 — 이 페인에 로드 (드래그앤드롭)
@@ -2638,6 +2650,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           const inst = insts[idx];
           return (
             <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
+                 // 타일 더블클릭 = 그 이미지로 파고들기(Image 분할 1×1) — 이후 스크롤로 시리즈 전체 확인.
+                 // 페인에서 다시 더블클릭하면 원래 분할·위치로 복귀.
+                 onDoubleClick={(e) => {
+                   if (tilesOf(p) <= 1 || !p.series || !inst) return;
+                   if (OPEN_ENDED.has(tool) && pend) return;   // 열린 다각 완료가 우선
+                   e.stopPropagation();
+                   tileZoomRef.current[pi] = { il: p.il, index: p.index, suid: p.series.series_uid };
+                   upd(pi, { il: { r: 1, c: 1 }, index: idx });
+                   setActive(pi);
+                 }}
                  onMouseDown={(e) => {
                    if (e.button !== 0 || !p.series || !inst) return;
                    if (DRAG_TOOLS.has(tool)) {
@@ -3084,7 +3106,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           <GridPicker label="Series" max={10} value={sLayout}
                       onPick={(v) => applySLayout({ r: Math.min(v.r, 10), c: Math.min(v.c, 10) })} />
           <GridPicker label="Image" max={10} value={panes[active]?.il ?? { r: 1, c: 1 }}
-                      onPick={(v) => upd(active, { il: { r: Math.min(v.r, 10), c: Math.min(v.c, 10) } })} />
+                      onPick={(v) => {
+                        delete tileZoomRef.current[active];   // 직접 분할을 고르면 파고들기 복귀 기억은 버린다
+                        const il = { r: Math.min(v.r, 10), c: Math.min(v.c, 10) };
+                        // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로(마지막 한 장만 보이는 현상 방지)
+                        const len = panes[active]?.series?.instances.length ?? 0;
+                        upd(active, { il, index: alignTileIndex(panes[active]?.index ?? 0, il.r * il.c, len) });
+                      }} />
           {/* 분할을 넘어가는 시리즈가 있을 때 — Shift+스크롤로 페이지 이동 */}
           {(() => {
             const cnt = Math.max(1, sLayout.r * sLayout.c);
@@ -3212,7 +3240,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       if (rule) applyHpIn(rule);
                     }
                     else if (v === "stack") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 1, c: 1 } }); setHpName("기본"); }
-                    else if (v === "tile") { applySLayout({ r: 1, c: 1 }); upd(0, { il: { r: 3, c: 3 } }); setHpName("기본"); }
+                    else if (v === "tile") {
+                      applySLayout({ r: 1, c: 1 });
+                      upd(0, { il: { r: 3, c: 3 }, index: alignTileIndex(panes[0]?.index ?? 0, 9, panes[0]?.series?.instances.length ?? 0) });
+                      setHpName("기본");
+                    }
                     else if (v === "cmp") { applySLayout({ r: 1, c: 2 }); setHpName("기본"); }
                     e.target.value = "";
                   }} style={{ fontSize: 10 }}>

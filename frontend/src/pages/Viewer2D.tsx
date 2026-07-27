@@ -8,7 +8,7 @@ import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
-import { DEFAULT_WL_PRESETS, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_WL_PRESETS, alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { ToolIconTy } from "../components/ToolIconTy";
@@ -493,6 +493,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 2D 행잉(모달리티→Image 분할) 기본 il — 검사 열 때 페인에 적용(prefs 로드에서 해석)
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
+  // Image Layout 타일 더블클릭으로 1×1 파고들기 — 복귀용 원래 분할·시작 인덱스(페인별, 시리즈 검증)
+  const tileZoomRef = useRef<Record<string, { il: { r: number; c: number }; index: number; suid: string }>>({});
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
   const isMg = detail.modality === "MG";
   const [mgOn, setMgOn] = useState(false);
@@ -1029,7 +1031,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (ig) {
         setImgLay(ig);
         // 이미 생성된 페인에도 즉시 적용(prefs 로드가 시리즈 로드보다 늦은 경우)
-        setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pp]) => [k, { ...pp, il: ig }])));
+        setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pp]) => [k, {
+          ...pp, il: ig,
+          index: alignTileIndex(pp.index, ig.r * ig.c, pp.series?.instances.length ?? 0),
+        }])));
       }
       // 2D-MG — MG 는 위에서 2D 행잉을 건너뛰므로 전용 키(mg_join)로 분할·기본 체크를 정한다.
       // 페인↔시리즈 배정은 레이아웃과 무관하게 전 페인에 미리 채워지므로 여기서 setLayout 만 해도 안전
@@ -1132,7 +1137,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             const s = mammoSeries ? (mammoSeries[i] ?? null) : imgSeries[i];
             next[pid] = s
               ? applyPState({ ...initPane(detail.study_uid), series: s,
-                  index: Math.floor(s.instances.length / 2), wl: ai?.q ?? "",
+                  // 타일 분할이 있으면 시작을 페이지 경계로 — 중앙에서 시작하면 마지막 칸만 채워진다
+                  index: alignTileIndex(Math.floor(s.instances.length / 2),
+                                        (hang2dImgRef.current?.r ?? 1) * (hang2dImgRef.current?.c ?? 1),
+                                        s.instances.length),
+                  wl: ai?.q ?? "",
                   il: hang2dImgRef.current ?? undefined })   // 모달리티 기본 Image 분할
               : initPane(detail.study_uid);
           });
@@ -2991,7 +3000,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
            }}
            onDoubleClick={() => {
              if (tool && OPEN_ENDED.has(tool)) { finishOpenEnded(); return; }  // 수집 종료 — 최대화 충돌 회피
-             if (!tool) setMaximized((m) => (m === pid ? null : pid));   // 더블클릭 = 페인 최대화/복원
+             if (tool) return;
+             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀 — 같은 시리즈일 때만
+             const tz = tileZoomRef.current[pid];
+             if (tz && tileCount <= 1 && tz.suid === (p.series?.series_uid ?? "")) {
+               delete tileZoomRef.current[pid];
+               patch(pid, { il: tz.il, index: tz.index });
+               return;
+             }
+             setMaximized((m) => (m === pid ? null : pid));   // 더블클릭 = 페인 최대화/복원
            }}
            onMouseMove={(e) => {   // Magnification — 단일 이미지 페인에서 마우스 추적 (In Viewer 이식)
              if (!magOn || !inst || tileCount > 1) return;
@@ -3045,6 +3062,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   const u = renderedUrlAt(p, p.index + k);
                   return u ? (
                     <img key={k} src={u} alt="" draggable={false}
+                         // 타일 더블클릭 = 그 이미지로 파고들기(Image 분할 1×1) — 이후 스크롤로 시리즈 전체 확인.
+                         // 페인 여백에서 다시 더블클릭하면 원래 분할·위치로 복귀.
+                         onDoubleClick={(e) => {
+                           if (tool) return;   // 도구 사용 중엔 기존 동작(열린 다각 완료 등) 우선
+                           e.stopPropagation();
+                           tileZoomRef.current[pid] = { il: pIl, index: p.index, suid: p.series?.series_uid ?? "" };
+                           patch(pid, { il: { r: 1, c: 1 }, index: p.index + k });
+                           setActivePane(pid);
+                         }}
                          style={{
                            width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
                            minWidth: 0, minHeight: 0,
@@ -3054,6 +3080,31 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                 })}
               </div>
             )}
+          </div>
+        )}
+        {/* Image Layout 타일별 정보 — 페인 전체 오버레이(환자·검사·시리즈)와 별개로 각 이미지의 번호·위치를 표시.
+            변환 래퍼 밖(별도 그리드)에 겹쳐 그려야 확대/이동해도 글자가 같이 커지지 않는다. */}
+        {overlayOn && tileCount > 1 && p.series && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none", display: "grid", gap: 1,
+                        gridTemplateColumns: `repeat(${pIl.c}, 1fr)`, gridTemplateRows: `repeat(${pIl.r}, 1fr)` }}>
+            {Array.from({ length: tileCount }, (_, k) => {
+              const ti = p.series?.instances[p.index + k];
+              if (!ti) return <div key={k} />;
+              const sl = ti.position?.length === 3 ? ti.position[2] : undefined;
+              // 첫 행 마지막 타일은 페인 전체 오버레이(우상단 시리즈·Img 범위) 자리와 겹치므로 아래로 내린다
+              const dodge = k < pIl.c && k % pIl.c === pIl.c - 1 ? Math.round(tyOvFont * 3.4) : 0;
+              return (
+                <div key={k} style={{ position: "relative", minWidth: 0, minHeight: 0 }}>
+                  <div style={{ position: "absolute", top: dodge, right: 0, padding: "2px 4px", textAlign: "right",
+                                fontSize: Math.max(8, tyOvFont - 1.5), lineHeight: 1.35,
+                                color: "var(--text-primary)", textShadow: "0 0 4px #000", whiteSpace: "nowrap" }}>
+                    {keyMarks.has(ti.sop_uid) && <span style={{ color: "#facc15" }}>🔑 </span>}
+                    Img: {p.index + k + 1}/{p.series?.instances.length}
+                    {sl !== undefined && <><br />SL: {sl.toFixed(1)}</>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
         {/* 확대경 렌즈 — 마우스 위치 3배 확대 (배경이미지 트릭, In Viewer 동일) */}
@@ -4033,7 +4084,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     value={{ r: LAYOUTS[layout].rows, c: LAYOUTS[layout].cols }}
                     onPick={(v) => setLayout(`${v.r}x${v.c}`)} />
         <GridPicker label="Img" max={10} value={imgLay}
-                    onPick={(v) => { setImgLay(v); patch(activePane, { il: v }); }} />
+                    onPick={(v) => {
+                      delete tileZoomRef.current[activePane];   // 직접 분할을 고르면 파고들기 복귀 기억은 버린다
+                      setImgLay(v);
+                      // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로 — 안 그러면 첫 칸이 시리즈 중간에서
+                      // 시작해 마지막 한 장만 보인다(2장 시리즈를 1×2 로 나눌 때 특히)
+                      setPanes((prev) => {
+                        const q = prev[activePane];
+                        if (!q) return prev;
+                        return { ...prev, [activePane]: { ...q, il: v,
+                          index: alignTileIndex(q.index, v.r * v.c, q.series?.instances.length ?? 0) } };
+                      });
+                    }} />
         {/* 오픈 검사 탭 — 좌→우로 쌓임. 클릭=활성 페인에 표시, ✕=닫기(주 검사로 복귀) */}
         <div style={{ display: "flex", gap: 2, alignSelf: "flex-end", overflowX: "auto", maxWidth: "55%" }}>
           {openTabs.map((t) => {
