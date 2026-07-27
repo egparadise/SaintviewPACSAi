@@ -6,6 +6,8 @@ import {
   INFI_COLUMNS, SV_COLUMNS, SVINFI_PANELS, SVINFI_PANEL_LABEL, type ViewerKey,
 } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, normMgJoin, type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
+import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, APP_VERSION, APP_VERSION_LABEL } from "../lib/version";
 import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_PALETTE } from "../lib/infiConfig";
 import { screenApiIssue } from "../lib/screens";
@@ -80,6 +82,10 @@ const TREE: { key: string; label: string; admin?: boolean; scope: SettingsScope;
   { key: "shortcuts", label: "단축키 (Mouse·Key)", scope: "viewer" },
   { key: "policy", label: "정책 (Policy)", scope: "viewer" },
   { key: "hp", label: "행잉 (HP)", scope: "viewer" },
+  // 정보 — 버전·적용일자·제조사. 세 범위(시스템/병원/뷰어) 모두에서 같은 패널을 연다
+  { key: "about", label: "정보 (Information)", scope: "viewer" },
+  { key: "about", label: "정보 (Information)", scope: "hospital" },
+  { key: "about", label: "정보 (Information)", scope: "system" },
 ];
 const SCOPE_TITLE: Record<SettingsScope, string> = {
   system: "시스템 설정", hospital: "병원 설정", viewer: "뷰어 설정",
@@ -129,9 +135,11 @@ interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: stri
 
 /** 2D 행잉 편집기 — 모달리티별 Series/Image 분할(공통·뷰어별 공용). */
 const HANG2D_MODS = ["CR", "DR", "MG", "US", "CT", "MR", "XA", "NM", "PT"];
-function Hanging2dEditor({ map, onChange }: {
+function Hanging2dEditor({ map, onChange, mg, onMg }: {
   map: Record<string, { s: string; i: string }>;
   onChange: (m: string, next: { s: string; i: string }) => void;
+  /** MG 행 전용 — 2D-MG(좌우 맞붙임) 설정. 뷰어 공통 페이지에서만 전달한다 */
+  mg?: MgJoinPrefs; onMg?: (next: MgJoinPrefs) => void;
 }) {
   const parseG = (s: string) => { const [r, c] = s.split("x").map(Number); return { r: r || 1, c: c || 1 }; };
   const gStr = (g: { r: number; c: number }) => `${g.r}x${g.c}`;
@@ -144,9 +152,35 @@ function Hanging2dEditor({ map, onChange }: {
             <b style={{ width: 42, fontSize: 12 }}>{m}</b>
             <GridPicker label="Series" max={10} value={parseG(cur.s)} onPick={(g) => onChange(m, { ...cur, s: gStr(g) })} />
             <GridPicker label="Image" max={10} value={parseG(cur.i)} onPick={(g) => onChange(m, { ...cur, i: gStr(g) })} />
+            {m === "MG" && mg && onMg && (
+              <>
+                <label title="좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 뷰어 우측 상단 2D-MG 체크박스로 켜고 끕니다."
+                       style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, marginLeft: 10, whiteSpace: "nowrap" }}>
+                  <input type="checkbox" checked={mg.on_default}
+                         onChange={(e) => onMg({ ...mg, on_default: e.target.checked })} />
+                  2D-MG 기본 ON
+                </label>
+                <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, whiteSpace: "nowrap" }}>
+                  분할
+                  <select value={mg.layout} onChange={(e) => onMg({ ...mg, layout: e.target.value as MgLayoutKey })}
+                          style={{ fontSize: 12 }}>
+                    {MG_LAYOUTS.map((k) => <option key={k} value={k}>{mgLayoutLabel(k)}</option>)}
+                  </select>
+                </label>
+                <label title="조직과 배경(공기)을 가르는 밝기 임계값. 배경에 잡음이 많아 맞붙임이 과하면 값을 올립니다(0~255)."
+                       style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, whiteSpace: "nowrap" }}>
+                  임계
+                  <input type="number" min={0} max={255} value={mg.thresh} style={{ width: 52, fontSize: 12 }}
+                         onChange={(e) => onMg({ ...mg, thresh: Math.max(0, Math.min(255, Number(e.target.value) || 0)) })} />
+                </label>
+              </>
+            )}
           </div>
         );
       })}
+      {mg && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
+        · MG 행의 Series/Image 분할 대신 <b>2D-MG 분할</b>이 적용됩니다(맘모는 페인당 1장 고정). 이미 열려 있는 뷰어에는 다음에 검사를 열 때 반영됩니다.
+      </div>}
     </>
   );
 }
@@ -220,6 +254,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [h2dMap, setH2dMap] = useState<Record<string, { s: string; i: string }>>({});
   const [h2dCommonOn, setH2dCommonOn] = useState(true);
   const [h2dByViewer, setH2dByViewer] = useState<Record<string, Record<string, { s: string; i: string }>>>({});
+  // 2D-MG(맘모 좌우 맞붙임) — 2D 행잉 MG 행에서 편집. 전 뷰어(T/In/SaintView) 공통
+  const [mgJoin, setMgJoin] = useState<MgJoinPrefs>(DEFAULT_MG_JOIN);
+  const mgOnDefLoaded = useRef(DEFAULT_MG_JOIN.on_default);   // '기본 ON' 을 바꿨는지 판정용
   const [reportDock, setReportDock] = useState(false);  // 판독 도크 기본 숨김
   // 비교(Compare) 설정 — viewer.prefs.compare (뷰어·openV2 가 소비). 편집은 판독(Reading) 탭.
   //  enabled=기능 on/off · multi_monitor=Viewer 모니터 2개+면 비교검사를 다음 모니터에(끝번→첫번 순환) · labels=M/S 녹색 라벨
@@ -404,6 +441,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       const vv = v as { hanging2d_common_on?: boolean; hanging2d_by_viewer?: Record<string, Record<string, { s: string; i: string }>> };
       if (vv.hanging2d_common_on !== undefined) setH2dCommonOn(!!vv.hanging2d_common_on);
       if (vv.hanging2d_by_viewer) setH2dByViewer(vv.hanging2d_by_viewer);
+      { const mj = normMgJoin((v as { mg_join?: unknown }).mg_join); setMgJoin(mj); mgOnDefLoaded.current = mj.on_default; }
       if (v.reportDock !== undefined) setReportDock(v.reportDock);
       const tb = (v as { toolbar?: Record<string, boolean> }).toolbar;
       if (tb) setTbConfig(tb);
@@ -511,6 +549,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       hanging2d: h2dMap,
       hanging2d_common_on: h2dCommonOn,
       hanging2d_by_viewer: h2dByViewer,
+      mg_join: mgJoin,
+      // '기본 ON' 을 바꿨으면 뷰어에 남아 있는 마지막 사용 상태(mg_join_on)도 함께 맞춘다 —
+      // 안 그러면 한 번이라도 뷰어에서 토글한 계정은 이 설정이 영영 반영되지 않는다
+      ...(mgJoin.on_default !== mgOnDefLoaded.current ? { mg_join_on: mgJoin.on_default } : {}),
       client_viewer: clientViewer,
       compare: cmpCfg,
       infi_sel_color: infSelColor, infi_overlay_font: infOvlFont, infi_overlay_visible: infOvlVisible,
@@ -599,7 +641,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
           <span style={{ marginLeft: 8, fontSize: 11.5, color: "var(--text-secondary)" }}>
             {scope === "system" ? "서버 운영" : scope === "hospital" ? "병원별 배치 구성" : "사용자·판독 환경"}
           </span>
-          <button style={{ marginLeft: "auto", marginRight: 6 }} title={maxed ? "기본 크기로 복원" : "전체 화면으로 크게 보기"}
+          {/* 버전 칩 — 클릭하면 정보(Information) 페이지로 이동 */}
+          <span onClick={() => setPage("about")} title={`${APP_NAME} ${APP_VERSION_LABEL} (적용일 ${APP_RELEASE_DATE}) — 클릭하면 정보 페이지로 이동`}
+                style={{ marginLeft: "auto", marginRight: 8, padding: "1px 8px", borderRadius: 10, cursor: "pointer",
+                         border: "1px solid var(--border)", background: "var(--bg-canvas)",
+                         fontSize: 11, fontWeight: 700, color: "var(--text-secondary)" }}>
+            {APP_VERSION_LABEL}
+          </span>
+          <button style={{ marginRight: 6 }} title={maxed ? "기본 크기로 복원" : "전체 화면으로 크게 보기"}
                   onClick={() => setMaxed((m) => !m)}>{maxed ? "❐ 복원" : "⬜ 최대화"}</button>
           <button onClick={onClose}>닫기</button>
         </div>
@@ -1618,7 +1667,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   해제하면 각 뷰어(뷰어 공통 &gt; SaintView/I-View/T-View)의 개별 설정을 사용합니다.<br />
                   검사를 열 때 모달리티별 기본 분할 — <b>Series</b>(뷰포트 개수) + <b>Image</b>(페인 내 이미지 타일). 그리드에서 선택.
                 </div>
-                <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))} />
+                <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))}
+                                 mg={mgJoin} onMg={setMgJoin} />
               </Group>
             )}
             {(page === "viewerTy" || page === "viewerSv") && (
@@ -2122,6 +2172,19 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   · <b>최신으로</b>: ◀=한 단계 최신(위 행) / ▶=한 단계 과거(아래 행)<br />
                   이동 대상 환자가 이미 Exam 탭으로 열려 있으면 그 탭으로 전환되고, 아니면 열면서 이동합니다.
                   Worklist·Image Viewer·Reading Viewer는 열린 환자를 서로 따라갑니다(연동). OK(저장) 시 적용.
+                </div>
+              </Group>
+            )}
+
+            {page === "about" && (
+              <Group title="정보 (Information)">
+                <Row label="제품명"><b>{APP_NAME}</b></Row>
+                <Row label="현재 Version"><b style={{ fontSize: 14 }}>{APP_VERSION}</b></Row>
+                <Row label="버전 적용일자">{APP_RELEASE_DATE}</Row>
+                <Row label="제조사"><b>{APP_VENDOR}</b></Row>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 6 }}>
+                  버전 표기는 <b>major.minor.patch</b> — minor 는 개발 차수, patch 는 차수 내 보정 릴리스입니다.
+                  설정 창 상단의 버전 칩을 클릭하면 이 화면으로 옵니다.
                 </div>
               </Group>
             )}

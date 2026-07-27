@@ -17,6 +17,41 @@ export function mammoAssign<T extends { series_desc: string }>(list: T[]): (T | 
     list.find((s) => { const v = mammoView(s.series_desc); return v.lat === lat && v.view === view; }) ?? null;
   return [pick("R", "CC"), pick("L", "CC"), pick("R", "MLO"), pick("L", "MLO")];
 }
+/** 표준 4-view 가 하나라도 잡히는가 — 맘모 전용 배치를 쓸지(아니면 순서대로 폴백할지) 판정.
+ *  mammoOrder 의 반환 길이(분할 칸수)와 무관해야 하므로 별도 함수로 둔다(1:2 에서 CC 만 보는 문제 방지). */
+export function hasMammoView<T extends { series_desc: string }>(list: T[]): boolean {
+  return mammoAssign(list).some(Boolean);
+}
+/** 표준 4-view 배치를 `count` 칸(그리드 `cols` 열)으로 확장.
+ *  · 좌우 쌍(CC 쌍 / MLO 쌍)은 **같은 행의 인접 두 열**에 놓는다 — 맞붙임(2D-MG)이 성립하려면 짝이 옆에 있어야 한다.
+ *    (2열 4칸이면 [R CC, L CC, R MLO, L MLO] 로 기존과 완전히 동일)
+ *  · 칸이 4 미만이면 실제로 잡힌 쌍을 앞세운다(1:2 인데 CC 없이 MLO 만 있는 검사 대응).
+ *  · 남는 칸은 아직 걸리지 않은 시리즈로 채운다(빈 페인 방지). */
+export function mammoOrder<T extends { series_desc: string }>(
+  list: T[], count: number, cols = 2,
+): (T | null)[] {
+  const n = Math.max(0, count);
+  const base = mammoAssign(list);
+  const cc = base.slice(0, 2), mlo = base.slice(2, 4);
+  // 쌍 우선순위 — 기본은 CC → MLO. 표시 칸이 4 미만이면 실제로 잡힌 쌍을 먼저 보여준다.
+  const pairs = (n < 4 && !cc.some(Boolean) && mlo.some(Boolean)) ? [mlo, cc] : [cc, mlo];
+  const used = new Set(base.filter(Boolean) as T[]);
+  const rest = list.filter((s) => !used.has(s));
+  const c = Math.max(1, cols);
+  const flat = [...pairs[0], ...pairs[1]];
+  const out: (T | null)[] = [];
+  let ri = 0;
+  for (let i = 0; i < n; i++) {
+    if (c < 2) { out.push(i < 4 ? flat[i] ?? null : rest[ri++] ?? null); continue; }   // 1열 — 쌍 개념 없음
+    const row = Math.floor(i / c), col = i % c;
+    const pair = pairs[row];
+    // 2열 이상이면 각 행의 0·1 열이 그 행의 좌우 쌍, 나머지 열은 여분 시리즈.
+    // 그 행에 짝을 놓을 자리가 없으면(칸 수 부족) 쌍을 반쪽만 걸지 않는다 — 표준 뷰 유실 방지.
+    if (pair && col < 2 && (col === 1 || row * c + 1 < n)) out.push(pair[col] ?? null);
+    else out.push(rest[ri++] ?? null);
+  }
+  return out;
+}
 
 /** Client 뷰어 레지스트리 — Setting>뷰어>선택 뷰어.
  *  현행 자체 뷰어(Viewer2D) = TY Viewer. 신규 뷰어는 여기 등록 + ViewerWindow의 컴포넌트 맵에 연결.

@@ -8,7 +8,9 @@ import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
-import { DEFAULT_WL_PRESETS, mammoAssign, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_WL_PRESETS, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
+         type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
@@ -306,6 +308,9 @@ interface ViewerPrefs {
   // 비교(Compare) 설정 — Setting>판독(Reading). enabled/multi_monitor/labels +
   // prior_mode: 과거검사(History) 비교 표시 — "layout"=1:2 분할 / "monitor"=인접 모니터 창
   compare?: { enabled?: boolean; multi_monitor?: boolean; labels?: boolean; prior_mode?: "layout" | "monitor" };
+  // 2D-MG(맘모 좌우 맞붙임) — 설정>뷰어 공통>2D 행잉 MG 행. mg_join_on 은 뷰어에서 마지막으로 켜둔 상태
+  mg_join?: MgJoinPrefs;
+  mg_join_on?: boolean;
 }
 const DEFAULT_PREFS: ViewerPrefs = {
   paletteSide: "left", thumbSide: "left", thumbSize: 128,
@@ -486,6 +491,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 2D 행잉(모달리티→Image 분할) 기본 il — 검사 열 때 페인에 적용(prefs 로드에서 해석)
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
+  /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
+  const isMg = detail.modality === "MG";
+  const [mgOn, setMgOn] = useState(false);
+  const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
+  // MG 원본 시리즈 — 분할(1:2/2:2/2:3) 전환 시 좌우 쌍 재배치용. 어느 검사 것인지 함께 들고 있어야
+  // 검사 전환 중(시리즈 트리 로드 전) 이전 검사 시리즈로 재배치하는 사고를 막는다
+  const mgSrcRef = useRef<{ uid: string; list: SeriesNode[] }>({ uid: "", list: [] });
+  const mgOnRef = useRef(false);                  // 비동기 적용 중 해제되었는지 즉시 판정
+  const mgTouchedRef = useRef(false);             // 사용자가 직접 토글함 — 검사 전환 시 서버값이 덮어쓰지 않게
+  // 해제 시 복원용 기준값(맞붙이기 전 상태) + 우리가 마지막으로 쓴 변환(기준값 오염 판정용)
+  const mgSavedRef = useRef<Record<string, { key: string; zoom: number; tx: number; ty: number }>>({});
+  const mgAppliedRef = useRef<Record<string, { zoom: number; tx: number; ty: number }>>({});
+  useEffect(() => { mgOnRef.current = mgOn; }, [mgOn]);
   // 페인 최대화(더블클릭 토글) + 페인 경계 스플리터 분율 (In Viewer 이식)
   const [maximized, setMaximized] = useState<string | null>(null);
   const vpRef = useRef<HTMLDivElement>(null);
@@ -819,7 +837,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [profileData, setProfileData] = useState<{ title: string; vals: number[] } | null>(null);
   const [tableData, setTableData] = useState<{ title: string; rows: string[][] } | null>(null);
   const paneSizes = useRef<Record<string, { w: number; h: number }>>({});
-  const [, setSizeTick] = useState(0);
+  const [sizeTick, setSizeTick] = useState(0);
   const observers = useRef<Record<string, ResizeObserver>>({});
   const paneRefCbs = useRef<Record<string, (el: HTMLDivElement | null) => void>>({});
 
@@ -828,6 +846,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       paneRefCbs.current[pid] = (el) => {
         observers.current[pid]?.disconnect();
         delete observers.current[pid];
+        if (!el) delete paneSizes.current[pid];   // 언마운트(페인 최대화 등) — 옛 크기가 남아 계산에 섞이지 않게
         if (el) {
           const ro = new ResizeObserver((es) => {
             const r = es[0].contentRect;
@@ -841,6 +860,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     }
     return paneRefCbs.current[pid];
   };
+
+  // 페인 ResizeObserver 일괄 해제는 언마운트에서만
+  useEffect(() => () => { Object.values(observers.current).forEach((o) => o.disconnect()); }, []);
 
   const patch = useCallback((pid: string, p: Partial<PaneState>) => {
     setPanes((prev) => ({ ...prev, [pid]: { ...prev[pid], ...p } }));
@@ -1007,6 +1029,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         // 이미 생성된 페인에도 즉시 적용(prefs 로드가 시리즈 로드보다 늦은 경우)
         setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pp]) => [k, { ...pp, il: ig }])));
       }
+      // 2D-MG — MG 는 위에서 2D 행잉을 건너뛰므로 전용 키(mg_join)로 분할·기본 체크를 정한다.
+      // 페인↔시리즈 배정은 레이아웃과 무관하게 전 페인에 미리 채워지므로 여기서 setLayout 만 해도 안전
+      // (시리즈 로드 effect 와 순서가 뒤바뀌어도 같은 결과).
+      const mj = normMgJoin(v.mg_join);
+      mgCfgRef.current = mj;
+      // 사용자가 이미 뷰어에서 직접 토글했으면 서버값으로 되돌리지 않는다(저장 디바운스 중 검사 전환 대비)
+      if (!mgTouchedRef.current) { const on = v.mg_join_on ?? mj.on_default; mgOnRef.current = on; setMgOn(on); }
+      // 시리즈 로드가 먼저 끝났다면 그때는 기본 열 수(2)로 배치됐으므로 다시 건다 —
+      // 좌우 쌍이 같은 행의 인접 열에 있어야 맞붙임이 성립한다(2:3 에서 특히 중요)
+      if (detail.modality === "MG" && LAYOUTS[mj.layout]) {
+        if (mgSrcRef.current.uid === detail.study_uid) applyMgLayout(mj.layout);
+        else setLayout(mj.layout);
+      }
       // TY 팔레트·오버레이 개인화 키 소비 (viewer.prefs 통짜 — 계정 로밍)
       const t = r.value as {
         ty_tool_size?: number; ty_tool_labels?: boolean; ty_icon_3d?: boolean; ty_quick_row?: boolean;
@@ -1070,9 +1105,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setSeries(imgSeries);
       // Mammo(MG) 전용 행잉 — 표준 2×2 [R CC, L CC, R MLO, L MLO] + 오버레이 텍스트 제거 (전 뷰어 공통 규칙)
       const mammo = detail.modality === "MG";
-      const ma = mammo ? mammoAssign(imgSeries) : null;
-      const mammoSeries = ma && ma.some(Boolean) ? ma : null;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
-      if (mammo) { setLayout("2x2"); setOverlayOn(false); }
+      // 판정은 표준 4-view 매칭 여부로만 — 여분 칸(5번째~)은 매칭과 무관하게 채워지므로
+      // ma.some() 으로 보면 '매칭 0' 폴백이 영영 불가능해져 앞 4페인이 전부 빈다(검사명이 R/L·CC/MLO 로 안 읽히는 검사)
+      if (mammo) mgSrcRef.current = { uid: detail.study_uid, list: imgSeries };   // 분할 전환 시 재배치용
+      const mgL = LAYOUTS[mgCfgRef.current.layout] ?? LAYOUTS["2x2"];
+      const ma = mammo && hasMammoView(imgSeries)
+        ? mammoOrder(imgSeries, mgL.count, mgL.cols) : null;
+      const mammoSeries = ma;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
+      // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일). prefs 로드가 늦으면 기본값으로 걸고, 로드 시 재적용된다
+      if (mammo) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); setOverlayOn(false); }
       setSelSeries(null);   // 처음 열 때 썸네일 이미지 목록은 모두 접힘 — 더블클릭으로만 펼침
       if (imgSeries[0]) {
         // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
@@ -1117,10 +1158,138 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 검사 전환/언마운트 — 전역 시네 정지 시 ref·표시 상태까지 재정렬(재생 버튼 잔상 방지)
       if (cineRef.current) { window.clearInterval(cineRef.current); cineRef.current = null; }
       setCine(false);
-      Object.values(observers.current).forEach((o) => o.disconnect());
+      // ⚠ 페인 ResizeObserver 는 여기서 끊지 않는다 — 이 effect 는 검사 전환(◀▶·Add/Stack)마다 재실행되는데
+      //   ref 콜백은 pid 별로 메모이즈돼 다시 호출되지 않아, 한 번 끊으면 페인 크기가 영구히 고정된다.
+      //   페인별 해제는 ref 콜백이, 언마운트 일괄 해제는 아래 전용 effect 가 담당.
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.id, detail.study_uid, addDetail?.id, stackDetail?.id, keySops?.length]);
+
+  /* ── 2D-MG 적용 — 조직 경계를 찾아 각 페인을 안쪽(가운데)으로 붙인다 ──────────────
+     · 뷰어의 기존 zoom/tx/ty 만 갱신 → 주석·ROI·Scout·돋보기 좌표계가 자동으로 맞는다.
+     · 배율은 대상 페인 전체 동일(좌우 유방 크기 비교가 판독의 핵심).
+     · 감지 실패·회전·타일 분할(il>1×1) 페인은 건드리지 않는다(원본 표시 유지).
+     · deps 에서 zoom/tx/ty 를 뺀 paneSig 를 쓰므로 이 effect 자신의 setPanes 로 재실행되지 않는다. */
+  const mgPaneSig = PANE_IDS.slice(0, LAYOUTS[layout].count)
+    .map((pid) => { const p = panes[pid];
+      return `${p?.series?.series_uid ?? ""}:${p?.index ?? 0}:${p?.flipH ? 1 : 0}:${p?.rot ?? 0}:${p?.il?.r ?? 1}x${p?.il?.c ?? 1}`;
+    }).join(",");
+  /* MG 분할 전환(1:2/2:2/2:3) — 좌우 쌍이 같은 행의 인접 열에 오도록 열 수에 맞춰 재배치한다.
+     (일반 GridPicker 와 달리 맘모는 배치 자체가 판독 규약이라 열 수가 바뀌면 다시 걸어야 한다) */
+  const applyMgLayout = (k: keyof typeof LAYOUTS) => {
+    setLayout(k);
+    if (PANE_IDS.indexOf(activePane) >= LAYOUTS[k].count) setActivePane("p0");   // 축소 시 활성 페인 보정
+    const src = mgSrcRef.current;
+    if (!isMg || src.uid !== detail.study_uid || !src.list.length || !hasMammoView(src.list)) return;
+    const ord = mammoOrder(src.list, LAYOUTS[k].count, LAYOUTS[k].cols);
+    setPanes((prev) => {
+      const next = { ...prev };
+      PANE_IDS.forEach((pid, i) => {
+        const s = ord[i] ?? null;
+        const p = next[pid];
+        if (!p || p.series?.series_uid === s?.series_uid) return;   // 같은 시리즈면 상태 유지
+        // 다른 검사(과거검사 비교·Add/Stack) 페인은 건드리지 않는다 — 비교 화면이 조용히 지워지는 사고 방지
+        if (p.series && p.studyUid !== detail.study_uid) return;
+        next[pid] = s
+          ? applyPState({ ...initPane(detail.study_uid), series: s, index: Math.floor(s.instances.length / 2) })
+          : initPane(detail.study_uid);
+      });
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    // MG 가 아니게 되면(비-MG 검사로 이동) 맞붙임을 풀어준다 — 체크박스가 사라진 채 남아 있으면 해제 불가
+    if (!isMg || !mgOn) {
+      const saved = mgSavedRef.current;
+      if (!Object.keys(saved).length) return;
+      const applied = mgAppliedRef.current;
+      mgSavedRef.current = {};
+      mgAppliedRef.current = {};
+      setPanes((prev) => {
+        const next = { ...prev };
+        for (const [pid, s] of Object.entries(saved)) {
+          const p = next[pid];
+          if (!p) continue;
+          // 저장 시점과 같은 내용이거나, 아직 우리가 쓴 변환을 그대로 들고 있으면(=맞붙은 상태) 되돌린다.
+          // 둘 다 아니면 사용자가 이미 다른 상태로 바꾼 페인이므로 건드리지 않는다.
+          const same = s.key === `${p.studyUid}|${p.series?.series_uid ?? ""}`;
+          const mine = !!applied[pid] && mgSameXf(p, applied[pid]);
+          if (same || mine) next[pid] = { ...p, zoom: s.zoom, tx: s.tx, ty: s.ty };
+        }
+        return next;
+      });
+      return;
+    }
+    if (maximized !== null) return;   // 페인 최대화 중에는 붙일 짝이 없다(화면 끝으로 밀리는 것 방지)
+    const L2 = LAYOUTS[layout];
+    let dead = false;
+    const run = async () => {
+      const cfg = mgCfgRef.current;
+      type Item = { pid: string; key: string; side: "left" | "right"; bbox: MgBBox;
+                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean };
+      const items: Item[] = [];
+      let cand = 0;   // 조직 감지를 시도한 페인 수 — 0이면 아직 로드 전이므로 안내를 띄우지 않는다
+      const ids = PANE_IDS.slice(0, L2.count);
+      for (let i = 0; i < ids.length; i++) {
+        const pid = ids[i];
+        const p = panesRef.current[pid];
+        const inst = p?.series?.instances[p.index];
+        // 페인 상자는 매번 실측 — ResizeObserver 캐시는 레이아웃 변경 직후 한 프레임 뒤처진다
+        const el = document.querySelector<HTMLElement>(`[data-pid="${pid}"]`);
+        const rc = el?.getBoundingClientRect();
+        const sz = rc?.width ? { w: rc.width, h: rc.height } : paneSizes.current[pid];
+        if (!p || !p.series || p.media || !inst || !sz?.w || !sz?.h) continue;
+        if ((p.il?.r ?? 1) * (p.il?.c ?? 1) > 1) continue;      // 타일 분할 페인은 단일 변환으로 정렬 불가
+        if ((p.rot ?? 0) % 360 !== 0) continue;
+        const side = mgSide(mammoView(p.series.series_desc).lat, i % L2.cols, L2.cols);
+        if (!side) continue;
+        const url = renderedUrlAt(p, p.index);
+        if (!url) continue;
+        cand++;
+        const bbox = await tissueBBox(url, cfg.thresh);
+        if (dead) return;
+        if (!bbox) continue;
+        items.push({ pid, key: `${p.studyUid}|${p.series.series_uid}`, side, bbox, paneW: sz.w, paneH: sz.h,
+                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH });
+      }
+      if (dead) return;
+      if (!items.length) { if (cand) setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다"); return; }
+      let zoom = Infinity;
+      for (const it of items) { const z = mgZoom(it); if (z != null) zoom = Math.min(zoom, z); }
+      if (!isFinite(zoom) || zoom <= 0) zoom = 1;
+      if (!mgOnRef.current) return;   // 비동기 진행 중 사용자가 해제 — 다시 맞붙이지 않는다
+      setPanes((prev) => {
+        const next = { ...prev };
+        for (const it of items) {
+          const p = next[it.pid];
+          if (!p) continue;
+          /* 기준값(맞붙이기 전 상태) 캡처 규칙 — 이 규칙이 없으면 재적용 시 '이미 맞붙인 값'이
+             기준값이 되어 해제해도 원복되지 않는다.
+              · 처음이면 현재 값을 잡는다.
+              · 내용이 바뀌었는데 현재 변환이 우리가 쓴 값 그대로면 → 기준값은 그대로 유효, 키만 갱신.
+              · 내용이 바뀌고 변환도 다르면 → 우리가 손댄 적 있는 페인은 사용자 조작이 섞였을 수 있으므로
+                기본 맞춤(fit)으로, 손댄 적 없으면 현재 값을 기준으로 잡는다. */
+          const st = mgSavedRef.current[it.pid];
+          const applied = mgAppliedRef.current[it.pid];
+          const ours = !!applied && mgSameXf(p, applied);
+          if (!st) mgSavedRef.current[it.pid] = { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
+          else if (st.key !== it.key) {
+            mgSavedRef.current[it.pid] = ours ? { ...st, key: it.key }
+              : applied ? { key: it.key, zoom: 1, tx: 0, ty: 0 }
+              : { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
+          }
+          const xf = { zoom, tx: mgTx({ ...it, zoom }), ty: 0 };
+          mgAppliedRef.current[it.pid] = xf;
+          if (!mgSameXf(p, xf)) next[it.pid] = { ...p, ...xf };
+        }
+        return next;
+      });
+    };
+    const raf = requestAnimationFrame(() => { void run(); });   // 레이아웃 확정 후 실측
+    return () => { dead = true; cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMg, mgOn, layout, mgPaneSig, sizeTick, maximized]);
 
   // 키이미지 마크 로드 — 열린 검사(openTabs) 전체의 key_images SOP 집합(합집합). 열림 변화 시 갱신
   useEffect(() => {
@@ -3852,6 +4021,29 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         </div>
         {status && <span style={{ fontSize: 11.5, color: "var(--stat-emergency)" }}>{status}</span>}
         <div style={{ flex: 1 }} />
+        {/* 2D-MG — 맘모 검사에서만 노출. 체크 시 좌우 유방 사이 빈 공간을 없애고 가운데에서 맞붙인다 */}
+        {isMg && (
+          <span style={{ display: "flex", gap: 5, alignItems: "center", marginRight: 8 }}>
+            <label title="2D-MG — 좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 해제하면 원래대로 돌아갑니다."
+                   style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+              <input type="checkbox" checked={mgOn}
+                     onChange={(e) => {
+                       mgTouchedRef.current = true;
+                       mgOnRef.current = e.target.checked;   // 진행 중인 비동기 적용을 즉시 중단시키기 위해 동기 갱신
+                       setMgOn(e.target.checked);
+                       persistPrefsPatch({ mg_join_on: e.target.checked });
+                     }} />
+              2D-MG
+            </label>
+            {MG_LAYOUTS.map((k) => (
+              <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`} onClick={() => applyMgLayout(k)}
+                      style={{ padding: "2px 7px", fontSize: 11,
+                               ...(layout === k ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
+                {mgLayoutLabel(k)}
+              </button>
+            ))}
+          </span>
+        )}
         {/* 3D 뷰어(MPR/MIP) — 내장 Axial/Sagittal/Coronal + MIP 로 뷰포트 전환(재클릭 시 2D 복귀) */}
         <button title="3D 뷰어 — MPR(Axial/Sagittal/Coronal) + MIP 재구성 (CT/MR 볼륨). 다시 누르면 2D 복귀"
                 onClick={() => setMprOn((m) => !m)}

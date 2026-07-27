@@ -25,7 +25,9 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
-import { mammoAssign, type HpRule } from "../lib/viewerConfig";
+import { hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
+         type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -156,6 +158,8 @@ function scoutSegment(src: Geom, tgt: Geom): { x1: number; y1: number; x2: numbe
   return { x1: pts[bi[0]].x, y1: pts[bi[0]].y, x2: pts[bi[1]].x, y2: pts[bi[1]].y };
 }
 
+/** 영상 시리즈만 — SR/KO/PR/SEG 는 픽셀이 없어 페인·썸네일에 걸면 빈 화면이 된다 (TY Viewer 동일 규칙) */
+const imgOnly = (list: SeriesNode[]) => list.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality));
 function instUrl(studyUid: string, s: SeriesNode, inst: InstanceNode, wl: string): string {
   const q = wl ? `?window=${wl},linear` : "";
   const su = inst.series_uid ?? s.series_uid;   // Combine 결합본은 인스턴스마다 원본 시리즈/검사 UID 로 요청
@@ -347,6 +351,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [keyMarks, setKeyMarks] = useState<Set<string>>(new Set());
   const [activeExam, setActiveExam] = useState(0);
   const [sLayout, setSLayout] = useState<{ r: number; c: number }>({ r: 1, c: 1 });
+  /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 (Viewer2D 와 동일 규칙) */
+  const [mgOn, setMgOn] = useState(false);
+  const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
+  const mgOnRef = useRef(false);                  // 비동기 적용 중 해제되었는지 즉시 판정
+  const mgTouchedRef = useRef(false);             // 사용자가 직접 토글함 — 검사 전환 시 서버값이 덮어쓰지 않게
+  // 해제 시 복원용 기준값(맞붙이기 전 상태) + 우리가 마지막으로 쓴 변환(기준값 오염 판정용)
+  const mgSavedRef = useRef<Record<number, { key: string; zoom: number; tx: number; ty: number }>>({});
+  const mgAppliedRef = useRef<Record<number, { zoom: number; tx: number; ty: number }>>({});
+  useEffect(() => { mgOnRef.current = mgOn; }, [mgOn]);
   const [panes, setPanes] = useState<Pane[]>([initPane()]);
   const [active, setActive] = useState(0);
   const [tool, setTool] = useState<Tool>("select");
@@ -520,7 +533,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       try {
         const d = id === detail.id ? detail : await api.study(id);
         const t = await api.seriesTree(id);
-        return { d, series: t.series };
+        return { d, series: imgOnly(t.series) };
       } catch { return null; }   // 개별 검사 로드 실패(삭제·권한) — 그 검사만 제외(전체 빈 화면 방지)
     })).then(async (raw) => {
       const list = raw.filter((x): x is { d: StudyDetail; series: SeriesNode[] } => !!x);
@@ -547,7 +560,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         hanging2d?: Record<string, string | { s: string; i: string }>;
         hanging2d_common_on?: boolean;
         hanging2d_by_viewer?: Record<string, Record<string, string | { s: string; i: string }>>;
+        mg_join?: unknown; mg_join_on?: boolean;
       };
+      // 2D-MG(맘모 좌우 맞붙임) — 분할·기본 체크. 이 effect 안에서 읽으므로 아래 행잉 계산과 순서 문제가 없다
+      mgCfgRef.current = normMgJoin(prefsV.mg_join);
+      // 사용자가 이미 뷰어에서 직접 토글했으면 서버값으로 되돌리지 않는다(저장 디바운스 중 검사 전환 대비)
+      if (!mgTouchedRef.current) {
+        const on = prefsV.mg_join_on ?? mgCfgRef.current.on_default;
+        mgOnRef.current = on; setMgOn(on);
+      }
       // In-View 기본 레이아웃 = infi_default_layout. 뷰어 공통 2D 행잉(공통/뷰어별 infi)을 병합:
       // 공통 우선(hanging2d_common_on, 기본 on)이면 공통이 우선. RxC 문자열 → {r,c} 변환.
       const defMap: Record<string, { s?: { r: number; c: number } | null; i?: { r: number; c: number } | null }> =
@@ -628,11 +649,16 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const defCfg = single ? (defMap[mod] ?? defMap["*"]) : undefined;
       // Mammo(MG) 전용 행잉 — 표준 2×2 [R CC, L CC, R MLO, L MLO] + 오버레이 텍스트 제거 (전 뷰어 공통 규칙)
       const mammo = single && mod === "MG";
-      const ma = mammo ? mammoAssign(hangList[0].series) : null;
-      const mammoSeries = ma && ma.some(Boolean) ? ma : null;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
+      const mgLay = mgCfgRef.current.layout.split("x").map(Number);
+      // 판정은 표준 4-view 매칭 여부로만(분할 칸수와 무관) — 여분 칸은 항상 채워지므로
+      // ma.some() 으로 보면 '매칭 0' 폴백이 죽는다
+      const ma = mammo && hasMammoView(hangList[0].series)
+        ? mammoOrder(hangList[0].series, (mgLay[0] || 2) * (mgLay[1] || 2), mgLay[1] || 2) : null;
+      const mammoSeries = ma;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
       if (mammo) setOvlVisible(false);
       let r: number, c: number;
-      if (mammo) { r = 2; c = 2; setHpName("Mammo 2×2"); }
+      // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일)
+      if (mammo) { r = mgLay[0] || 2; c = mgLay[1] || 2; setHpName(`Mammo ${r}×${c}`); }
       else if (single && hpMatch) {
         const vg = hpMatch.displays?.find((d) => d.role === "viewer")?.grid ?? hpMatch.s;
         r = Math.min(vg.r, 10); c = Math.min(vg.c, 10);
@@ -653,11 +679,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           // 단독 검사: 페인마다 시리즈를 순서대로(부족하면 빈 페인), Image 레이아웃은 설정값. Mammo 는 표준 4-view 배치.
           const s0 = mammoSeries ? (mammoSeries[i] ?? null) : (hangList[0].series[i] ?? null);
           const p = { ...initPane(hangList[0].d.study_uid), series: s0 };
-          if (hpMatch) {   // IN-2 ①: HP 규칙의 Image layout·W/L 적용 (TY applyHp 동일)
+          // Mammo 는 페인당 1장 고정(맞붙임 성립 조건) — HP 규칙의 타일 분할도 적용하지 않는다
+          if (hpMatch && !mammo) {   // IN-2 ①: HP 규칙의 Image layout·W/L 적용 (TY applyHp 동일)
             p.il = { r: Math.min(hpMatch.i.r, 10), c: Math.min(hpMatch.i.c, 10) };
             if (hpMatch.wl !== undefined) p.wl = hpMatch.wl ?? "";
           }
-          else if (defCfg?.i) p.il = defCfg.i;
+          // Mammo 는 페인당 1장(맞붙임이 성립하려면 타일 분할 없음) — MG 행의 Image 분할은 적용하지 않는다(TY 동일)
+          else if (defCfg?.i && !mammo) p.il = defCfg.i;
           else if (i === 0 && r * c === 1 && ["CT", "MR"].includes(mod)
                    && (hangList[0].series[0]?.instances.length ?? 0) >= 9) {
             p.il = { r: 3, c: 3 };   // 설정 없을 때 기본 행잉 (원본)
@@ -676,12 +704,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const ex = exams[activeExam];
     if (!ex) return;
     api.seriesTree(ex.d.id).then((t) => {
-      setSeries(t.series);
-      setExams((es) => es.map((e, i) => (i === activeExam ? { ...e, series: t.series } : e)));
+      const im = imgOnly(t.series);
+      setSeries(im);
+      setExams((es) => es.map((e, i) => (i === activeExam ? { ...e, series: im } : e)));
       // 활성 검사를 보이는 페인들의 시리즈 객체를 새 데이터로 교체(인덱스 범위 보정) — 미교체 시 화면 미갱신 버그
       setPanes((ps) => ps.map((q) => {
         if (q.studyUid !== ex.d.study_uid || !q.series) return q;
-        const ns = t.series.find((s) => s.series_uid === q.series!.series_uid);
+        const ns = im.find((s) => s.series_uid === q.series!.series_uid);
         return ns ? { ...q, series: ns, index: Math.min(q.index, Math.max(0, ns.instances.length - 1)) } : q;
       }));
     }).catch(() => say("검사 갱신 실패"));
@@ -783,7 +812,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         while (cursor < series.length && used.has(series[cursor].series_uid)) cursor += 1;
         const s = series[cursor] ?? null;
         if (s) { used.add(s.series_uid); cursor += 1; }
-        return { ...initPane(detail.study_uid), series: s };
+        // 채우는 시리즈는 '활성 검사'의 것이므로 검사 UID 도 활성 검사로 맞춘다
+        // (창 배정 검사로 찍으면 페인이 다른 검사 UID 로 영상을 요청해 빈 페인이 된다)
+        return { ...initPane(exams[activeExam]?.d.study_uid ?? detail.study_uid), series: s };
       });
     });
   };
@@ -806,14 +837,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     setHpName(rule.name);
     say(`행잉 프로토콜 적용 — ${rule.name}`);
   };
-  // 과거검사 시리즈 로드 (Related Exam 버튼)
-  const loadPrior = (reId: number, uid: string, label: string) => {
-    if (priorLoaded.has(reId)) return;
-    api.seriesTree(reId).then((r) => {
-      setPriorLoaded((s) => new Set(s).add(reId));
-      setPriorSeries((ps) => [...ps, ...r.series.map((s) => ({ uid, label, s }))]);
-    }).catch(() => {});
-  };
+  // (과거검사 시리즈 로드는 판독 도크 History 비교 경로에서만 — 썸네일 열의 '+과거검사' 버튼은 제거됨)
   const upd = useCallback((i: number, patch: Partial<Pane>) => {
     setPanes((ps) => ps.map((p, k) => (k === i ? { ...p, ...patch } : p)));
   }, []);
@@ -965,7 +989,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       try {
         const d = await api.study(id);
         const t = await api.seriesTree(id);
-        setExams((es) => (es.some((x) => x.d.id === id) ? es : [...es, { d, series: t.series }]));
+        setExams((es) => (es.some((x) => x.d.id === id) ? es : [...es, { d, series: imgOnly(t.series) }]));
         try {
           const ids: number[] = JSON.parse(localStorage.getItem("sv_infi_exams") ?? "[]");
           if (!ids.includes(id)) localStorage.setItem("sv_infi_exams", JSON.stringify([...ids, id]));
@@ -2172,7 +2196,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           try {
             const d = await api.study(examId);
             const t = await api.seriesTree(examId);
-            setExams((es) => (es.some((x) => x.d.id === examId) ? es : [...es, { d, series: t.series }]));
+            setExams((es) => (es.some((x) => x.d.id === examId) ? es : [...es, { d, series: imgOnly(t.series) }]));
           } catch { /* 무시 */ }
         })();
       }
@@ -2180,11 +2204,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       return;
     }
     api.seriesTree(examId).then((r) => {
+      const im = imgOnly(r.series);
       if (re && !priorLoaded.has(examId)) {
         setPriorLoaded((s) => new Set(s).add(examId));
-        setPriorSeries((ps) => [...ps, ...r.series.map((s) => ({ uid: re.study_uid, label: re.study_date, s }))]);
+        setPriorSeries((ps) => [...ps, ...im.map((s) => ({ uid: re.study_uid, label: re.study_date, s }))]);
       }
-      const s0 = r.series[0];
+      const s0 = im[0];
       if (s0) {
         applySLayout({ r: 1, c: 2 });
         setPanes((ps) => ps.map((p, i) => (i === 1 ? { ...initPane(re?.study_uid ?? ""), series: s0 } : p)));
@@ -2322,6 +2347,115 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     setRowFr(Array(sLayout.r).fill(1));
     setSelPanes(new Set());   // 레이아웃 변경 — 멀티 선택 초기화
   }, [sLayout.r, sLayout.c]);
+
+  /* ── 2D-MG 적용 — 조직 경계를 찾아 각 페인을 안쪽(가운데)으로 붙인다 (Viewer2D 와 동일 규칙) ──
+     기존 zoom/tx/ty 만 갱신 → 주석·측정·돋보기 좌표계가 자동으로 맞는다. 배율은 대상 페인 전체 동일.
+     deps 에서 zoom/tx/ty 를 뺀 서명(mgPaneSig)을 쓰므로 자기 setPanes 로 재실행되지 않는다. */
+  const isMg = curD.modality === "MG";
+  /* MG 분할 전환(1:2/2:2/2:3) — 일반 applySLayout 은 남는 칸을 '시리즈 트리 순서'로 채우므로
+     좌우 쌍이 어긋난다. 맘모는 배치 자체가 판독 규약이라 열 수에 맞춰 다시 건다. */
+  const applyMgLayout = (r: number, c: number) => {
+    const src = exams[activeExam]?.series ?? [];
+    // '이 창에 이 검사만 걸려 있는가'는 exams 길이가 아니라 실제 페인 내용으로 판정한다 —
+    // 과거검사 비교(판독 도크 History)·드래그 로드는 exams 를 늘리지 않으면서 다른 검사를 페인에 얹는다
+    const soleStudy = panes.every((p) => !p.series || p.studyUid === curD.study_uid);
+    if (!isMg || !soleStudy || !hasMammoView(src)) { applySLayout({ r, c }); return; }
+    const ord = mammoOrder(src, r * c, c);
+    const suid = exams[activeExam]?.d.study_uid ?? detail.study_uid;
+    setSLayout({ r, c });
+    setMaximized(null);
+    setActive((a) => Math.min(a, r * c - 1));   // 축소 시 활성 페인 보정
+    setPanes((ps) => Array.from({ length: r * c }, (_, i) => {
+      const s = ord[i] ?? null;
+      const p = ps[i];
+      if (p && p.series?.series_uid === s?.series_uid) return p;   // 같은 시리즈면 상태 유지
+      if (p?.series && p.studyUid !== suid) return p;              // 다른 검사 페인은 보존
+      return applyPStateToPane({ ...initPane(suid), series: s });
+    }));
+  };
+  const [mgTick, setMgTick] = useState(0);
+  // 페인 상자 크기 변화 감지 — 창 리사이즈뿐 아니라 팔레트/썸네일/판독도크 스플리터, 패널 접기까지
+  // 뷰포트 컨테이너 크기로 잡는다(미감지 시 이전 크기로 계산된 tx 가 남아 가운데 공백이 다시 벌어짐).
+  useEffect(() => {
+    if (!isMg || !mgOn) return;
+    const bump = () => setMgTick((t) => t + 1);
+    window.addEventListener("resize", bump);
+    const el = vpRef.current;
+    const ro = el ? new ResizeObserver(bump) : null;
+    if (el && ro) ro.observe(el);
+    return () => { window.removeEventListener("resize", bump); ro?.disconnect(); };
+  }, [isMg, mgOn]);
+  const mgPaneSig = panes.map((p) => `${p.series?.series_uid ?? ""}:${p.index}:${p.flipH ? 1 : 0}:${p.rot}:${p.il.r}x${p.il.c}`).join(",");
+  useEffect(() => {
+    // MG 가 아니게 되면(비-MG 검사 탭으로 전환) 맞붙임을 풀어준다 — 체크박스가 사라진 채 남으면 해제 불가
+    if (!isMg || !mgOn) {
+      const saved = mgSavedRef.current;
+      if (!Object.keys(saved).length) return;
+      const applied = mgAppliedRef.current;
+      mgSavedRef.current = {};
+      mgAppliedRef.current = {};
+      setPanes((prev) => prev.map((p, i) => {
+        const s = saved[i];
+        if (!s) return p;
+        // 저장 시점과 같은 내용이거나, 아직 우리가 쓴 변환 그대로면(=맞붙은 상태) 되돌린다
+        const same = s.key === `${p.studyUid}|${p.series?.series_uid ?? ""}`;
+        const mine = !!applied[i] && mgSameXf(p, applied[i]);
+        return same || mine ? { ...p, zoom: s.zoom, tx: s.tx, ty: s.ty } : p;
+      }));
+      return;
+    }
+    if (maximized !== null) return;   // 페인 최대화 중에는 붙일 짝이 없다
+    let dead = false;
+    const run = async () => {
+      const cfg = mgCfgRef.current;
+      type Item = { pi: number; key: string; side: "left" | "right"; bbox: MgBBox;
+                    paneW: number; paneH: number; cols: number; rows: number; flipH: boolean };
+      const items: Item[] = [];
+      const cur = panesRef.current;
+      for (let pi = 0; pi < cur.length; pi++) {
+        const p = cur[pi];
+        const inst = p.series?.instances[p.index];
+        if (!p.series || p.media || !inst) continue;
+        if (p.il.r * p.il.c > 1) continue;          // 타일 분할 페인은 단일 변환으로 정렬 불가
+        if (p.rot % 360 !== 0) continue;
+        const el = document.querySelector<HTMLElement>(`[data-pane="${pi}"]`);
+        const rc = el?.getBoundingClientRect();
+        if (!rc?.width || !rc.height) continue;
+        const side = mgSide(mammoView(p.series.series_desc).lat, pi % sLayout.c, sLayout.c);
+        if (!side) continue;
+        const bbox = await tissueBBox(instUrl(p.studyUid || curD.study_uid, p.series, inst, p.wl), cfg.thresh);
+        if (dead) return;
+        if (!bbox) continue;
+        items.push({ pi, key: `${p.studyUid}|${p.series.series_uid}`, side, bbox, paneW: rc.width, paneH: rc.height,
+                     cols: inst.cols || 1, rows: inst.rows || 1, flipH: p.flipH });
+      }
+      if (dead || !items.length) return;
+      let zoom = Infinity;
+      for (const it of items) { const z = mgZoom(it); if (z != null) zoom = Math.min(zoom, z); }
+      if (!isFinite(zoom) || zoom <= 0) zoom = 1;
+      if (!mgOnRef.current) return;   // 비동기 진행 중 사용자가 해제 — 다시 맞붙이지 않는다
+      setPanes((prev) => prev.map((p, i) => {
+        const it = items.find((q) => q.pi === i);
+        if (!it) return p;
+        // 기준값 캡처 규칙 — Viewer2D 와 동일(자세한 설명은 그쪽 주석 참조)
+        const st = mgSavedRef.current[i];
+        const applied = mgAppliedRef.current[i];
+        const ours = !!applied && mgSameXf(p, applied);
+        if (!st) mgSavedRef.current[i] = { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
+        else if (st.key !== it.key) {
+          mgSavedRef.current[i] = ours ? { ...st, key: it.key }
+            : applied ? { key: it.key, zoom: 1, tx: 0, ty: 0 }
+            : { key: it.key, zoom: p.zoom, tx: p.tx, ty: p.ty };
+        }
+        const xf = { zoom, tx: mgTx({ ...it, zoom }), ty: 0 };
+        mgAppliedRef.current[i] = xf;
+        return mgSameXf(p, xf) ? p : { ...p, ...xf };
+      }));
+    };
+    const raf = requestAnimationFrame(() => { void run(); });   // 레이아웃 확정 후 측정
+    return () => { dead = true; cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMg, mgOn, sLayout.r, sLayout.c, mgPaneSig, colFr, rowFr, mgTick, maximized]);
 
   // 'A' = 전체 페인 선택, Esc = 해제, T(홀드)+스크롤 = 오버레이 글자 크기, T+Del = 오버레이 토글
   // IN-2 ④ 키보드 패리티(TY 동일): ←→=이미지 스크롤(활성 페인), Space=활성 페인 시네 토글,
@@ -2734,29 +2868,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           </div>
         </div>
       ))}
-      {(curD.related_exams ?? []).map((re) => !priorLoaded.has(re.id) && (
-        <button key={re.id} onClick={() => loadPrior(re.id, re.study_uid, re.study_date)}
-                title={`과거검사 열기 — ${re.modality} ${re.study_desc}`}
-                style={{ fontSize: 10, color: "#facc15" }}>
-          +{re.study_date.slice(4)} {re.modality}
-        </button>
-      ))}
-      {priorSeries.map((e) => (
-        <div key={`${e.uid}-${e.s.series_uid}`} draggable data-suid={e.s.series_uid}
-             onDragStart={(ev) => { ev.dataTransfer.setData("application/x-sv-series", e.s.series_uid); ev.dataTransfer.effectAllowed = "copy"; }}
-             onClick={() => upd(active, { series: e.s, index: 0, studyUid: e.uid })}
-             title={`[과거 ${e.label}] Se${e.s.series_number} · ${e.s.series_desc}\n· 드래그 → 원하는 페인에 놓기`}
-             style={{ cursor: "pointer", textAlign: "center", fontSize: 10, flexShrink: 0,
-                      border: thumbBorder(e.s.series_uid, "1px solid #854d0e"),
-                      borderRadius: 3, background: "#000" }}>
-        {e.s.instances[0] && (
-          <img src={e.s.instances[0].preview_url} alt="" loading="lazy" decoding="async" style={{ width: "100%", display: "block" }} />
-        )}
-        <div style={{ color: "#facc15", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-          P·{e.label.slice(4)}
-        </div>
-        </div>
-      ))}
+      {/* 과거검사(관련검사 + 로드된 과거 시리즈)는 이 썸네일 열에 표시하지 않는다 —
+          우측 판독 도크 History 가 담당(중복 노출 제거). 과거 시리즈를 직접 고르려면
+          Exam 탭에서 해당 검사로 전환하면 이 열이 그 검사의 시리즈로 바뀐다. */}
     </div>
   );
 
@@ -2989,7 +3103,34 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                  }} />
         </span>
         {toast && <span style={{ color: "#facc15" }}>{toast}</span>}
-        <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+        <span style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
+          {/* 2D-MG — 맘모 검사에서만 노출. 체크 시 좌우 유방 사이 빈 공간을 없애고 가운데에서 맞붙인다 */}
+          {isMg && (
+            <>
+              <label title="2D-MG — 좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 해제하면 원래대로 돌아갑니다."
+                     style={{ display: "flex", gap: 3, alignItems: "center", fontWeight: 700, cursor: "pointer" }}>
+                <input type="checkbox" checked={mgOn}
+                       onChange={(e) => {
+                         mgTouchedRef.current = true;
+                         mgOnRef.current = e.target.checked;   // 진행 중인 비동기 적용을 즉시 중단
+                         setMgOn(e.target.checked);
+                         persistPrefs({ mg_join_on: e.target.checked });
+                       }} />
+                2D-MG
+              </label>
+              {MG_LAYOUTS.map((k) => {
+                const [kr, kc] = k.split("x").map(Number);
+                return (
+                  <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`} onClick={() => applyMgLayout(kr, kc)}
+                          style={{ padding: "1px 6px", fontSize: 11,
+                                   ...(sLayout.r === kr && sLayout.c === kc
+                                       ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
+                    {mgLayoutLabel(k)}
+                  </button>
+                );
+              })}
+            </>
+          )}
           {IN_CROSSLINK_MODES.map((m) => (
             <label key={m.key} title={m.desc}
                    style={{ display: "flex", gap: 3, alignItems: "center",
@@ -3361,7 +3502,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                                 try {
                                   const d = await api.study(id);
                                   const t = await api.seriesTree(id);
-                                  setExams((es) => (es.some((x) => x.d.id === id) ? es : [...es, { d, series: t.series }]));
+                                  setExams((es) => (es.some((x) => x.d.id === id) ? es : [...es, { d, series: imgOnly(t.series) }]));
                                 } catch { /* 무시 */ }
                               })();
                             }
