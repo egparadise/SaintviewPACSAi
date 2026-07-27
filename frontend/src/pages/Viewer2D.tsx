@@ -3082,19 +3082,27 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             )}
           </div>
         )}
-        {/* Image Layout 타일별 정보 — 페인 전체 오버레이(환자·검사·시리즈)와 별개로 각 이미지의 번호·위치를 표시.
-            변환 래퍼 밖(별도 그리드)에 겹쳐 그려야 확대/이동해도 글자가 같이 커지지 않는다. */}
-        {overlayOn && tileCount > 1 && p.series && (
+        {/* Image Layout 타일 구분선 + 타일별 정보 — 페인 전체 오버레이(환자·검사·시리즈)와 별개로
+            각 이미지의 번호·위치를 표시. 변환 래퍼 밖(별도 그리드)에 겹쳐 그려야 확대/이동해도
+            선 두께와 글자 크기가 그대로 유지된다. 구분선은 정보 토글과 무관하게 항상 표시. */}
+        {tileCount > 1 && p.series && (
           <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none", display: "grid", gap: 1,
                         gridTemplateColumns: `repeat(${pIl.c}, 1fr)`, gridTemplateRows: `repeat(${pIl.r}, 1fr)` }}>
             {Array.from({ length: tileCount }, (_, k) => {
+              // 칸 구분선 — 마지막 열/행이 아니면 오른쪽·아래에 선(페인 경계선과 같은 색)
+              const cell: React.CSSProperties = {
+                position: "relative", minWidth: 0, minHeight: 0,
+                ...(k % pIl.c !== pIl.c - 1 ? { borderRight: "1px solid var(--border)" } : {}),
+                ...(k < tileCount - pIl.c ? { borderBottom: "1px solid var(--border)" } : {}),
+              };
               const ti = p.series?.instances[p.index + k];
-              if (!ti) return <div key={k} />;
+              if (!ti) return <div key={k} style={cell} />;
               const sl = ti.position?.length === 3 ? ti.position[2] : undefined;
               // 첫 행 마지막 타일은 페인 전체 오버레이(우상단 시리즈·Img 범위) 자리와 겹치므로 아래로 내린다
               const dodge = k < pIl.c && k % pIl.c === pIl.c - 1 ? Math.round(tyOvFont * 3.4) : 0;
               return (
-                <div key={k} style={{ position: "relative", minWidth: 0, minHeight: 0 }}>
+                <div key={k} style={cell}>
+                  {overlayOn && (
                   <div style={{ position: "absolute", top: dodge, right: 0, padding: "2px 4px", textAlign: "right",
                                 fontSize: Math.max(8, tyOvFont - 1.5), lineHeight: 1.35,
                                 color: "var(--text-primary)", textShadow: "0 0 4px #000", whiteSpace: "nowrap" }}>
@@ -3102,6 +3110,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     Img: {p.index + k + 1}/{p.series?.instances.length}
                     {sl !== undefined && <><br />SL: {sl.toFixed(1)}</>}
                   </div>
+                  )}
                 </div>
               );
             })}

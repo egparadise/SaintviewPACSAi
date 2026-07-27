@@ -2649,7 +2649,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           const idx = p.index + t;
           const inst = insts[idx];
           return (
-            <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000" }}
+            <div key={t} style={{ position: "relative", overflow: "hidden", background: "#000",
+                                  // Image Layout 칸 구분선 — 마지막 열/행이 아니면 오른쪽·아래에 선
+                                  ...(tilesOf(p) > 1 && t % p.il.c !== p.il.c - 1 ? { borderRight: "1px solid var(--border)" } : {}),
+                                  ...(tilesOf(p) > 1 && t < tilesOf(p) - p.il.c ? { borderBottom: "1px solid var(--border)" } : {}) }}
                  // 타일 더블클릭 = 그 이미지로 파고들기(Image 분할 1×1) — 이후 스크롤로 시리즈 전체 확인.
                  // 페인에서 다시 더블클릭하면 원래 분할·위치로 복귀.
                  onDoubleClick={(e) => {
