@@ -766,6 +766,25 @@ export const api = {
   reportLock: (studyId: number, locked: boolean) =>
     req<{ locked: boolean }>(`/api/studies/${studyId}/report-lock`, {
       method: "POST", body: JSON.stringify({ locked }) }),
+
+  /** 검사 DICOM 내보내기 — fmt=zip(DICOMDIR 포함, 폴더·USB 저장용) / iso(CD 굽기용 이미지).
+   *  응답이 바이너리라 req() 를 쓰지 않고 직접 fetch 한다. */
+  exportStudies: async (ids: number[], fmt: "zip" | "iso"): Promise<Blob> => {
+    const res = await fetch(`${BASE}/api/studies/export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ ids, fmt }),
+    });
+    if (!res.ok) {
+      let msg = `내보내기 실패 (HTTP ${res.status})`;
+      try { const j = await res.json(); if (j?.detail) msg = String(j.detail); } catch { /* 본문 없음 */ }
+      throw new Error(msg);
+    }
+    return res.blob();
+  },
 };
 
 // ── Exam Control 타입 (레인 F/B 공통 계약 /api/examctl) ──

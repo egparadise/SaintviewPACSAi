@@ -123,6 +123,82 @@ class NlQueryBody(BaseModel):
     text: str
 
 
+class ExportBody(BaseModel):
+    ids: list[int]
+    fmt: str = "zip"    # zip = 폴더/USB 저장용(DICOMDIR 포함) · iso = CD 굽기용 이미지
+
+
+@router.post("/studies/export")
+def export_studies(
+    body: ExportBody,
+    db: Session = Depends(get_db),
+    user: dict = Depends(current_user),
+):
+    """선택 검사의 DICOM 을 미디어(ZIP/ISO)로 내보낸다 — CD·USB·로컬 저장 공용.
+
+    ⚠ 브라우저는 CD 를 직접 구울 수 없다. fmt=iso 는 굽기용 이미지를 만들어 줄 뿐이고,
+    실제 굽기는 Windows 탐색기의 '디스크 이미지 굽기'로 사용자가 마무리한다.
+    """
+    from fastapi.responses import Response
+
+    from app.dicom.orthanc import client_for_hospital
+    from app.services.export_service import MAX_STUDIES, build_media_zip, zip_to_iso
+
+    ids = list(dict.fromkeys(body.ids or []))
+    if not ids:
+        raise HTTPException(status_code=400, detail="내보낼 검사를 선택하세요")
+    if len(ids) > MAX_STUDIES:
+        raise HTTPException(status_code=400, detail=f"한 번에 최대 {MAX_STUDIES}건까지 내보낼 수 있습니다")
+
+    # 검사마다 병원 스코프 가드(테넌시 IDOR 차단) + Orthanc 리소스 수집
+    studies = [_require_study(db, sid, user) for sid in ids]
+    hids = {st.hospital_id for st in studies}
+    if len(hids) > 1:
+        raise HTTPException(status_code=400, detail="서로 다른 병원의 검사는 함께 내보낼 수 없습니다")
+    missing = [st.id for st in studies if not st.orthanc_id]
+    if missing:
+        raise HTTPException(status_code=409, detail=f"영상이 없는 검사가 있습니다(#{missing[0]})")
+
+    # 병원별 Orthanc 우선, 없으면 공용 Orthanc 로 폴백 — 배포에 따라 실제 보관 위치가 다르다
+    from app.dicom.orthanc import OrthancClient
+    candidates = [client_for_hospital(db, next(iter(hids))), OrthancClient()]
+    seen: set[str] = set()
+    last: Exception | None = None
+    zip_bytes = b""
+    for client in candidates:
+        base = str(getattr(client, "_client", None) and client._client.base_url or "")
+        if base in seen:
+            continue
+        seen.add(base)
+        try:
+            zip_bytes = build_media_zip(client, [st.orthanc_id for st in studies])
+            break
+        except Exception as exc:                                # noqa: BLE001
+            last = exc
+    if not zip_bytes:
+        raise HTTPException(status_code=502, detail=f"영상 미디어 생성 실패: {last}")
+
+    label = (studies[0].study_date or "SAINTVIEW")[:8]
+    if body.fmt == "iso":
+        try:
+            data = zip_to_iso(zip_bytes, f"SV_{label}")
+        except ModuleNotFoundError:
+            raise HTTPException(
+                status_code=501,
+                detail="ISO 생성 모듈(pycdlib)이 설치되지 않았습니다 — pip install pycdlib",
+            ) from None
+        except Exception as exc:                                # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"ISO 생성 실패: {exc}") from exc
+        return Response(
+            content=data, media_type="application/x-iso9660-image",
+            headers={"Content-Disposition": f'attachment; filename="saintview_{label}.iso"'},
+        )
+    return Response(
+        content=zip_bytes, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="saintview_{label}.zip"'},
+    )
+
+
 @router.post("/worklist/nl-query")
 def nl_query(body: NlQueryBody, user: dict = Depends(current_user)):
     """S1 자연어 검색 — 자연어를 필터로 변환해 미리보기 반환(적용은 사용자 확인 후)."""

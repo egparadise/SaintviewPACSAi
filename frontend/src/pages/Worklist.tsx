@@ -63,6 +63,8 @@ import { Splitter, clampSz } from "../lib/Splitter";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
+// 영상 내보내기(CD/USB/파일) — fflate 는 여기서만 쓰므로 지연 로드
+const ExportDialog = lazy(() => import("../components/ExportDialog").then((m) => ({ default: m.ExportDialog })));
 const LocalViewer = lazy(() => import("./LocalViewer").then((m) => ({ default: m.LocalViewer })));
 // EXAM CONTROL (레인 F) — 관리자 전용 검사 QC 화면 (워크리스트 탭 바에서 전환)
 const ExamControl = lazy(() => import("./admin/ExamControl").then((m) => ({ default: m.ExamControl })));
@@ -82,7 +84,7 @@ function localToRow(r: LocalStudyRow): StudyRow {
   };
 }
 /** LOCAL 모드에서 허용되는 툴바 액션 — 그 외 서버 액션은 비활성+툴팁 */
-const LOCAL_OK_ACTIONS = new Set(["import", "csv", "print", "refresh", "logout"]);
+const LOCAL_OK_ACTIONS = new Set(["import", "csv", "export", "print", "refresh", "logout"]);
 const LOCAL_DENIED_TIP = "LOCAL 모드 — 서버 기능 비활성 (Import/새로고침/로컬 뷰어만 사용 가능)";
 
 /* ── F-18 행잉 매핑 + 모니터 배치(viewer.prefs.monitor) ─────────────────── */
@@ -2365,6 +2367,8 @@ export function Worklist() {
   const [selected, setSelected] = useState<StudyDetail | null>(null);
   // 다중선택 — Shift=범위, Ctrl/Cmd=개별 토글, 일반=단일. selected(포커스)와 별개의 선택 집합.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // 영상 내보내기 대상(비어 있으면 다이얼로그 닫힘)
+  const [exportTargets, setExportTargets] = useState<{ id: number; label: string }[]>([]);
   const selAnchorRef = useRef<number | null>(null);   // Shift 범위 기준점(마지막 단일/토글 클릭)
   const [compareSet, setCompareSet] = useState<CompareItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -3384,7 +3388,18 @@ export function Worklist() {
         })();
         break;
       }
-      case "csv": {   // Export — 현재 워크리스트를 CSV 로 (원본 Export result to file)
+      case "export": {   // Export — 선택 검사의 DICOM 영상 내보내기(CD/USB/파일)
+        const chosen = selectedIds.size
+          ? items.filter((it) => selectedIds.has(it.id))
+          : (selected ? items.filter((it) => it.id === selected.id) : []);
+        if (!chosen.length) { showToast("내보낼 검사를 먼저 선택하세요 (Shift/Ctrl 로 여러 건 선택 가능)", "error"); break; }
+        setExportTargets(chosen.map((r) => ({
+          id: r.id,
+          label: `${r.patient_name} (${r.patient_key}) · ${r.modality} ${r.study_date} · ${r.study_desc ?? ""}`.trim(),
+        })));
+        break;
+      }
+      case "csv": {   // 워크리스트 목록을 CSV 로 (원본 Export result to file)
         const rows = [
           ["PatientID", "Name", "Sex", "Modality", "StudyDate", "Description", "Status"].join(","),
           ...items.map((r) => [r.patient_key, r.patient_name, r.sex, r.modality, r.study_date,
@@ -3436,7 +3451,8 @@ export function Worklist() {
     { i: "🧊", l: "3D — MPR/MIP 뷰어", a: "3d" },
     { i: "⇄", l: "Compare — 뷰어에서 과거검사 선택 비교(모달) 열기", a: "compareOpen" },
     { i: "📥", l: "Import — DICOM 파일 업로드(Orthanc)", a: "import" },
-    { i: "📤", l: "Export — 워크리스트 CSV 내보내기", a: "csv" },
+    { i: "📤", l: "Export — 선택 검사의 DICOM 영상 내보내기 (CD/USB/파일)", a: "export" },
+    { i: "🧾", l: "목록 CSV — 현재 워크리스트를 CSV 로", a: "csv" },
     { i: "🖨", l: "Print — 화면 인쇄", a: "print" },
     { i: "📄", l: "Report — 판독서 PDF 내려받기", a: "pdf" },
     { i: "📝", l: "Report 창 — 판독 작성 창 열기(선택 검사)", a: "reading" },
@@ -3476,7 +3492,8 @@ export function Worklist() {
                            {([
                              ["reading", "📝 Reading", "Report 창 — 판독 작성 창 열기(선택 검사)"],
                              ["import", "📥 Import", "Import — DICOM 파일/폴더 업로드(Orthanc)"],
-                             ["csv", "📤 Export", "Export — 워크리스트 CSV 내보내기"],
+                             ["export", "📤 Export", "Export — 선택 검사의 DICOM 영상 내보내기 (CD/USB/파일)"],
+                             ["csv", "🧾 목록 CSV", "현재 워크리스트 목록을 CSV 로 내보내기"],
                              ["print", "🖨 Print", "Print — 화면 인쇄"],
                              ["pdf", "📄 PDF", "판독서 PDF"],
                              ["emergency", "⚠ Emergency", "응급 우선순위 토글 (F-15)"],
@@ -3775,6 +3792,12 @@ export function Worklist() {
       </footer>
 
       {batchOpen && <BatchReviewModal onClose={() => setBatchOpen(false)} onDone={() => setRefreshKey((k) => k + 1)} />}
+      {exportTargets.length > 0 && (
+        <Suspense fallback={null}>
+          <ExportDialog targets={exportTargets} onClose={() => setExportTargets([])}
+                        onStatus={(m) => showToast(m, "error")} />
+        </Suspense>
+      )}
       {importOpen && (
         <Suspense fallback={null}>
           <ImportDialog onClose={() => setImportOpen(false)}
