@@ -140,11 +140,16 @@ interface PaneState {
   cineSec?: number;
   media?: { url: string; kind: "image" | "video"; name: string } | null;  /** 페인별 Image Layout(N×M 타일) — 활성 페인에만 적용, 기본 1×1 */
   il?: { r: number; c: number };
+  /** 타일 더블클릭으로 1×1 파고들기 했을 때의 복귀 정보. **페인 상태에 둔다** —
+   *  ref 로 두면 페인이 다시 걸릴 때(initPane) 무효화를 빠뜨려 엉뚱한 재분할이 일어난다. */
+  tz?: { il: { r: number; c: number }; index: number };
 }
 const initPane = (studyUid: string): PaneState => ({
   studyUid, series: null, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
   flipH: false, flipV: false, invert: false, wl: "", fx: "", shutter: null,
   playing: false, media: null,
+  // 키를 명시해야 `patch(pid, {...initPane(...)})` 같은 병합 갱신에서도 옛 분할·파고들기 기억이 지워진다
+  il: undefined, tz: undefined,
 });
 
 /* ── TY-3: Crosslink 5모드 — 기존 Link 단일 토글을 확장 (In IN_CROSSLINK_MODES 이식, 단일 선택형) ── */
@@ -493,8 +498,6 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 2D 행잉(모달리티→Image 분할) 기본 il — 검사 열 때 페인에 적용(prefs 로드에서 해석)
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
-  // Image Layout 타일 더블클릭으로 1×1 파고들기 — 복귀용 원래 분할·시작 인덱스(페인별, 시리즈 검증)
-  const tileZoomRef = useRef<Record<string, { il: { r: number; c: number }; index: number; suid: string }>>({});
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
   const isMg = detail.modality === "MG";
   const [mgOn, setMgOn] = useState(false);
@@ -2956,6 +2959,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const pIl = p.il ?? { r: 1, c: 1 };
     const tileCount = pIl.r * pIl.c;
     const url = renderedUrl(p);
+    // 페인 시각 변환 — 단일 이미지는 페인 래퍼에, 타일 분할에서는 각 타일 이미지에 건다
+    const paneXf = `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`;
     const isPrior = p.studyUid !== detail.study_uid;
     const inst = p.series?.instances[p.index];
     // 페인 테두리 — 멀티 선택=ty_sel_color 2px, 활성=ty_sel_color 1px (TY-3(2))
@@ -3001,11 +3006,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
            onDoubleClick={() => {
              if (tool && OPEN_ENDED.has(tool)) { finishOpenEnded(); return; }  // 수집 종료 — 최대화 충돌 회피
              if (tool) return;
-             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀 — 같은 시리즈일 때만
-             const tz = tileZoomRef.current[pid];
-             if (tz && tileCount <= 1 && tz.suid === (p.series?.series_uid ?? "")) {
-               delete tileZoomRef.current[pid];
-               patch(pid, { il: tz.il, index: tz.index });
+             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀
+             if (p.tz && tileCount <= 1) {
+               // 2D-MG 맞붙임은 타일 페인을 건너뛰므로, 되돌아가면 join 변환이 페인에 남는다 → 함께 원복
+               const mgBase = mgSavedRef.current[pid];
+               delete mgSavedRef.current[pid];
+               delete mgAppliedRef.current[pid];
+               patch(pid, { il: p.tz.il, index: p.tz.index, tz: undefined,
+                            ...(mgBase ? { zoom: mgBase.zoom, tx: mgBase.tx, ty: mgBase.ty } : {}) });
                return;
              }
              setMaximized((m) => (m === pid ? null : pid));   // 더블클릭 = 페인 최대화/복원
@@ -3037,85 +3045,80 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             ↓ 이 페인에 시리즈 표시
           </div>
         )}
-        {url && (
-          <div style={{
-            position: "absolute", inset: 0,
-            transform: `translate(${p.tx}px,${p.ty}px) scale(${p.zoom * (p.flipH ? -1 : 1)},${p.zoom * (p.flipV ? -1 : 1)}) rotate(${p.rot}deg)`,
-          }}>
-            {tileCount <= 1 ? (
-              <>
-                <img src={url} alt="" draggable={false}
-                     style={{
-                       width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
-                       filter: paneFilter(p),
-                     }} />
-                {inst && annoSvg(pid, p, inst)}
-              </>
-            ) : (
-              /* Image Layout — 연속 이미지 N×M 타일 (UBPACS p.14) */
-              <div style={{
-                width: "100%", height: "100%", display: "grid", gap: 1,
-                gridTemplateColumns: `repeat(${pIl.c}, 1fr)`,
-                gridTemplateRows: `repeat(${pIl.r}, 1fr)`,
-              }}>
-                {Array.from({ length: tileCount }, (_, k) => {
-                  const u = renderedUrlAt(p, p.index + k);
-                  return u ? (
-                    <img key={k} src={u} alt="" draggable={false}
-                         // 타일 더블클릭 = 그 이미지로 파고들기(Image 분할 1×1) — 이후 스크롤로 시리즈 전체 확인.
-                         // 페인 여백에서 다시 더블클릭하면 원래 분할·위치로 복귀.
-                         onDoubleClick={(e) => {
-                           if (tool) return;   // 도구 사용 중엔 기존 동작(열린 다각 완료 등) 우선
-                           e.stopPropagation();
-                           tileZoomRef.current[pid] = { il: pIl, index: p.index, suid: p.series?.series_uid ?? "" };
-                           patch(pid, { il: { r: 1, c: 1 }, index: p.index + k });
-                           setActivePane(pid);
-                         }}
-                         style={{
-                           width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
-                           minWidth: 0, minHeight: 0,
-                           filter: paneFilter(p),
-                         }} />
-                  ) : <div key={k} />;
-                })}
-              </div>
-            )}
+        {url && (tileCount <= 1 ? (
+          <div style={{ position: "absolute", inset: 0, transform: paneXf }}>
+            <img src={url} alt="" draggable={false}
+                 style={{
+                   width: "100%", height: "100%", objectFit: "contain", userSelect: "none",
+                   filter: paneFilter(p),
+                 }} />
+            {inst && annoSvg(pid, p, inst)}
           </div>
-        )}
-        {/* Image Layout 타일 구분선 + 타일별 정보 — 페인 전체 오버레이(환자·검사·시리즈)와 별개로
-            각 이미지의 번호·위치를 표시. 변환 래퍼 밖(별도 그리드)에 겹쳐 그려야 확대/이동해도
-            선 두께와 글자 크기가 그대로 유지된다. 구분선은 정보 토글과 무관하게 항상 표시. */}
-        {tileCount > 1 && p.series && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none", display: "grid", gap: 1,
-                        gridTemplateColumns: `repeat(${pIl.c}, 1fr)`, gridTemplateRows: `repeat(${pIl.r}, 1fr)` }}>
+        ) : (
+          /* Image Layout — 연속 이미지 N×M 타일 (UBPACS p.14).
+             ⚠ 칸(그리드)은 변환하지 않고 **변환은 각 이미지에만** 건다(In Viewer 동일 구조).
+             칸 전체에 하나의 transform 을 걸면 flip/회전 시 이미지가 칸을 바꿔 타일 정보가
+             엉뚱한 이미지에 붙고, 확대 시 이미지가 옆 칸으로 번진다. */
+          <div style={{
+            position: "absolute", inset: 0, display: "grid", gap: 1,
+            gridTemplateColumns: `repeat(${pIl.c}, 1fr)`,
+            gridTemplateRows: `repeat(${pIl.r}, 1fr)`,
+          }}>
             {Array.from({ length: tileCount }, (_, k) => {
+              const idx = p.index + k;
+              const u = renderedUrlAt(p, idx);
+              const ti = p.series?.instances[idx];
               // 칸 구분선 — 마지막 열/행이 아니면 오른쪽·아래에 선(페인 경계선과 같은 색)
               const cell: React.CSSProperties = {
-                position: "relative", minWidth: 0, minHeight: 0,
+                position: "relative", overflow: "hidden", minWidth: 0, minHeight: 0,
                 ...(k % pIl.c !== pIl.c - 1 ? { borderRight: "1px solid var(--border)" } : {}),
                 ...(k < tileCount - pIl.c ? { borderBottom: "1px solid var(--border)" } : {}),
               };
-              const ti = p.series?.instances[p.index + k];
-              if (!ti) return <div key={k} style={cell} />;
-              const sl = ti.position?.length === 3 ? ti.position[2] : undefined;
-              // 첫 행 마지막 타일은 페인 전체 오버레이(우상단 시리즈·Img 범위) 자리와 겹치므로 아래로 내린다
-              const dodge = k < pIl.c && k % pIl.c === pIl.c - 1 ? Math.round(tyOvFont * 3.4) : 0;
+              // 첫 행 마지막 칸은 페인 전체 오버레이(우상단) 자리와 겹치므로 아래로 내린다 — 단 칸이 넉넉할 때만
+              const lf = Math.max(8, tyOvFont - 1.5);
+              const cellH = (paneSizes.current[pid]?.h ?? 0) / pIl.r;
+              const want = Math.round(tyOvFont * 3.4);
+              const dodge = k < pIl.c && k % pIl.c === pIl.c - 1 && cellH > want + lf * 3 ? want : 0;
               return (
-                <div key={k} style={cell}>
-                  {overlayOn && (
-                  <div style={{ position: "absolute", top: dodge, right: 0, padding: "2px 4px", textAlign: "right",
-                                fontSize: Math.max(8, tyOvFont - 1.5), lineHeight: 1.35,
-                                color: "var(--text-primary)", textShadow: "0 0 4px #000", whiteSpace: "nowrap" }}>
-                    {keyMarks.has(ti.sop_uid) && <span style={{ color: "#facc15" }}>🔑 </span>}
-                    Img: {p.index + k + 1}/{p.series?.instances.length}
-                    {sl !== undefined && <><br />SL: {sl.toFixed(1)}</>}
-                  </div>
+                <div key={k} style={cell}
+                     // 타일 더블클릭 = 그 이미지로 파고들기(Image 분할 1×1) — 이후 스크롤로 시리즈 전체 확인.
+                     // 페인에서 다시 더블클릭하면 원래 분할·위치로 복귀.
+                     onDoubleClick={(e) => {
+                       if (tool || !u) return;   // 도구 사용 중엔 기존 동작(열린 다각 완료 등) 우선
+                       e.stopPropagation();
+                       patch(pid, { tz: { il: pIl, index: p.index }, il: { r: 1, c: 1 }, index: idx });
+                       setActivePane(pid);
+                     }}>
+                  {u && (
+                    <img src={u} alt="" draggable={false}
+                         style={{
+                           position: "absolute", inset: 0, width: "100%", height: "100%",
+                           objectFit: "contain", userSelect: "none",
+                           transform: paneXf, filter: paneFilter(p),
+                         }} />
+                  )}
+                  {overlayOn && ti && (
+                    <div style={{ position: "absolute", top: dodge, right: 0, padding: "2px 4px", textAlign: "right",
+                                  pointerEvents: "none", fontSize: lf, lineHeight: 1.35,
+                                  color: "var(--text-primary)", textShadow: "0 0 4px #000", whiteSpace: "nowrap" }}>
+                      {keyMarks.has(ti.sop_uid) && <span style={{ color: "#facc15" }}>🔑 </span>}
+                      Img: {idx + 1}/{p.series?.instances.length}
+                      {(() => {
+                        // 슬라이스 위치 = DICOM 위치를 슬라이스 법선에 투영(nearestSliceIndex 와 동일 정의).
+                        // position[2](코너 Z)를 그대로 쓰면 sagittal/coronal 에서 전 타일이 같은 값이 된다.
+                        const g = geomOf(ti);
+                        if (!g) return null;
+                        const nn = Math.hypot(g.n[0], g.n[1], g.n[2]) || 1;
+                        const v = (g.pos[0] * g.n[0] + g.pos[1] * g.n[1] + g.pos[2] * g.n[2]) / nn;
+                        return <><br />SL: {(Math.abs(v) < 0.05 ? 0 : v).toFixed(1)}</>;
+                      })()}
+                    </div>
                   )}
                 </div>
               );
             })}
           </div>
-        )}
+        ))}
         {/* 확대경 렌즈 — 마우스 위치 3배 확대 (배경이미지 트릭, In Viewer 동일) */}
         {magOn && magPos && magPos.pid === pid && url && inst && tileCount <= 1 && (
           <div style={{
@@ -4094,14 +4097,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     onPick={(v) => setLayout(`${v.r}x${v.c}`)} />
         <GridPicker label="Img" max={10} value={imgLay}
                     onPick={(v) => {
-                      delete tileZoomRef.current[activePane];   // 직접 분할을 고르면 파고들기 복귀 기억은 버린다
                       setImgLay(v);
                       // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로 — 안 그러면 첫 칸이 시리즈 중간에서
                       // 시작해 마지막 한 장만 보인다(2장 시리즈를 1×2 로 나눌 때 특히)
                       setPanes((prev) => {
                         const q = prev[activePane];
                         if (!q) return prev;
-                        return { ...prev, [activePane]: { ...q, il: v,
+                        // 직접 분할을 고르면 파고들기 복귀 기억은 버린다
+                        return { ...prev, [activePane]: { ...q, il: v, tz: undefined,
                           index: alignTileIndex(q.index, v.r * v.c, q.series?.instances.length ?? 0) } };
                       });
                     }} />

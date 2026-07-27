@@ -98,6 +98,9 @@ interface Pane {
   wl: string;
   fx: "" | "sharpen" | "smooth" | "pseudo";   // p.13 필터(Sharpens/Average/Pseudo)
   il: { r: number; c: number };  // Image Layout — DICOM 계층: 페인(Series) 내부의 이미지 타일 분할(페인별)
+  /** 타일 더블클릭으로 1×1 파고들기 했을 때의 복귀 정보. **페인 상태에 둔다** —
+   *  ref(인덱스 키)로 두면 페인 배열이 줄었다 늘 때 다른 페인으로 옮겨붙는다. */
+  tz?: { il: { r: number; c: number }; index: number };
   shutter?: { kind: "rect" | "ellipse" | "poly"; pts: { x: number; y: number }[] } | null;  // 표시 셔터
   playing?: boolean;             // 시네 재생 중 (페인별 독립)
   cineSec?: number;              // 시네 간격(초) — 없으면 설정 기본값
@@ -106,6 +109,7 @@ interface Pane {
 const initPane = (studyUid = ""): Pane => ({
   series: null, studyUid, index: 0, zoom: 1, tx: 0, ty: 0, rot: 0,
   flipH: false, flipV: false, invert: false, wl: "", fx: "", il: { r: 1, c: 1 },
+  tz: undefined,   // 병합 갱신에서도 파고들기 기억이 지워지도록 키를 명시
 });
 
 /* ── Scout line 기하 — DICOM ImagePosition/Orientation 으로 소스 이미지의 절단선을
@@ -356,8 +360,6 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 (Viewer2D 와 동일 규칙) */
   const [mgOn, setMgOn] = useState(false);
   const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
-  // Image Layout 타일 더블클릭으로 1×1 파고들기 — 복귀용 원래 분할·시작 인덱스(페인별, 시리즈 검증)
-  const tileZoomRef = useRef<Record<number, { il: { r: number; c: number }; index: number; suid: string }>>({});
   const mgOnRef = useRef(false);                  // 비동기 적용 중 해제되었는지 즉시 판정
   const mgTouchedRef = useRef(false);             // 사용자가 직접 토글함 — 검사 전환 시 서버값이 덮어쓰지 않게
   // 해제 시 복원용 기준값(맞붙이기 전 상태) + 우리가 마지막으로 쓴 변환(기준값 오염 판정용)
@@ -2107,8 +2109,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const uncombine = (pi: number) => {
     const snap = preCombineRef.current[pi];
     delete preCombineRef.current[pi];
-    if (snap) upd(pi, { series: snap.series, index: snap.index, studyUid: snap.studyUid });
-    else upd(pi, { series: series[0] ?? null, index: 0, studyUid: curD.study_uid });
+    if (snap) upd(pi, { series: snap.series, index: snap.index, studyUid: snap.studyUid, tz: undefined });
+    else upd(pi, { series: series[0] ?? null, index: 0, studyUid: curD.study_uid, tz: undefined });
     setActive(pi);
     say("Combine 해제 — 원래 시리즈로 복원");
   };
@@ -2129,7 +2131,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const base = panes[pi]?.series ?? null;
     const merged = buildCombined(
       base ? [{ s: base, studyUid: panes[pi].studyUid }, dropped] : [dropped]);
-    upd(pi, { series: merged, index: 0 });
+    upd(pi, { series: merged, index: 0, tz: undefined });
     setActive(pi);
     say(`Combine — Se${dropped.s.series_number} ${dropped.s.instances.length}장 추가 · 총 ${merged.instances.length}장(연속 스크롤)`);
   };
@@ -2141,7 +2143,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     snapCombine(pi);
     const merged = buildCombined(
       [...src].sort((a, b) => a.series_number - b.series_number).map((s) => ({ s, studyUid: curD.study_uid })));
-    upd(pi, { series: merged, index: 0, studyUid: curD.study_uid });
+    upd(pi, { series: merged, index: 0, studyUid: curD.study_uid, tz: undefined });
     setActive(pi);
     say(`Combine all — ${src.length}개 시리즈 ${merged.instances.length}장을 한 시리즈처럼 결합(연속 스크롤 · 다시 누르면 해제)`);
   };
@@ -2572,9 +2574,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 썸네일 시리즈 드롭 → 해당 페인에 로드 (현재/과거 시리즈 모두 조회)
   const dropSeriesToPaneInfi = (pi: number, seriesUid: string) => {
     const cur = series.find((x) => x.series_uid === seriesUid);
-    if (cur) { upd(pi, { series: cur, index: 0, studyUid: curD.study_uid }); setActive(pi); say(`시리즈 Se${cur.series_number} → 페인 로드 (드래그앤드롭)`); return; }
+    if (cur) { upd(pi, { series: cur, index: 0, studyUid: curD.study_uid, tz: undefined }); setActive(pi); say(`시리즈 Se${cur.series_number} → 페인 로드 (드래그앤드롭)`); return; }
     const pr = priorSeries.find((e) => e.s.series_uid === seriesUid);
-    if (pr) { upd(pi, { series: pr.s, index: 0, studyUid: pr.uid }); setActive(pi); say(`[과거] Se${pr.s.series_number} → 페인 로드 (드래그앤드롭)`); return; }
+    if (pr) { upd(pi, { series: pr.s, index: 0, studyUid: pr.uid, tz: undefined }); setActive(pi); say(`[과거] Se${pr.s.series_number} → 페인 로드 (드래그앤드롭)`); return; }
     say("드롭 실패 — 시리즈를 찾을 수 없습니다");
   };
 
@@ -2616,11 +2618,14 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                const inst2 = p.series?.instances.find((x) => x.sop_uid === pend.sop);
                if (inst2 && finishOpenEnded(pi, p, inst2)) return;
              }
-             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀 — 같은 시리즈일 때만
-             const tz = tileZoomRef.current[pi];
-             if (tz && tilesOf(p) <= 1 && tz.suid === (p.series?.series_uid ?? "")) {
-               delete tileZoomRef.current[pi];
-               upd(pi, { il: tz.il, index: tz.index });
+             // 타일에서 파고든 상태(1×1)면 원래 Image 분할로 복귀
+             if (p.tz && tilesOf(p) <= 1) {
+               // 2D-MG 맞붙임은 타일 페인을 건너뛰므로, 되돌아가면 join 변환이 남는다 → 함께 원복
+               const mgBase = mgSavedRef.current[pi];
+               delete mgSavedRef.current[pi];
+               delete mgAppliedRef.current[pi];
+               upd(pi, { il: p.tz.il, index: p.tz.index, tz: undefined,
+                         ...(mgBase ? { zoom: mgBase.zoom, tx: mgBase.tx, ty: mgBase.ty } : {}) });
                return;
              }
              setMaximized((m) => (m === null ? pi : null));
@@ -2659,8 +2664,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                    if (tilesOf(p) <= 1 || !p.series || !inst) return;
                    if (OPEN_ENDED.has(tool) && pend) return;   // 열린 다각 완료가 우선
                    e.stopPropagation();
-                   tileZoomRef.current[pi] = { il: p.il, index: p.index, suid: p.series.series_uid };
-                   upd(pi, { il: { r: 1, c: 1 }, index: idx });
+                   upd(pi, { tz: { il: p.il, index: p.index }, il: { r: 1, c: 1 }, index: idx });
                    setActive(pi);
                  }}
                  onMouseDown={(e) => {
@@ -3110,11 +3114,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       onPick={(v) => applySLayout({ r: Math.min(v.r, 10), c: Math.min(v.c, 10) })} />
           <GridPicker label="Image" max={10} value={panes[active]?.il ?? { r: 1, c: 1 }}
                       onPick={(v) => {
-                        delete tileZoomRef.current[active];   // 직접 분할을 고르면 파고들기 복귀 기억은 버린다
                         const il = { r: Math.min(v.r, 10), c: Math.min(v.c, 10) };
-                        // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로(마지막 한 장만 보이는 현상 방지)
+                        // 분할을 바꾸는 즉시 시작 인덱스를 페이지 경계로(마지막 한 장만 보이는 현상 방지).
+                        // 직접 분할을 고르면 파고들기 복귀 기억은 버린다.
                         const len = panes[active]?.series?.instances.length ?? 0;
-                        upd(active, { il, index: alignTileIndex(panes[active]?.index ?? 0, il.r * il.c, len) });
+                        upd(active, { il, tz: undefined, index: alignTileIndex(panes[active]?.index ?? 0, il.r * il.c, len) });
                       }} />
           {/* 분할을 넘어가는 시리즈가 있을 때 — Shift+스크롤로 페이지 이동 */}
           {(() => {
