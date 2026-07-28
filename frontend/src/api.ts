@@ -209,6 +209,7 @@ export interface RelatedExam {
   study_uid: string;
   study_date: string;
   modality: string;
+  body_part?: string;   // Compare 기준(같은 Modality·부위) 판정용
   study_desc: string;
   status: string;
 }

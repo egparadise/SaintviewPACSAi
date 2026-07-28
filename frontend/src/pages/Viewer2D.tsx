@@ -8,7 +8,8 @@ import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
-import { DEFAULT_WL_PRESETS, alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { DEFAULT_WL_PRESETS, alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
+         type CompareBasis, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
@@ -312,8 +313,10 @@ interface ViewerPrefs {
   monitor?: { screens?: number[]; worklist?: number | null; report?: number | null;
               max_open?: number; close_scope?: "all" | "current" };
   // 비교(Compare) 설정 — Setting>판독(Reading). enabled/multi_monitor/labels +
+  // basis: 비교 기준 — patient(기본, 이 환자의 과거검사 전부) / match(같은 Modality·부위만)
   // prior_mode: 과거검사(History) 비교 표시 — "layout"=1:2 분할 / "monitor"=인접 모니터 창
-  compare?: { enabled?: boolean; multi_monitor?: boolean; labels?: boolean; prior_mode?: "layout" | "monitor" };
+  compare?: { enabled?: boolean; multi_monitor?: boolean; labels?: boolean;
+              prior_mode?: "layout" | "monitor"; basis?: CompareBasis };
   // 2D-MG(맘모 좌우 맞붙임) — 설정>뷰어 공통>2D 행잉 MG 행. mg_join_on 은 뷰어에서 마지막으로 켜둔 상태
   mg_join?: MgJoinPrefs;
   mg_join_on?: boolean;
@@ -1444,6 +1447,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   /* 탭 클릭: 해당 검사를 활성 페인에 표시 (UBPACS Opened Study List 전환) */
   /* 전 페인 재행잉 — 탭 전환으로 다른 환자 검사를 볼 때 화면 전체를 그 검사로 교체(환자 혼합 방지).
      시리즈가 레이아웃보다 적으면 빈 페인 유지(In Viewer 규칙). */
+  /** Compare 후보 — 설정>판독의 '비교 기준' 을 따른다. 기본(patient)은 이 환자의 과거검사 전부,
+   *  match 는 그중 같은 Modality·부위만. 두 경우 모두 같은 환자로 제한(환자 혼합 차단). */
+  const cmpList = compareCandidates(detail.related_exams ?? [], detail, prefs.compare?.basis ?? "patient");
+
   const hangAll = (uid: string, list: SeriesNode[]) => {
     const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
     setPanes((prev) => {
@@ -4339,7 +4346,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                    }))} />
         <TitleMenu id="related" icon="🗂" title="Related Study List — Open=활성 페인 비교 · +Add=현재 유지+중첩 로드"
                    menu={menu} setMenu={setMenu}
-                   items={detail.related_exams.map((e) => ({
+                   items={cmpList.map((e) => ({
                      label: `${e.modality} · ${e.study_date} · ${e.study_desc}`,
                      sub: `${e.status} / ${detail.patient_key}`,
                      chip: STAT_COLOR[e.status] ?? "var(--stat-received)",
@@ -4639,13 +4646,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               <b style={{ fontSize: 13 }}>⇄ Compare — {detail.patient_name} 의 과거검사</b>
               <button style={{ marginLeft: "auto" }} onClick={() => setCmpOpen(false)}>✕</button>
             </div>
-            {(detail.related_exams ?? []).length === 0 && (
+            {cmpList.length === 0 && (
               <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 8 }}>
-                이 환자의 과거검사가 없습니다.<br />
+                {(detail.related_exams ?? []).length
+                  ? "비교 기준(같은 Modality·부위)에 맞는 과거검사가 없습니다 — 설정>판독>비교 기준에서 '환자 기준'으로 바꾸면 전체가 보입니다."
+                  : "이 환자의 과거검사가 없습니다."}<br />
                 다른 환자와 비교하려면 워크리스트의 <b>＋Add</b> 버튼을 사용하세요(명시적 비교 — 환자 혼합 방지).
               </div>
             )}
-            {(detail.related_exams ?? []).map((re) => (
+            {cmpList.map((re) => (
               <label key={re.id}
                      style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 6px",
                               borderRadius: 4, fontSize: 12.5, cursor: "pointer",

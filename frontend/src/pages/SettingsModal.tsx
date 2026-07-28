@@ -10,7 +10,7 @@ import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, normMgJoin, type MgJoinPref
 import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, APP_VERSION, APP_VERSION_LABEL } from "../lib/version";
 import { normOverlayCfg, type OverlayCfg } from "../lib/overlayFields";
 import { OverlayLayoutEditor } from "../components/OverlayLayoutEditor";
-import { CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
+import { type CompareBasis, CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS, type HpDisplay, type HpRule, type WlPreset } from "../lib/viewerConfig";
 import { IN_PALETTE } from "../lib/infiConfig";
 import { screenApiIssue } from "../lib/screens";
 import { SC_ACTIONS, SC_DEFAULTS, displayKey } from "../lib/shortcutDefs";
@@ -266,8 +266,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   //  enabled=기능 on/off · multi_monitor=Viewer 모니터 2개+면 비교검사를 다음 모니터에(끝번→첫번 순환) · labels=M/S 녹색 라벨
   //  prior_mode=과거검사(History) 비교 표시 — "layout"(1:2 분할) / "monitor"(인접 모니터: 다음, 끝번이면 이전)
   const [cmpCfg, setCmpCfg] = useState<{ enabled: boolean; multi_monitor: boolean; labels: boolean;
-                                         prior_mode: "layout" | "monitor" }>(
-    { enabled: true, multi_monitor: true, labels: true, prior_mode: "layout" });
+                                         prior_mode: "layout" | "monitor"; basis: CompareBasis }>(
+    { enabled: true, multi_monitor: true, labels: true, prior_mode: "layout", basis: "patient" });
   const [hospital, setHospital] = useState("");
   const [department, setDepartment] = useState("");
   const [footer, setFooter] = useState("");
@@ -1183,6 +1183,19 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                                onChange={(e) => setCmpCfg((p) => ({ ...p, labels: e.target.checked }))} />
                         M/S 라벨 표시 — 기준 검사 <b style={{ color: "var(--stat-final)" }}>Compare M</b>, 비교 검사 <b style={{ color: "var(--stat-final)" }}>Compare S1·S2</b> (녹색·중앙 상단)
                       </label>
+                      <Row label="비교 기준">
+                        <select value={cmpCfg.basis} disabled={!cmpCfg.enabled}
+                                onChange={(e) => setCmpCfg((p) => ({ ...p, basis: e.target.value as CompareBasis }))}>
+                          <option value="patient">환자 기준 — 이 환자의 과거검사 전부 (기본)</option>
+                          <option value="match">판독 기준 — 같은 Modality·같은 부위만</option>
+                        </select>
+                      </Row>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                        기본은 <b>환자 기준</b>입니다 — 같은 환자(차트번호)의 과거검사를 모두 후보로 봅니다.
+                        <b>판독 기준</b>은 그중 현재 검사와 <b>같은 Modality·같은 검사부위</b>만 남겨,
+                        직접 비교되는 과거 판독만 보여줍니다(부위가 비어 있으면 검사명 앞머리로 판정).
+                        두 경우 모두 후보는 <b>같은 환자</b>로 제한되며, 다른 환자 비교는 워크리스트 ＋Add 로만 가능합니다.
+                      </div>
                       <Row label="과거검사(History) 비교 표시">
                         <select value={cmpCfg.prior_mode} disabled={!cmpCfg.enabled}
                                 onChange={(e) => setCmpCfg((p) => ({ ...p, prior_mode: e.target.value as "layout" | "monitor" }))}>

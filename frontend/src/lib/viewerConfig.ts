@@ -202,3 +202,30 @@ export const TOOLBAR_DEFS: { section: string; items: { id: string; label: string
     { id: "cmp", label: "⇄", desc: "Compare — 같은 환자 과거검사 다중 선택 비교 오픈 (상단바)" },
   ]},
 ];
+
+/* ── Compare 기준 — 무엇을 '비교 대상'으로 볼 것인가 ─────────────────────────────
+   · patient (기본) : 같은 환자의 과거검사 전부. 환자가 기준이므로 항상 이게 기본이다.
+   · match          : 그중 **같은 Modality·같은 검사부위** 만(현재 판독과 직접 비교되는 것).
+   두 경우 모두 후보는 같은 환자(같은 차트번호)의 검사로 제한된다 — 환자 혼합은 원천 차단. */
+export type CompareBasis = "patient" | "match";
+
+/** 두 검사가 '같은 종류' 인가 — Modality 일치 + 부위(없으면 검사명) 일치 */
+export function sameExamKind(
+  a: { modality?: string; body_part?: string; study_desc?: string },
+  b: { modality?: string; body_part?: string; study_desc?: string },
+): boolean {
+  const norm = (v?: string) => (v ?? "").trim().toUpperCase();
+  if (norm(a.modality) !== norm(b.modality)) return false;
+  const ap = norm(a.body_part), bp = norm(b.body_part);
+  if (ap && bp) return ap === bp;
+  // 부위가 비어 있으면 검사명으로 대체 판정(앞 단어 기준 — "CHEST PA" ↔ "CHEST AP")
+  const head = (v?: string) => norm(v).split(/[\s,()/-]+/).filter(Boolean)[0] ?? "";
+  return !!head(a.study_desc) && head(a.study_desc) === head(b.study_desc);
+}
+
+/** Compare 후보 목록 — 기준에 따라 관련검사를 거른다 */
+export function compareCandidates<T extends { modality?: string; body_part?: string; study_desc?: string }>(
+  related: T[], base: { modality?: string; body_part?: string; study_desc?: string }, basis: CompareBasis,
+): T[] {
+  return basis === "match" ? related.filter((r) => sameExamKind(r, base)) : related;
+}

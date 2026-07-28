@@ -25,7 +25,8 @@ import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
-import { alignTileIndex, hasMammoView, mammoOrder, mammoView, type HpRule } from "../lib/viewerConfig";
+import { alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
+         type CompareBasis, type HpRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
@@ -406,8 +407,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // 비교 설정 (viewer.prefs.compare) + 다중 모니터 슬롯 사전 캐시(모달 열 때 감지 → 클릭 시 동기 사용, 팝업 허용)
   //  prior_mode: 과거검사(History) 비교 표시 — "layout"=1:2 분할 / "monitor"=인접 모니터 창
   const [cmpCfg, setCmpCfg] = useState<{ enabled: boolean; multi_monitor: boolean; labels: boolean;
-                                         prior_mode: "layout" | "monitor" }>(
-    { enabled: true, multi_monitor: true, labels: true, prior_mode: "layout" });
+                                         prior_mode: "layout" | "monitor"; basis?: CompareBasis }>(
+    { enabled: true, multi_monitor: true, labels: true, prior_mode: "layout", basis: "patient" });
   const cmpSlotsRef = useRef<{ index: number; features: string }[]>([]);
   const cmpCfgRef = useRef(cmpCfg);
   useEffect(() => { cmpCfgRef.current = cmpCfg; }, [cmpCfg]);
@@ -777,6 +778,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     void doCloseActionRef.current(m, false, { kind: "all" });
   }), [closeMode]);
   const curD = exams[activeExam]?.d ?? detail;
+  /** Compare 후보 — 설정>판독의 '비교 기준'. 기본(patient)은 이 환자의 과거검사 전부,
+   *  match 는 그중 같은 Modality·부위만. 두 경우 모두 같은 환자로 제한. */
+  const cmpList = compareCandidates(curD.related_exams ?? [], curD, cmpCfg.basis ?? "patient");
   // 비교(Compare) M/S 라벨 — 창 역할(cmpRole: 다중 모니터) 우선, 없으면 페인별 파생.
   //  기준(master)=비교 시작 시점의 활성 검사(cmpMaster, 미설정=창 배정 detail). ⇄/History 명시 진입 시에만.
   const cmpLabelsOn = cmpCfg.enabled !== false && cmpCfg.labels !== false;
@@ -3586,13 +3590,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
               <b style={{ fontSize: 13 }}>⇄ Compare — {curD.patient_name} 의 과거검사</b>
               <button style={{ marginLeft: "auto" }} onClick={() => setCmpOpen(false)}>✕</button>
             </div>
-            {(curD.related_exams ?? []).length === 0 && (
+            {cmpList.length === 0 && (
               <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 8 }}>
                 이 환자의 과거검사가 없습니다.<br />
                 다른 환자와 비교하려면 워크리스트의 <b>＋Add</b> 버튼을 사용하세요(명시적 비교).
               </div>
             )}
-            {(curD.related_exams ?? []).map((re) => (
+            {cmpList.map((re) => (
               <label key={re.id}
                      style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 6px",
                               borderRadius: 4, fontSize: 12.5, cursor: "pointer",

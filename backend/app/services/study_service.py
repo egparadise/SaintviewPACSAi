@@ -350,6 +350,7 @@ def study_detail(db: Session, study_id: int) -> dict | None:
             "study_uid": s.study_uid,
             "study_date": s.study_date,
             "modality": s.modality,
+            "body_part": s.body_part,   # Compare 기준(같은 Modality·부위) 판정용
             "study_desc": s.study_desc,
             "status": s.status,
         }
