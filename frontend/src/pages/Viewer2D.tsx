@@ -515,7 +515,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const userLayoutRef = useRef<string | null>(null);
   const userIlRef = useRef<{ r: number; c: number } | null>(null);
   /* 2D-MG — 맘모 좌우 맞붙임(가운데 공백 제거). MG 검사에서만 노출·동작 */
-  const isMg = detail.modality === "MG";
+  // ⚠ 활성 Exam 기준 — 창의 주 검사(detail)에 고정하면 ◀▶·Exam 탭으로 이동한 뒤
+  //   MG 검사인데 2D-MG 가 안 뜨거나, 반대로 비-MG 영상에 맞붙임이 걸린다(In-View 와 동일 규칙).
+  const isMg = dockDetail.modality === "MG";
   const [mgOn, setMgOn] = useState(false);
   const mgCfgRef = useRef<MgJoinPrefs>(DEFAULT_MG_JOIN);
   // MG 원본 시리즈 — 분할(1:2/2:2/2:3) 전환 시 좌우 쌍 재배치용. 어느 검사 것인지 함께 들고 있어야
@@ -998,8 +1000,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const vd = rule.displays?.find((d) => d.role === "viewer");
     const sg = vd?.grid ?? rule.s;
     const key = `${Math.min(sg.r, 10)}x${Math.min(sg.c, 10)}`;
-    if (LAYOUTS[key]) setLayout(key);
-    setImgLay({ r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) });
+    // MG 는 전용 행잉(2D-MG 분할)이 우선 — HP 규칙이 1×1 등으로 덮으면 맞붙임이 죽는다
+    if (detail.modality !== "MG") {
+      if (LAYOUTS[key]) setLayout(key);
+      setImgLay({ r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) });
+    }
     if (rule.wl !== undefined) {
       setPanes((prev) => Object.fromEntries(
         Object.entries(prev).map(([k, p]) => [k, { ...p, wl: rule.wl ?? "" }])));
@@ -1142,8 +1147,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일). prefs 로드가 늦으면 기본값으로 걸고, 로드 시 재적용된다
       // Mammo 도 4코너 정보(환자·시리즈·W/L·배율)는 유지한다 — 판독에 필요. 표시 여부는 INFO 토글로만 제어
       if (mammo) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); }
-      // 사용자가 이 창에서 직접 바꾼 분할이 있으면 모달리티 기본값보다 우선(창 닫힐 때까지 유지)
-      if (userLayoutRef.current && LAYOUTS[userLayoutRef.current]) setLayout(userLayoutRef.current);
+      // 사용자가 이 창에서 직접 바꾼 분할이 있으면 모달리티 기본값보다 우선(창 닫힐 때까지 유지).
+      // ⚠ Mammo 는 제외 — 세션 기억이 1×1 이면 좌우 열이 없어져 2D-MG 맞붙임이 성립하지 않는다
+      //   (il 기억은 아래에서 이미 제외 중. Series 분할에도 같은 규칙을 적용).
+      //   맘모 분할은 MG 프리셋 버튼(1:2/2:2/2:3)으로만 바꾼다.
+      if (!mammo && userLayoutRef.current && LAYOUTS[userLayoutRef.current]) setLayout(userLayoutRef.current);
       setSelSeries(null);   // 처음 열 때 썸네일 이미지 목록은 모두 접힘 — 더블클릭으로만 펼침
       if (imgSeries[0]) {
         // ② AI 추천 W/L 자동 적용(수동 변경 가능). 합성/비보정 데이터(PixelSpacing 없음)는
@@ -1300,7 +1308,24 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       });
       return;
     }
-    if (maximized !== null) return;   // 페인 최대화 중에는 붙일 짝이 없다(화면 끝으로 밀리는 것 방지)
+    if (maximized !== null) {
+      // 최대화 중에는 붙일 짝이 없다. 작은 타일 기준으로 계산된 zoom/tx 를 그대로 두면
+      // 확대된 페인에서 영상이 어긋나 잘리므로 기준값으로 되돌린다(복귀 시 다시 계산됨).
+      const saved = mgSavedRef.current;
+      if (Object.keys(saved).length) {
+        mgSavedRef.current = {};
+        mgAppliedRef.current = {};
+        setPanes((prev) => {
+          const next = { ...prev };
+          for (const [pid, sv] of Object.entries(saved)) {
+            const q = next[pid];
+            if (q) next[pid] = { ...q, zoom: sv.zoom, tx: sv.tx, ty: sv.ty };
+          }
+          return next;
+        });
+      }
+      return;
+    }
     const L2 = LAYOUTS[layout];
     let dead = false;
     const run = async () => {
@@ -1311,6 +1336,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const items: Item[] = [];
       let cand = 0;   // 조직 감지를 시도한 페인 수 — 0이면 아직 로드 전이므로 안내를 띄우지 않는다
       let tiled = 0;  // Image 분할(타일) 때문에 건너뛴 페인 수 — 이유를 알려주기 위함
+      let noSide = 0; // 붙일 방향을 못 정한 페인 수(좌우 열 없음/짝 없음) — 무음 실패 방지
+      let rotated = 0; // 회전 때문에 건너뛴 페인 수
       const ids = PANE_IDS.slice(0, L2.count);
       for (let i = 0; i < ids.length; i++) {
         const pid = ids[i];
@@ -1322,9 +1349,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const sz = rc?.width ? { w: rc.width, h: rc.height } : paneSizes.current[pid];
         if (!p || !p.series || p.media || !inst || !sz?.w || !sz?.h) continue;
         if ((p.il?.r ?? 1) * (p.il?.c ?? 1) > 1) { tiled++; continue; }   // 타일 분할 페인은 단일 변환으로 정렬 불가
-        if ((p.rot ?? 0) % 360 !== 0) continue;
+        if ((p.rot ?? 0) % 360 !== 0) { rotated++; continue; }
         const side = mgSide(mammoView(p.series.series_desc).lat, i % L2.cols, L2.cols);
-        if (!side) continue;
+        if (!side) { noSide++; continue; }
         const url = renderedUrlAt(p, p.index);
         if (!url) continue;
         cand++;
@@ -1337,8 +1364,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       }
       if (dead) return;
       if (!items.length) {
-        if (tiled) setStatus("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
-        else if (cand) setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다");
+        if (L2.cols < 2 && noSide) {
+          setStatus("2D-MG는 좌우 두 열 이상에서만 맞붙일 수 있습니다 — 상단 1:2 / 2:2 / 2:3 버튼으로 분할을 바꿔 주세요");
+        } else if (tiled) {
+          setStatus("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
+        } else if (cand) {
+          setStatus("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다");
+        } else if (rotated) {
+          setStatus("2D-MG는 회전 상태에서 맞붙일 수 없습니다 — 회전을 원위치로 되돌려 주세요");
+        } else if (noSide) {
+          setStatus("2D-MG: 좌우 짝을 정할 수 없어 맞붙이지 않았습니다(검사명에 R/L 표기 확인)");
+        }
         return;
       }
       /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 띄운다.
@@ -1451,14 +1487,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
    *  match 는 그중 같은 Modality·부위만. 두 경우 모두 같은 환자로 제한(환자 혼합 차단). */
   const cmpList = compareCandidates(detail.related_exams ?? [], detail, prefs.compare?.basis ?? "patient");
 
-  const hangAll = (uid: string, list: SeriesNode[]) => {
+  const hangAll = (uid: string, list: SeriesNode[], mgTarget = false) => {
     const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
     setPanes((prev) => {
       const next = { ...prev };
       for (const pid2 of PANE_IDS) {
         const i = vis.indexOf(pid2);
         const s = i >= 0 ? list[i] : undefined;
-        const uil = userIlRef.current;   // 사용자가 바꾼 Image 분할은 검사 전환에도 유지
+        // 사용자가 바꾼 Image 분할은 검사 전환에도 유지 — 단 맘모는 페인당 1장(맞붙임 성립 조건)
+        const uil = mgTarget ? null : userIlRef.current;
         next[pid2] = s
           ? { ...initPane(uid), series: s, il: uil ?? undefined,
               index: alignTileIndex(Math.floor(s.instances.length / 2),
@@ -1476,19 +1513,24 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (fullDetailRef.current[id]) return fullDetailRef.current[id];
     try { const d = await api.study(id); fullDetailRef.current[id] = d; return d; } catch { return null; }
   };
+  const tgtMgRef = useRef(false);   // loadIntoActive 안에서 늦게 알게 된 대상 모달리티(MG) 전달용
   const loadIntoActive = async (id: number) => {
     const isMain = id === detail.id;
+    tgtMgRef.current = false;
     void fullDetail(id).then((d) => { if (d) setDockDetail(d); });   // 판독 도크도 이 검사로 전환
     try {
       const tree = isMain ? { uid: detail.study_uid, series } : await getTree(id);
       if (!tree.series[0]) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
       // 대상 검사의 환자 확인(메타 미로드 시 1회 조회) — 탭 전환은 암묵 동선이므로 환자 혼합 금지
+      // 대상 검사의 모달리티 — 맘모면 타일 분할 금지 + MG 분할로 건다(창의 주 검사가 아니라 '여는 검사' 기준)
+      const tgtMg = (isMain ? detail.modality : (studyMeta[tree.uid]?.modality ?? "")) === "MG";
       let targetKey = isMain ? detail.patient_key : studyMeta[tree.uid]?.patient_key;
       if (!targetKey && !isMain) {
         try {
           const d = await api.study(id);
           targetKey = d.patient_key;
           setStudyMeta((m) => ({ ...m, [tree.uid]: metaOf(d) }));
+          if (d.modality === "MG") tgtMgRef.current = true;
         } catch { /* 메타 실패 시 아래 혼합 판정은 보수적으로 통과 */ }
       }
       const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
@@ -1499,12 +1541,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       });
       if (mixed) {
         // 다른 환자로의 전환 — 활성 페인만 바꾸면 이전 환자 영상이 격자에 남아 섞이므로 전체 재행잉
-        hangAll(tree.uid, tree.series);
+        hangAll(tree.uid, tree.series, tgtMg || tgtMgRef.current);
         setStatus("검사 전환 — 다른 환자이므로 화면 전체를 이 검사로 표시했습니다 (혼합 비교는 ⇄ Compare/+Add 사용)");
         return;
       }
       const s = tree.series[0];
-      const uil = userIlRef.current;
+      const uil = (tgtMg || tgtMgRef.current) ? null : userIlRef.current;   // 맘모는 타일 분할 금지
+      // 맘모로 전환하면 MG 분할(좌우 열)로 되돌린다 — 안 그러면 2D-MG 가 성립하지 않는다
+      if (tgtMg || tgtMgRef.current) {
+        const lk = mgCfgRef.current.layout;
+        if (LAYOUTS[lk]) setLayout(lk);
+      }
       patch(activePane, { ...initPane(tree.uid), series: s, il: uil ?? undefined,
                           index: alignTileIndex(Math.floor(s.instances.length / 2),
                                                 (uil?.r ?? 1) * (uil?.c ?? 1), s.instances.length) });
@@ -1516,6 +1563,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const closeTab = (id: number) => {
     const tab = openTabs.find((t) => t.id === id);
     setOpenTabs((prev) => prev.filter((t) => t.id !== id));
+    // 닫은 검사를 판독 도크가 계속 보고 있으면 주 검사로 되돌린다(화면에 없는 검사의 판독문 방지)
+    setDockDetail((d) => (d.id === id ? detail : d));
     if (!tab) return;
     setPanes((prev) => {
       const next = { ...prev };
@@ -3265,7 +3314,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             zoom: p.zoom, wl: p.wl, fx: p.fx,
           });
           const corner = (c: "tl" | "tr" | "bl" | "br") => {
-            const keys = fieldsAt(place, c, "series");
+            // 분할 1×1 이면 페인 상자 = 이미지 칸이므로 image 범위도 여기서 함께 그린다
+            // (안 그러면 기본 레이아웃에서 'Img: n/총'·SL 이 아예 사라진다)
+            const keys = tileCount <= 1
+              ? [...fieldsAt(place, c, "series"), ...fieldsAt(place, c, "image")]
+              : fieldsAt(place, c, "series");
             const lines = keys.map((k) => ({ k, v: val(k) })).filter((x) => x.v);
             if (!lines.length && !(c === "tl" && priorMark)) return null;
             return (
@@ -4247,7 +4300,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             </label>
             {MG_LAYOUTS.map((k) => (
               <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`}
-                      onClick={() => { userLayoutRef.current = k; applyMgLayout(k); }}
+                      onClick={() => { mgCfgRef.current = { ...mgCfgRef.current, layout: k }; applyMgLayout(k); }}
                       style={{ padding: "2px 7px", fontSize: 11,
                                ...(layout === k ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
                 {mgLayoutLabel(k)}

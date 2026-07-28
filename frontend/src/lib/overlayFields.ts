@@ -64,8 +64,8 @@ export const OV_FIELD_LABEL: Record<string, string> = Object.fromEntries(OV_FIEL
 
 /** 기본 배치 — 지금까지 뷰어가 그리던 모습 그대로(설정을 만지지 않으면 화면이 바뀌지 않는다) */
 export const DEFAULT_OVERLAY: Record<string, OvPlace> = {
-  patient_name: { c: "tl", s: "series" },
-  sex: { c: "tl", s: "series" },
+  patient_name: { c: "tl", s: "series" },   // "홍길동 (M)" 처럼 성별을 함께 표기
+  sex: { c: "off", s: "series" },           // 기본 숨김 — 환자명에 이미 포함(중복 방지). 따로 쓰려면 켠다
   study_desc: { c: "tl", s: "series" },
   study_date: { c: "tl", s: "series" },
   series: { c: "tr", s: "series" },
@@ -89,13 +89,15 @@ export const DEFAULT_OVERLAY: Record<string, OvPlace> = {
 };
 
 /** 설정에서 다룰 모달리티 목록 — "*" 은 공통(모달리티별 설정이 없을 때 쓰인다) */
-export const OV_MODALITIES = ["*", "CR", "DR", "MG", "US", "CT", "MR", "XA", "NM", "PT"];
+export const OV_MODALITIES = ["*", "CR", "DR", "DX", "MG", "US", "CT", "MR", "XA", "NM", "PT"];
 export const ovModalityLabel = (m: string) => (m === "*" ? "공통" : m);
 
 const isCorner = (v: unknown): v is OvCorner =>
   v === "tl" || v === "tr" || v === "bl" || v === "br" || v === "off";
 
-/** 저장값 정규화 — 모르는 키·값은 버리고 빠진 필드는 기본값으로 채운다 */
+/** 저장값 정규화 — 모르는 키·값만 버리고 **사용자가 실제로 설정한 것만** 남긴다.
+ *  모든 모달리티를 기본값으로 실체화하면 공통(*) 설정이 장비별 기본값에 가려 영영 적용되지 않는다.
+ *  빠진 값은 읽을 때(overlayFor) 공통 → 기본값 순으로 채운다. */
 export function normOverlayCfg(v: unknown): OverlayCfg {
   const src = (v ?? {}) as Record<string, unknown>;
   const out: OverlayCfg = {};
@@ -103,22 +105,20 @@ export function normOverlayCfg(v: unknown): OverlayCfg {
     const raw = (src[m] ?? {}) as Record<string, unknown>;
     const one: Record<string, OvPlace> = {};
     for (const f of OV_FIELDS) {
-      const d = DEFAULT_OVERLAY[f.key] ?? { c: "off" as OvCorner, s: "series" as OvScope };
       const r = raw[f.key] as { c?: unknown; s?: unknown } | undefined;
-      one[f.key] = {
-        c: isCorner(r?.c) ? r.c : d.c,
-        s: r?.s === "image" || r?.s === "series" ? r.s : d.s,
-      };
+      if (!r || !isCorner(r.c)) continue;   // 설정한 적 없는 필드는 저장하지 않는다
+      one[f.key] = { c: r.c, s: r.s === "image" ? "image" : "series" };
     }
     out[m] = one;
   }
   return out;
 }
 
-/** 이 모달리티에 적용할 배치 — 모달리티별 설정이 공통과 다르면 그것을, 없으면 공통을 쓴다 */
+/** 이 모달리티에 적용할 배치 — 기본값 → 공통(*) → 장비별 순으로 덮어쓴다.
+ *  이래야 공통 탭에서 바꾼 것이 장비별로 따로 설정하지 않은 모달리티에도 반영된다. */
 export function overlayFor(cfg: OverlayCfg | undefined, modality: string): Record<string, OvPlace> {
   const c = cfg ?? {};
-  return c[(modality || "").toUpperCase()] ?? c["*"] ?? DEFAULT_OVERLAY;
+  return { ...DEFAULT_OVERLAY, ...(c["*"] ?? {}), ...(c[(modality || "").toUpperCase()] ?? {}) };
 }
 
 /** 한 귀퉁이에 들어갈 필드들 — OV_FIELDS 순서를 유지해 배치가 뒤섞이지 않게 한다 */

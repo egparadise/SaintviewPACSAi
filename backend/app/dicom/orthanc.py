@@ -103,7 +103,7 @@ class OrthancClient:
                 # 측정(mm)·Reference line 계산용 — 없으면 빈 값(프론트에서 px 폴백)
                 "rows": int(itags.get("Rows") or 0),
                 "cols": int(itags.get("Columns") or 0),
-                "pixel_spacing": _floats(itags.get("PixelSpacing", "")),       # [row, col] mm
+                "pixel_spacing": _floats(itags.get("PixelSpacing") or itags.get("ImagerPixelSpacing", "")),       # [row, col] mm
                 "position": _floats(itags.get("ImagePositionPatient", "")),    # [x,y,z]
                 "orientation": _floats(itags.get("ImageOrientationPatient", "")),  # [rx..cz] 6개
             }
@@ -119,7 +119,7 @@ class OrthancClient:
             ir = self._client.get(
                 f"/studies/{orthanc_study_id}/instances",
                 params={"requestedTags": "SOPInstanceUID;InstanceNumber;Rows;Columns;"
-                                         "PixelSpacing;ImagePositionPatient;ImageOrientationPatient"},
+                                         "PixelSpacing;ImagerPixelSpacing;ImagePositionPatient;ImageOrientationPatient"},
                 timeout=120,
             )
             if ir.status_code == 200:

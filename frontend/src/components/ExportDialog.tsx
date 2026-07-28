@@ -27,7 +27,7 @@ export function ExportDialog({ targets, onClose, onStatus }: {
   onClose: () => void;
   onStatus?: (msg: string) => void;
 }) {
-  const [mode, setMode] = useState<Mode>("folder");
+  const [mode, setMode] = useState<Mode>(canPickDir ? "folder" : "file");   // 미지원 브라우저는 파일 저장으로
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
@@ -50,17 +50,20 @@ export function ExportDialog({ targets, onClose, onStatus }: {
         setDone("ISO 파일을 내려받았습니다. 탐색기에서 그 파일을 우클릭 → [디스크 이미지 굽기] 로 CD/DVD 에 구우세요.");
         return;
       }
-      setBusy("DICOM 미디어(DICOMDIR)를 만드는 중…");
-      const blob = await api.exportStudies(ids, "zip");
       if (mode === "file") {
+        setBusy("DICOM 미디어(DICOMDIR)를 만드는 중…");
+        const blob = await api.exportStudies(ids, "zip");
         save(blob, `saintview_${new Date().toISOString().slice(0, 10)}.zip`);
         setDone("ZIP 파일을 내려받았습니다. 압축을 풀면 DICOMDIR 구조 그대로 사용할 수 있습니다.");
         return;
       }
-      // 폴더/USB — 사용자가 고른 폴더에 DICOMDIR 구조 그대로 풀어 쓴다
-      setBusy("저장할 폴더(USB 드라이브 등)를 선택하세요…");
+      // 폴더/USB — ⚠ 폴더 선택창은 **네트워크 대기 전에** 띄워야 한다.
+      //   await 뒤에 부르면 사용자 제스처가 만료돼 브라우저가 SecurityError 로 거부한다.
+      if (!canPickDir) throw new Error("이 브라우저는 폴더 선택을 지원하지 않습니다 — '파일로 저장(ZIP)'을 이용하세요");
       const pick = (window as unknown as { showDirectoryPicker: (o?: object) => Promise<DirHandle> }).showDirectoryPicker;
       const root = await pick({ mode: "readwrite", startIn: "desktop" });
+      setBusy("DICOM 미디어(DICOMDIR)를 만드는 중…");
+      const blob = await api.exportStudies(ids, "zip");
       setBusy("압축을 푸는 중…");
       const { unzipSync } = await import("fflate");
       const files = unzipSync(new Uint8Array(await blob.arrayBuffer()));
@@ -80,7 +83,8 @@ export function ExportDialog({ targets, onClose, onStatus }: {
       setDone(`선택한 폴더에 ${n}개 파일을 저장했습니다(DICOMDIR 포함).`);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      if (/abort/i.test(m)) { setBusy(""); return; }   // 사용자가 폴더 선택을 취소
+      // 사용자가 폴더 선택을 취소 — 이름으로 판정(메시지 문구에 의존하지 않는다)
+      if ((e as { name?: string })?.name === "AbortError" || /abort/i.test(m)) { setBusy(""); return; }
       setErr(m);
       onStatus?.(`내보내기 실패 — ${m}`);
     } finally {

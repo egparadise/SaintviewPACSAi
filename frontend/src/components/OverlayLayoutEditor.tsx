@@ -3,7 +3,7 @@
 // 귀퉁이를 누르면 그림이 즉시 바뀌어 "이 값이 어디에 나오는지" 눈으로 확인된다.
 import { useState } from "react";
 import {
-  OV_CORNERS, OV_FIELDS, OV_FIELD_LABEL, OV_MODALITIES, fieldsAt, ovModalityLabel,
+  OV_CORNERS, OV_FIELDS, OV_FIELD_LABEL, OV_MODALITIES, fieldsAt, overlayFor, ovModalityLabel,
   type OvCorner, type OvPlace, type OvScope, type OverlayCfg,
 } from "../lib/overlayFields";
 
@@ -19,11 +19,13 @@ export function OverlayLayoutEditor({ cfg, onChange }: {
   onChange: (next: OverlayCfg) => void;
 }) {
   const [mod, setMod] = useState("*");
-  const place = cfg[mod] ?? {};
+  // 표시는 '실제 적용될 값'(기본 → 공통 → 장비별)이고, 저장은 이 탭에서 건드린 것만 남긴다.
+  const place = overlayFor(cfg, mod === "*" ? "" : mod);
+  const own = cfg[mod] ?? {};
 
   const set = (key: string, patch: Partial<OvPlace>) => {
     const cur: OvPlace = place[key] ?? { c: "off", s: "series" };
-    onChange({ ...cfg, [mod]: { ...place, [key]: { ...cur, ...patch } } });
+    onChange({ ...cfg, [mod]: { ...own, [key]: { ...cur, ...patch } } });
   };
 
   /** 미리보기 상자의 한 귀퉁이 — 그 자리에 배치된 필드 라벨을 그대로 보여준다 */

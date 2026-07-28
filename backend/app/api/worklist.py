@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user
+from app.api.deps import current_user, require_effective
 from app.db import get_db
 from app.models import Study
 from app.services.study_service import (
@@ -15,6 +17,7 @@ from app.services.study_service import (
     worklist_counts,
 )
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["worklist"])
 
 
@@ -132,7 +135,7 @@ class ExportBody(BaseModel):
 def export_studies(
     body: ExportBody,
     db: Session = Depends(get_db),
-    user: dict = Depends(current_user),
+    user: dict = Depends(require_effective("image.print")),
 ):
     """선택 검사의 DICOM 을 미디어(ZIP/ISO)로 내보낸다 — CD·USB·로컬 저장 공용.
 
@@ -175,8 +178,13 @@ def export_studies(
             break
         except Exception as exc:                                # noqa: BLE001
             last = exc
+            log.warning("내보내기 미디어 생성 실패 (orthanc=%s): %s", base, exc)
     if not zip_bytes:
-        raise HTTPException(status_code=502, detail=f"영상 미디어 생성 실패: {last}")
+        raise HTTPException(
+            status_code=502,
+            detail="영상 미디어를 만들지 못했습니다 — Orthanc 연결/보관 상태를 확인하세요"
+                   + (f" ({last})" if last else ""),
+        )
 
     label = (studies[0].study_date or "SAINTVIEW")[:8]
     if body.fmt == "iso":

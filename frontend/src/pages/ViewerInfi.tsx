@@ -2457,18 +2457,22 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                     ps: number };   // PixelSpacing row(mm/px) — 실제 크기 기준 배율 통일용(없으면 0)
       const items: Item[] = [];
       let tiled = 0;   // Image 분할(타일) 때문에 건너뛴 페인 수
+      let noSide = 0;  // 붙일 방향을 못 정한 페인 수(좌우 열 없음/짝 없음) — 무음 실패 방지
+      let rotated = 0; // 회전 때문에 건너뛴 페인 수
+      let cand = 0;    // 조직 감지를 시도한 페인 수(감지 실패와 구분)
       const cur = panesRef.current;
       for (let pi = 0; pi < cur.length; pi++) {
         const p = cur[pi];
         const inst = p.series?.instances[p.index];
         if (!p.series || p.media || !inst) continue;
         if (p.il.r * p.il.c > 1) { tiled++; continue; }   // 타일 분할 페인은 단일 변환으로 정렬 불가
-        if (p.rot % 360 !== 0) continue;
+        if (p.rot % 360 !== 0) { rotated++; continue; }
         const el = document.querySelector<HTMLElement>(`[data-pane="${pi}"]`);
         const rc = el?.getBoundingClientRect();
         if (!rc?.width || !rc.height) continue;
         const side = mgSide(mammoView(p.series.series_desc).lat, pi % sLayout.c, sLayout.c);
-        if (!side) continue;
+        if (!side) { noSide++; continue; }
+        cand++;
         const bbox = await tissueBBox(instUrl(p.studyUid || curD.study_uid, p.series, inst, p.wl), cfg.thresh);
         if (dead) return;
         if (!bbox) continue;
@@ -2478,7 +2482,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       }
       if (dead) return;
       if (!items.length) {
-        if (tiled) say("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
+        if (sLayout.c < 2 && noSide) say("2D-MG는 좌우 두 열 이상에서만 맞붙일 수 있습니다 — 상단 1:2 / 2:2 / 2:3 버튼으로 분할을 바꿔 주세요");
+        else if (tiled) say("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
+        else if (rotated) say("2D-MG는 회전 상태에서 맞붙일 수 없습니다 — 회전을 원위치로 되돌려 주세요");
+        else if (noSide) say("2D-MG: 좌우 짝을 정할 수 없어 맞붙이지 않았습니다(검사명에 R/L 표기 확인)");
+        else if (cand) say("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다");
         return;
       }
       /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 (Viewer2D 와 동일 규칙).

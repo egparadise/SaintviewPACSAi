@@ -84,7 +84,9 @@ function localToRow(r: LocalStudyRow): StudyRow {
   };
 }
 /** LOCAL 모드에서 허용되는 툴바 액션 — 그 외 서버 액션은 비활성+툴팁 */
-const LOCAL_OK_ACTIONS = new Set(["import", "csv", "export", "print", "refresh", "logout"]);
+// ⚠ export 는 서버 미디어(Orthanc) 경로라 LOCAL 모드에서 허용하면 로컬 DB id 가 서버로 나가
+//   엉뚱한 환자의 DICOM 이 내보내진다. pdf/reading 과 같은 이유로 서버 전용.
+const LOCAL_OK_ACTIONS = new Set(["import", "csv", "print", "refresh", "logout"]);
 const LOCAL_DENIED_TIP = "LOCAL 모드 — 서버 기능 비활성 (Import/새로고침/로컬 뷰어만 사용 가능)";
 
 /* ── F-18 행잉 매핑 + 모니터 배치(viewer.prefs.monitor) ─────────────────── */
@@ -283,6 +285,7 @@ function ReopenBar({ label, onExpand }: { label: string; onExpand: () => void })
 const ACTION_PERM: Record<string, string> = {
   pdf: "report.print",          // 판독 출력(PDF)
   print: "image.print",         // 영상 출력(화면 인쇄)
+  export: "image.print",        // 영상 내보내기(DICOM CD/USB/파일) — 출력과 동급 PHI 반출
   import: "study.import",       // 영상 추가(Import DICOM)
   batch: "report.write",        // AI 초안 일괄 확정(판독 변경)
   regen: "report.write",        // AI 초안 재생성
