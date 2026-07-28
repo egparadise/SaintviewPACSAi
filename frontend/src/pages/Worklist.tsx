@@ -1067,25 +1067,95 @@ function StudyGrid({
   );
 }
 
-/* ── [D-좌] 과거검사 (선택 환자, F-14) ────────────── */
-function PriorStudiesGrid({ detail, onAddCompare }: {
+/* ── [D-좌] 과거검사 (선택 환자, F-14) ──────────────
+   현재 검사 그리드와 동일하게 '＋' 로 Series → Image 까지 펼쳐 보고, 더블클릭으로 영상을 연다.
+   비교세트 추가는 행 오른쪽 ⇄ 버튼(더블클릭이 '열기' 로 바뀌었으므로 별도 동선). */
+function PriorStudiesGrid({ detail, onAddCompare, onOpen }: {
   detail: StudyDetail | null;
   onAddCompare: (e: { id: number; study_uid: string; study_date: string; modality: string; study_desc: string }) => void;
+  onOpen: (examId: number) => void;
 }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expSeries, setExpSeries] = useState<Set<string>>(new Set());
+  const [trees, setTrees] = useState<Record<number, SeriesNode[] | null>>({});   // null=로딩 중
+  const toggleExam = (id: number) => {
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) { n.delete(id); return n; }
+      n.add(id);
+      if (trees[id] === undefined) {
+        setTrees((t) => ({ ...t, [id]: null }));
+        api.seriesTree(id)
+          .then((r) => setTrees((t) => ({ ...t, [id]: r.series })))
+          .catch(() => setTrees((t) => ({ ...t, [id]: [] })));
+      }
+      return n;
+    });
+  };
+  const toggleSeries = (uid: string) => setExpSeries((prev) => {
+    const n = new Set(prev);
+    if (n.has(uid)) n.delete(uid); else n.add(uid);
+    return n;
+  });
+  const mark: React.CSSProperties = { cursor: "pointer", color: "var(--accent)", fontWeight: 700, userSelect: "none" };
+  const rows = detail?.related_exams ?? [];
   return (
-    <PanelBox title={`과거검사 ${detail ? `— ${detail.patient_name}` : ""} (더블클릭=비교세트 추가)`}>
+    <PanelBox title={`과거검사 ${detail ? `— ${detail.patient_name}` : ""} (＋=Series/Image · 더블클릭=영상 열기 · ⇄=비교세트)`}>
       <table className="grid-table">
-        <thead><tr><th>검사일</th><th>MOD</th><th>검사명</th><th>상태</th></tr></thead>
+        <thead><tr><th style={{ width: 22 }} /><th>검사일</th><th>MOD</th><th>검사명</th><th>상태</th><th style={{ width: 26 }} /></tr></thead>
         <tbody>
-          {(detail?.related_exams ?? []).map((e) => (
-            <tr key={e.id} onDoubleClick={() => onAddCompare(e)}>
-              <td>{e.study_date}</td><td>{e.modality}</td>
-              <td title={e.study_desc}>{e.study_desc}</td>
-              <td><StatusBadge status={e.status} /></td>
-            </tr>
+          {rows.map((e) => (
+            <Fragment key={e.id}>
+              <tr onDoubleClick={() => onOpen(e.id)} style={{ userSelect: "none" }}>
+                <td style={{ ...mark, textAlign: "center" }}
+                    title={expanded.has(e.id) ? "접기" : "Series/Image 펼치기"}
+                    onClick={(ev) => { ev.stopPropagation(); toggleExam(e.id); }}
+                    onDoubleClick={(ev) => ev.stopPropagation()}>
+                  {expanded.has(e.id) ? "−" : "＋"}
+                </td>
+                <td>{e.study_date}</td><td>{e.modality}</td>
+                <td title={e.study_desc}>{e.study_desc}</td>
+                <td><StatusBadge status={e.status} /></td>
+                <td style={{ ...mark, textAlign: "center" }} title="비교세트에 추가"
+                    onClick={(ev) => { ev.stopPropagation(); onAddCompare(e); }}
+                    onDoubleClick={(ev) => ev.stopPropagation()}>⇄</td>
+              </tr>
+              {expanded.has(e.id) && (
+                trees[e.id] === null ? (
+                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>시리즈 로딩…</td></tr>
+                ) : (trees[e.id] ?? []).length === 0 ? (
+                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>시리즈 없음</td></tr>
+                ) : (trees[e.id] ?? []).map((sr, si) => (
+                  <Fragment key={sr.series_uid}>
+                    <tr style={{ background: "rgba(56,108,173,0.10)" }} onDoubleClick={() => onOpen(e.id)}>
+                      <td />
+                      <td colSpan={5} style={{ paddingLeft: 20, fontSize: 12 }}>
+                        <span style={{ ...mark, marginRight: 7 }}
+                              title={expSeries.has(sr.series_uid) ? "Image 접기" : "Image 펼치기"}
+                              onClick={(ev) => { ev.stopPropagation(); toggleSeries(sr.series_uid); }}
+                              onDoubleClick={(ev) => ev.stopPropagation()}>
+                          {expSeries.has(sr.series_uid) ? "−" : "＋"}
+                        </span>
+                        📚 Series {sr.series_number || si + 1} · {sr.modality} · {sr.instances.length}장
+                        <span style={{ color: "var(--text-secondary)" }}> {sr.series_desc}</span>
+                      </td>
+                    </tr>
+                    {expSeries.has(sr.series_uid) && sr.instances.map((inst, ii) => (
+                      <tr key={inst.sop_uid} onDoubleClick={() => onOpen(e.id)}>
+                        <td />
+                        <td colSpan={5} style={{ paddingLeft: 48, fontSize: 11.5, color: "var(--text-secondary)" }}>
+                          🖼 Image {inst.instance_number || ii + 1}
+                          {inst.rows ? ` · ${inst.rows}×${inst.cols}px` : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                ))
+              )}
+            </Fragment>
           ))}
-          {(!detail || detail.related_exams.length === 0) && (
-            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>
+          {rows.length === 0 && (
+            <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>
               {detail ? "과거 검사 없음" : "검사를 선택하세요"}
             </td></tr>
           )}
@@ -3141,6 +3211,14 @@ export function Worklist() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, onSelect, openStudy, onChanged, dblAction, withOpen, withOpenMode, openV2, localMode, items, selectedIds]);
 
+  /** 과거검사 행 더블클릭 — 그 검사를 뷰어로 연다(현재 검사 그리드의 더블클릭과 동일 동선).
+   *  openV2 선언 뒤에 두어야 최신 상태를 잡는다(앞에 두면 첫 렌더의 openV2 를 붙든다). */
+  const openPrior = useCallback((examId: number) => {
+    api.study(examId)
+      .then((d) => { void openV2({ detail: d }); })
+      .catch(() => showToast("과거검사를 열지 못했습니다", "error"));
+  }, [openV2]);
+
   const openCompare = useCallback(() => {
     if (!selected) return;
     openViewerCompare([selected.study_uid, ...compareSet.map((c) => c.study_uid)], hpFor(selected.modality));
@@ -3676,7 +3754,8 @@ export function Worklist() {
                 <div style={{ height: infiSz.priorH, flexShrink: 0, display: "flex" }}>
                   <PriorStudiesGrid detail={selected}
                                     onAddCompare={(e) => setCompareSet((prev) =>
-                                      prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+                                      prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])}
+                                    onOpen={openPrior} />
                 </div>
               </>
             ) : (
@@ -3736,7 +3815,8 @@ export function Worklist() {
                 : k === "prior" ? (
                   <PriorStudiesGrid detail={selected}
                                     onAddCompare={(e) => setCompareSet((prev) =>
-                                      prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])} />
+                                      prev.some((c) => c.study_uid === e.study_uid) ? prev : [...prev, e])}
+                                    onOpen={openPrior} />
                 ) : (
                   <ComparisonSetGrid items={compareSet} current={selected}
                                      onRemove={(uid) => setCompareSet((p) => p.filter((c) => c.study_uid !== uid))}
