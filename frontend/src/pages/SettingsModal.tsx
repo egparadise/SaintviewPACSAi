@@ -200,7 +200,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [saved, setSaved] = useState("");
 
   // ── 상태 (페이지별) ──
-  const [refreshSec, setRefreshSec] = useState(10);
+  const [refreshSec, setRefreshSec] = useState(0);   // 0 = 수동(SEARCH 누를 때만 갱신) — 기본
   const [defaultStatus, setDefaultStatus] = useState("");
   const [columns, setColumns] = useState<string[]>(DEFAULT_COLUMNS);
   // 뷰어별 워크리스트 컬럼 오버라이드 — null/undefined = 공통(columns) 사용
@@ -833,12 +833,26 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             {page === "env" && (
               <>
                 <Group title="워크리스트 동작">
-                  <Row label="자동 갱신">
-                    <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
-                      <option value={0}>끔</option><option value={5}>5초</option>
-                      <option value={10}>10초</option><option value={30}>30초</option>
-                    </select>
+                  <Row label="갱신 방식">
+                    <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <select value={refreshSec > 0 ? "auto" : "manual"}
+                              onChange={(e) => setRefreshSec(e.target.value === "auto" ? (refreshSec || 10) : 0)}>
+                        <option value="manual">수동 (SEARCH 누를 때만)</option>
+                        <option value="auto">자동 (주기 갱신)</option>
+                      </select>
+                      {refreshSec > 0 && (
+                        <>
+                          <input type="number" min={1} max={3600} value={refreshSec} style={{ width: 72 }}
+                                 onChange={(e) => setRefreshSec(Math.max(1, Math.min(3600, Number(e.target.value) || 1)))} />
+                          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>초마다</span>
+                        </>
+                      )}
+                    </span>
                   </Row>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                    기본은 <b>수동</b>입니다 — 워크리스트가 저절로 바뀌지 않고 SEARCH 를 누를 때만 새로 읽습니다.
+                    자동으로 두면 지정한 초마다 목록을 다시 읽습니다(선택·스크롤은 유지).
+                  </div>
                   <Row label="기본 상태 필터">
                     <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
                       <option value="">전체</option><option value="unread">미판독(확정 전)</option>

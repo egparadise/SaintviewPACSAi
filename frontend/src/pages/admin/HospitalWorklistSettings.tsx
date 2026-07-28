@@ -26,7 +26,7 @@ const VIEWERS = [
 
 export function HospitalWorklistSettings({ hid }: { hid: number }) {
   // worklist.prefs (병원 스코프)
-  const [refreshSec, setRefreshSec] = useState(10);
+  const [refreshSec, setRefreshSec] = useState(0);   // 0 = 수동(SEARCH 누를 때만) — 기본
   const [defaultStatus, setDefaultStatus] = useState("");
   const [dblAction, setDblAction] = useState<"viewer2d" | "ohif">("viewer2d");
   const [navLeft, setNavLeft] = useState<"past" | "recent">("past");
@@ -100,11 +100,21 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
       </div>
 
       <Group title="워크리스트 동작">
-        <Row label="자동 갱신">
-          <select value={refreshSec} onChange={(e) => setRefreshSec(Number(e.target.value))}>
-            <option value={0}>끔</option><option value={5}>5초</option>
-            <option value={10}>10초</option><option value={30}>30초</option>
-          </select>
+        <Row label="갱신 방식">
+          <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select value={refreshSec > 0 ? "auto" : "manual"}
+                    onChange={(e) => setRefreshSec(e.target.value === "auto" ? (refreshSec || 10) : 0)}>
+              <option value="manual">수동 (SEARCH 누를 때만)</option>
+              <option value="auto">자동 (주기 갱신)</option>
+            </select>
+            {refreshSec > 0 && (
+              <>
+                <input type="number" min={1} max={3600} value={refreshSec} style={{ width: 72 }}
+                       onChange={(e) => setRefreshSec(Math.max(1, Math.min(3600, Number(e.target.value) || 1)))} />
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>초마다</span>
+              </>
+            )}
+          </span>
         </Row>
         <Row label="기본 상태 필터">
           <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>

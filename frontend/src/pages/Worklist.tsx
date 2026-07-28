@@ -2372,7 +2372,7 @@ export function Worklist() {
   const selAnchorRef = useRef<number | null>(null);   // Shift 범위 기준점(마지막 단일/토글 클릭)
   const [compareSet, setCompareSet] = useState<CompareItem[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [refreshSec, setRefreshSec] = useState(10);
+  const [refreshSec, setRefreshSec] = useState(0);   // 0 = 수동(SEARCH 누를 때만) — 기본
   // SEARCH 실행 시각 피드백 — 재조회 시작 시 그리드 깜빡임 (동일 keyframes 2개를 번갈아 써서 연속 클릭에도 재시작)
   const [searchFlash, setSearchFlash] = useState(0);
   const flashMountRef = useRef(false);
