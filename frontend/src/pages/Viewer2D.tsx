@@ -9,10 +9,12 @@ import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjac
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
-         type CompareBasis, type HpRule, hpPickRule } from "../lib/viewerConfig";
+         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource,
+         hpPickRule, hpPickPrior } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
+import { HpSaveDialog } from "../components/HpSaveDialog";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
@@ -576,6 +578,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // HP(행잉 프로토콜) + W/L 프리셋(All 적용) + 타이틀바 드롭다운
   const [hpRules, setHpRules] = useState<HpRule[]>([]);
   const [hpName, setHpName] = useState("기본");
+  // 직접설정 — 켜면 화면을 자유롭게 구성한 뒤 [현재 화면을 프로토콜로 저장] 으로 규칙을 만든다
+  const [hpDirect, setHpDirect] = useState(false);
+  const [hpSaveCap, setHpSaveCap] = useState<HpCapture | null>(null);
   const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
@@ -1027,6 +1032,21 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (rule.wl !== undefined) {
       setPanes((prev) => Object.fromEntries(
         Object.entries(prev).map(([k, p]) => [k, { ...p, wl: rule.wl ?? "" }])));
+    }
+    // 칸별 영상 시점 — current 가 아닌 칸은 그 시점에 해당하는 과거검사를 찾아 그 페인에 띄운다.
+    // (같은 과거검사가 두 칸에 겹치지 않도록 used 로 소진 처리)
+    const srcs = vd?.sources ?? [];
+    if (srcs.some((v) => v && v !== "current")) {
+      const used = new Set<number>();
+      const plan: { pid: string; examId: number }[] = [];
+      srcs.forEach((src, k) => {
+        if (!src || src === "current" || src === "vol3d") return;
+        const hit = hpPickPrior(detail.related_exams ?? [], detail.study_date, src, vd?.range, used);
+        if (!hit) return;
+        used.add(hit.id);
+        plan.push({ pid: PANE_IDS[k], examId: hit.id });
+      });
+      if (plan.length) void loadPriorInto(plan);
     }
     // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영, 미정의는 유지) — In-View 동일
     setXlink((x) => ({
@@ -1597,6 +1617,53 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       }
       return next;
     });
+  };
+
+  /** 지금 화면 구성을 규칙 형태로 읽어낸다 — '직접설정' 저장의 입력.
+   *  · 분할은 현재 Series 레이아웃과 활성 페인의 Image 분할
+   *  · 칸별 시점은 그 페인이 **다른 검사**(과거검사)를 보고 있으면 검사일 차이로 판정
+   *  · W/L·연동 토글은 현재 값 그대로 */
+  const captureHp = (): HpCapture => {
+    const L = LAYOUTS[layout];
+    const ids = PANE_IDS.slice(0, L.count);
+    const rel = detail.related_exams ?? [];
+    const sources = ids.map((pid): HpSlotSource => {
+      const p = panes[pid];
+      if (!p?.series || p.studyUid === detail.study_uid) return "current";
+      const ex = rel.find((r) => r.study_uid === p.studyUid);
+      if (!ex) return "current";
+      // 경과일 → 가장 좁은 시점 구간으로 기록(1주 → 1개월 → 1년 → 바로 이전)
+      const d = ((): number | null => {
+        const f = (v: string) => (/^\d{8}$/.test(v) ? new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) : null);
+        const a0 = f(detail.study_date), b0 = f(ex.study_date);
+        return a0 && b0 ? Math.round((a0.getTime() - b0.getTime()) / 86400000) : null;
+      })();
+      if (d == null || d < 0) return "prior";
+      return d <= 7 ? "w1" : d <= 30 ? "m1" : d <= 365 ? "y1" : "prior";
+    });
+    const ap = panes[activePane];
+    return {
+      s: { r: L.rows, c: L.cols },
+      i: { r: ap?.il?.r ?? 1, c: ap?.il?.c ?? 1 },
+      wl: ap?.wl ?? "",
+      xlink: { ...xlink },
+      sources,
+      cells: ids.map(() => null),
+    };
+  };
+
+  /* HP 칸별 영상 시점 적용 — 계획한 (페인, 과거검사) 쌍을 그대로 채운다.
+     loadPrior 와 달리 레이아웃을 바꾸지 않는다(분할은 이미 규칙이 정했다). */
+  const loadPriorInto = async (plan: { pid: string; examId: number }[]) => {
+    for (const { pid, examId } of plan) {
+      try {
+        const tree = await getTree(examId);
+        const s = tree.series[0];
+        if (!s) continue;
+        addOpenTab(examId, tree.uid);
+        patch(pid, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
+      } catch { /* 개별 실패는 그 칸만 비움 — 나머지 배치는 계속 */ }
+    }
   };
 
   /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
@@ -4502,9 +4569,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                        userIlRef.current = { r: 1, c: 1 }; setLayoutByUser("1x1");
                      } },
                      ...hpRules.map((r) => ({
-                       label: `${r.name} — ${r.modality || "*"}/${r.body_part || "*"}/${r.projection || "*"} · S${r.s.r}×${r.s.c} I${r.i.r}×${r.i.c}${r.wl ? ` · W/L ${r.wl}` : ""}`,
+                       label: `${r.priority ? "★ " : ""}${r.name} — ${r.modality || "*"}/${r.body_part || "*"}/${r.projection || "*"} · S${r.s.r}×${r.s.c} I${r.i.r}×${r.i.c}${r.wl ? ` · W/L ${r.wl}` : ""}`,
+                       active: hpName === r.name,
                        onClick: () => applyHp(r),
                      })),
+                     // 직접설정 — 화면을 자유롭게 구성한 뒤 프로토콜로 등록
+                     { label: `${hpDirect ? "☑" : "☐"} 직접설정 (화면에서 직접 구성)`,
+                       onClick: () => setHpDirect((v) => {
+                         setStatus(!v
+                           ? "직접설정 — 분할·영상·W/L 을 원하는 대로 맞춘 뒤 HP 메뉴에서 [현재 화면을 프로토콜로 저장]"
+                           : "직접설정 해제");
+                         return !v;
+                       }) },
+                     ...(hpDirect ? [{
+                       label: "💾 현재 화면을 프로토콜로 저장…",
+                       onClick: () => setHpSaveCap(captureHp()),
+                     }] : []),
                    ]} />
         <span>[{panes[activePane].index + 1}/{panes[activePane].series?.instances.length ?? 0}]</span>
         <span style={{ color: "var(--text-primary)" }}>
@@ -4810,6 +4890,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             role={localStorage.getItem("sv_role") ?? sessionStorage.getItem("sv_role") ?? "radiologist"}
             onClose={() => setSettingsOpen(false)} />
         </Suspense>
+      )}
+      {/* 직접설정 저장 — 지금 화면 구성을 행잉 프로토콜로 등록(설정>행잉 목록에 이어서 나온다) */}
+      {hpSaveCap && (
+        <HpSaveDialog capture={hpSaveCap} study={detail}
+                      onClose={() => setHpSaveCap(null)}
+                      onSaved={(rules, saved) => {
+                        setHpRules(rules); setHpName(saved.name); setHpDirect(false);
+                        setStatus(`행잉 프로토콜 '${saved.name}' 저장됨 — 설정>행잉(HP)에서 편집할 수 있습니다`);
+                      }} />
       )}
     </div>
   );

@@ -482,6 +482,60 @@ def _recover_kr(s: str | None) -> str | None:
     return fixed if any("가" <= c <= "힣" for c in fixed) else s
 
 
+class BackfillHpTagsBody(BaseModel):
+    dry_run: bool = True   # true=변경 없이 대상 건수만 반환
+    limit: int = 2000      # 한 번에 처리할 최대 검사 수
+
+
+@router.post("/backfill-hp-tags")
+def backfill_hp_tags(body: BackfillHpTagsBody, db: Session = Depends(get_db),
+                     user: dict = Depends(admin_user)):
+    """행잉 프로토콜 부위 매칭용 DICOM 태그를 기존 검사에 채운다.
+
+    protocol_name/procedure_code/procedure_desc/step_desc 는 나중에 추가된 컬럼이라
+    그 전에 수신된 검사는 비어 있다 — HP 규칙이 그 필드를 골라도 아무것도 못 찾는다.
+    Orthanc 에서 해당 태그만 다시 읽어 채운다(값이 이미 있는 검사는 건너뛴다 — 멱등).
+    """
+    from app.api.hospitals import _is_system_admin
+    from app.dicom.orthanc import OrthancClient, _flat_code
+
+    if not _is_system_admin(user):
+        raise HTTPException(status_code=403, detail="시스템 관리자 전용 기능입니다 (전 병원 데이터 스캔)")
+
+    rows = (
+        db.query(Study)
+        .filter(Study.orthanc_id != "")
+        .filter(
+            (Study.protocol_name == "")
+            & (Study.procedure_code == "")
+            & (Study.procedure_desc == "")
+            & (Study.step_desc == "")
+        )
+        .limit(max(1, min(body.limit, 5000)))
+        .all()
+    )
+    if body.dry_run:
+        return {"ok": True, "dry_run": True, "candidates": len(rows)}
+
+    client = OrthancClient()
+    updated = failed = 0
+    for st in rows:
+        try:
+            # study_metadata 는 RequestedTags 를 MainDicomTags 에 합쳐 준다(동기화 경로와 같은 자리)
+            meta = client.study_metadata(st.orthanc_id) or {}
+            tags = meta.get("MainDicomTags", {}) or {}
+            st.protocol_name = tags.get("ProtocolName", "") or ""
+            st.procedure_code = _flat_code(tags.get("ProcedureCodeSequence"))
+            st.procedure_desc = tags.get("RequestedProcedureDescription", "") or ""
+            st.step_desc = tags.get("PerformedProcedureStepDescription", "") or ""
+            if any((st.protocol_name, st.procedure_code, st.procedure_desc, st.step_desc)):
+                updated += 1
+        except Exception:   # 개별 검사 실패는 건너뛴다(Orthanc 에서 삭제된 검사 등)
+            failed += 1
+    db.commit()
+    return {"ok": True, "dry_run": False, "scanned": len(rows), "updated": updated, "failed": failed}
+
+
 class RepairEncodingBody(BaseModel):
     dry_run: bool = True   # true=변경 없이 대상 건수·표본만 반환
 
@@ -502,7 +556,8 @@ def repair_encoding(body: RepairEncodingBody, db: Session = Depends(get_db),
         raise HTTPException(status_code=403, detail="시스템 관리자 전용 기능입니다 (전 병원 데이터 스캔)")
 
     targets = [
-        (Study, ["study_desc", "clinical_info", "institution", "referring_physician", "department"]),
+        (Study, ["study_desc", "clinical_info", "institution", "referring_physician", "department",
+                 "protocol_name", "procedure_code", "procedure_desc", "step_desc"]),
         (Patient, ["name_masked"]),
         (Series, ["series_desc"]),
         (Order, ["patient_name", "procedure_desc", "department"]),

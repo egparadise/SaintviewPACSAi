@@ -26,7 +26,9 @@ import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
-         type CompareBasis, type HpRule } from "../lib/viewerConfig";
+         hpPickRule, hpPickPrior,
+         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource } from "../lib/viewerConfig";
+import { HpSaveDialog } from "../components/HpSaveDialog";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
@@ -433,6 +435,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // IN-2 ①: 행잉 프로토콜 규칙(viewer.hp) — 검사 로드 시 자동 매칭 + 행잉 콤보에서 선택 (TY applyHp 등가)
   const [hpRules, setHpRules] = useState<HpRule[]>([]);
   const [hpName, setHpName] = useState("기본");
+  // 직접설정 — 화면을 자유롭게 구성한 뒤 프로토콜로 등록(T-View·SaintView 동일)
+  const [hpDirect, setHpDirect] = useState(false);
+  const [hpSaveCap, setHpSaveCap] = useState<HpCapture | null>(null);
   // IN-2 ⑦: OHIF 게이트(viewer.prefs.ohif_enabled — 켠 계정만 '기타' 구획에 버튼 노출)
   const [ohifOn, setOhifOn] = useState(false);
   // IN-2 ⑥: 판독창(📝) 모니터 배치 — Setting>모니터의 monitor.report 인덱스
@@ -602,12 +607,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         { rules?: HpRule[] };
       const rules = hpv.rules ?? [];
       setHpRules(rules);
-      const up = (s: string) => (s || "").toUpperCase();
-      const hpMatch = rules.find((x) =>
-        x.use_on_exam_open !== false &&   // 'Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외(행잉 콤보에서 수동 적용)
-        (!x.modality || x.modality === detail.modality) &&
-        (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
-        (!x.projection || up(detail.study_desc).includes(up(x.projection)))) ?? null;
+      // '가장 우선 적용' 규칙 먼저 → 없으면 등록 순서. 부위는 규칙이 고른 DICOM 필드에서 찾는다.
+      // ('Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외 — 행잉 콤보에서 수동 적용)
+      const hpMatch = hpPickRule(rules, detail as unknown as Record<string, unknown>);
       // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
       if (keySops?.length) {
         const prim = list.find((e) => e.d.id === detail.id);
@@ -833,6 +835,53 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     });
   };
   /* IN-2 ①: 행잉 콤보에서 HP 규칙 수동 선택 — Series/Image layout + W/L (TY applyHp 등가) */
+  /** 지금 화면 구성을 규칙 형태로 읽어낸다 — '직접설정' 저장의 입력 (T-View captureHp 등가) */
+  const captureHpIn = (): HpCapture => {
+    const n = Math.max(1, sLayout.r * sLayout.c);
+    const base = exams[activeExam]?.d ?? detail;
+    const rel = base.related_exams ?? [];
+    const sources = Array.from({ length: n }, (_, k): HpSlotSource => {
+      const p = panes[k];
+      if (!p?.series || p.studyUid === base.study_uid) return "current";
+      const ex = rel.find((r) => r.study_uid === p.studyUid);
+      if (!ex) return "current";
+      const f = (v: string) => (/^\d{8}$/.test(v) ? new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) : null);
+      const a0 = f(base.study_date), b0 = f(ex.study_date);
+      const d = a0 && b0 ? Math.round((a0.getTime() - b0.getTime()) / 86400000) : null;
+      if (d == null || d < 0) return "prior";
+      return d <= 7 ? "w1" : d <= 30 ? "m1" : d <= 365 ? "y1" : "prior";
+    });
+    return {
+      s: { r: sLayout.r, c: sLayout.c },
+      i: { r: panes[active]?.il?.r ?? 1, c: panes[active]?.il?.c ?? 1 },
+      wl: panes[active]?.wl ?? "",
+      xlink: { ...xlink },
+      sources,
+      cells: Array.from({ length: n }, () => null),
+    };
+  };
+
+  /** HP 칸별 영상 시점 — current 가 아닌 칸에 해당 시점 과거검사를 띄운다(분할은 건드리지 않음) */
+  const applyHpSources = async (rule: HpRule) => {
+    const vd = rule.displays?.find((d) => d.role === "viewer");
+    const srcs = vd?.sources ?? [];
+    if (!srcs.some((v) => v && v !== "current")) return;
+    const base = exams[activeExam]?.d ?? detail;
+    const used = new Set<number>();
+    for (let k = 0; k < srcs.length; k++) {
+      const src = srcs[k];
+      if (!src || src === "current" || src === "vol3d") continue;
+      const hit = hpPickPrior(base.related_exams ?? [], base.study_date, src, vd?.range, used);
+      if (!hit) continue;
+      used.add(hit.id);
+      try {
+        const tr = await api.seriesTree(hit.id);
+        const s0 = tr.series[0];
+        if (s0) upd(k, { ...initPane(tr.study_uid), series: s0, index: Math.floor(s0.instances.length / 2) });
+      } catch { /* 개별 실패는 그 칸만 비움 */ }
+    }
+  };
+
   const applyHpIn = (rule: HpRule) => {
     const vg = rule.displays?.find((d) => d.role === "viewer")?.grid ?? rule.s;
     applySLayout({ r: Math.min(vg.r, 10), c: Math.min(vg.c, 10) });
@@ -851,6 +900,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       sync_other: rule.full_scroll_sync ?? x.sync_other,
       scout: rule.scout_image ?? x.scout,
     }));
+void applyHpSources(rule);
     setHpName(rule.name);
     say(`행잉 프로토콜 적용 — ${rule.name}`);
   };
@@ -3326,17 +3376,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                       setHpName("기본");
                     }
                     else if (v === "cmp") { applySLayout({ r: 1, c: 2 }); setHpName("기본"); }
+                    else if (v === "direct") {
+                      setHpDirect((d) => {
+                        say(!d
+                          ? "직접설정 — 분할·영상·W/L 을 맞춘 뒤 이 목록의 [현재 화면을 프로토콜로 저장] 을 고르세요"
+                          : "직접설정 해제");
+                        return !d;
+                      });
+                    }
+                    else if (v === "hpsave") setHpSaveCap(captureHpIn());
                     e.target.value = "";
                   }} style={{ fontSize: 10 }}>
             <option value="" disabled>HP: {hpName}</option>
             {hpRules.map((r, i) => (
               <option key={r.id} value={`hp:${i}`}>
-                {r.name} — {r.modality || "*"}/{r.body_part || "*"} · S{r.s.r}×{r.s.c} I{r.i.r}×{r.i.c}
+                {r.priority ? "★ " : ""}{r.name} — {r.modality || "*"}/{r.body_part || "*"} · S{r.s.r}×{r.s.c} I{r.i.r}×{r.i.c}
               </option>
             ))}
             <option value="stack">Stack 1x1</option>
             <option value="tile">Tile 3x3</option>
             <option value="cmp">Compare 1x2</option>
+            <option value="direct">{hpDirect ? "☑" : "☐"} 직접설정 (화면에서 직접 구성)</option>
+            {hpDirect && <option value="hpsave">💾 현재 화면을 프로토콜로 저장…</option>}
           </select>
           <div style={{ display: "flex", gap: 2 }}>
             <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
@@ -3805,6 +3866,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         }>
           <SettingsModal role={role} onClose={() => setSettingsOpen(false)} />
         </Suspense>
+      )}
+      {/* 직접설정 저장 — 지금 화면 구성을 행잉 프로토콜로 등록 */}
+      {hpSaveCap && (
+        <HpSaveDialog capture={hpSaveCap} study={exams[activeExam]?.d ?? detail}
+                      onClose={() => setHpSaveCap(null)}
+                      onSaved={(rules, saved) => {
+                        setHpRules(rules); setHpName(saved.name); setHpDirect(false);
+                        say(`행잉 프로토콜 '${saved.name}' 저장됨 — 설정>행잉(HP)에서 편집할 수 있습니다`);
+                      }} />
       )}
     </div>
   );
