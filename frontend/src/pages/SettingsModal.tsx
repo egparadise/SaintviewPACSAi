@@ -628,7 +628,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
       {/* ⚠ 최대화 시 창이 화면 밖으로 나가지 않도록 — 왼쪽 Refresh 버튼 폭까지 합쳐 100vw 안에 둔다.
           (창을 98vw 로 고정하면 버튼 폭만큼 넘쳐 좌우가 잘린다) */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8,
-                    maxWidth: "100vw", padding: "0 6px", boxSizing: "border-box" }}>
+                    // ⚠ 바깥이 grid+placeItems:center 라 기본은 내용 폭(shrink-to-fit)이다 —
+                    //    최대화일 때는 행 자체에 100vw 를 줘야 창이 화면을 채운다.
+                    ...(maxed ? { width: "100vw" } : { maxWidth: "100vw" }),
+                    padding: "0 6px", boxSizing: "border-box" }}>
       {/* 설정 창 왼쪽 Refresh — 저장 후 전체 새로고침으로 적용값을 즉시 확인 */}
       <button title="모든 설정을 저장하고 화면을 새로고침 — 적용된 값을 바로 확인합니다"
               onClick={async () => { await save(); window.location.reload(); }}
@@ -2246,7 +2249,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 monitorCfg={{ screens: monitorSel, worklist: wlMon, report: rptMon }}
                 onChange={async (next) => {
                   setHpRules(next);
-                  await api.putSetting("viewer.hp", { rules: next }, "user");
+                  // ⚠ 뷰어의 '직접설정' 이 같은 키에 규칙을 덧붙인다 — 화면 로드 시점 스냅샷으로
+                  //    덮어쓰면 그 사이 추가된 규칙이 사라진다. 저장 직전 서버 값과 합친다.
+                  const cur = await api.getSetting("viewer.hp").catch(() => ({ value: {} as Record<string, unknown> }));
+                  const live = (cur.value as { rules?: HpRule[] }).rules ?? [];
+                  const ids = new Set(next.map((r) => r.id));
+                  const merged = [...next, ...live.filter((r) => !ids.has(r.id))];
+                  setHpRules(merged);
+                  await api.putSetting("viewer.hp", { rules: merged }, "user");
                   setSaved("행잉 프로토콜 저장됨 — 왼쪽 ⟳ Refresh 후 뷰어 재오픈 시 적용");
                 }}
               />
@@ -2542,7 +2552,11 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
     if (!draft.modality) { window.alert("장비를 선택하세요"); return; }
     // viewer 디스플레이 그리드를 하위호환 s(Series 분할)로 반영 → 기존 applyHp 적용
     const vd = (draft.displays ?? []).find((d) => d.role === "viewer");
-    const clean: HpRule = { ...draft, name: draft.name.trim(), s: vd ? { ...vd.grid } : draft.s };
+    // 뷰어는 하위호환 s/i 를 읽으므로 첫 viewer 디스플레이의 분할을 함께 반영한다
+    // (이게 없으면 디스플레이별 Image 분할 픽커가 저장돼도 화면에 아무 영향이 없다)
+    const clean: HpRule = { ...draft, name: draft.name.trim(),
+                            s: vd ? { ...vd.grid } : draft.s,
+                            i: vd?.image ? { ...vd.image } : draft.i };
     void onChange(rules.map((r) => (r.id === clean.id ? clean : r)));
     setDraft(clean); setDirty(false);
   };

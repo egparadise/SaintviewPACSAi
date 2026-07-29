@@ -82,8 +82,15 @@ def register_study(
     institution: str = "",
     referring_physician: str = "",
     department: str = "",
+    # 행잉 프로토콜(HP) 부위 매칭 대상 — 장비·기관마다 부위가 들어오는 태그가 다르다
+    protocol_name: str = "",
+    procedure_code: str = "",
+    procedure_desc: str = "",
+    step_desc: str = "",
     source_aet: str = "",
     orthanc_id: str = "",
+    # 병원 명시 귀속(모바일 촬영 등 AET 로 판정할 수 없는 경로). 없으면 AET→장비→병원 자동 판정
+    hospital_id: int | None = None,
     series: list[dict] | None = None,
 ) -> Study:
     """검사 등록(수신 동기화·하네스 공용). 이미 있으면 카운트만 갱신."""
@@ -104,10 +111,14 @@ def register_study(
         institution=institution,
         referring_physician=referring_physician,
         department=department,
+        protocol_name=(protocol_name or "")[:128],
+        procedure_code=(procedure_code or "")[:128],
+        procedure_desc=(procedure_desc or "")[:256],
+        step_desc=(step_desc or "")[:256],
         source_aet=source_aet,
         orthanc_id=orthanc_id,
         # 경량 테넌시: 수신 AET → 등록 장비 → 병원으로 자동 귀속
-        hospital_id=_resolve_hospital_id(db, source_aet),
+        hospital_id=hospital_id if hospital_id is not None else _resolve_hospital_id(db, source_aet),
         status="received",
     )
     db.add(study)

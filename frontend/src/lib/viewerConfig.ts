@@ -134,7 +134,10 @@ export const HP_SLOT_SOURCES: { k: HpSlotSource; label: string }[] = [
 export function hpBodyPartHaystack(
   study: Record<string, unknown>, sources?: string[], extra: string[] = [],
 ): string {
-  const keys = sources && sources.length ? sources : HP_BP_SOURCE_DEFAULT;
+  // ⚠ 예전 규칙에는 bp_sources 가 없다 — 그때 판정은 body_part 하나뿐이었으므로
+  //    기본값을 넓히면 기존 규칙이 갑자기 더 많은 검사에 걸린다. 미지정은 예전 그대로 둔다.
+  //    (새로 만드는 규칙은 편집기·저장 다이얼로그가 HP_BP_SOURCE_DEFAULT 를 채워 준다)
+  const keys = sources && sources.length ? sources : ["body_part"];
   const vals = keys.map((k) => (k === "series_desc" ? extra.join(" ") : String(study[k] ?? "")));
   return vals.join(" ").toUpperCase();
 }

@@ -508,6 +508,9 @@ async def import_dicom(
                 institution=tags.get("InstitutionName", ""),
                 referring_physician=str(tags.get("ReferringPhysicianName", "")),
                 department=tags.get("InstitutionalDepartmentName", ""),
+                protocol_name=tags.get("ProtocolName", ""),
+                procedure_desc=tags.get("RequestedProcedureDescription", ""),
+                step_desc=tags.get("PerformedProcedureStepDescription", ""),
                 source_aet="IMPORT",
                 orthanc_id=sid,
             )

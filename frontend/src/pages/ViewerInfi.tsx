@@ -437,6 +437,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   const [hpName, setHpName] = useState("기본");
   // 직접설정 — 화면을 자유롭게 구성한 뒤 프로토콜로 등록(T-View·SaintView 동일)
   const [hpDirect, setHpDirect] = useState(false);
+  // 검사 오픈 시 자동 적용된 규칙 — 페인이 만들어진 뒤 칸별 영상 시점(sources)을 적용하려고 보관
+  const hpPendingRef = useRef<HpRule | null>(null);
   const [hpSaveCap, setHpSaveCap] = useState<HpCapture | null>(null);
   // IN-2 ⑦: OHIF 게이트(viewer.prefs.ohif_enabled — 켠 계정만 '기타' 구획에 버튼 노출)
   const [ohifOn, setOhifOn] = useState(false);
@@ -609,7 +611,11 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       setHpRules(rules);
       // '가장 우선 적용' 규칙 먼저 → 없으면 등록 순서. 부위는 규칙이 고른 DICOM 필드에서 찾는다.
       // ('Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외 — 행잉 콤보에서 수동 적용)
-      const hpMatch = hpPickRule(rules, detail as unknown as Record<string, unknown>);
+      // Series Description 을 부위 검색 대상으로 고른 규칙을 위해 시리즈 설명도 함께 넘긴다
+      const sdescs = list.flatMap((e) => e.series.map((x) => x.series_desc || ""));
+      const hpMatch = hpPickRule(rules, detail as unknown as Record<string, unknown>, sdescs);
+      hpPendingRef.current = hpMatch;   // 페인 생성 후 칸별 영상 시점을 적용(아래 effect)
+
       // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
       if (keySops?.length) {
         const prim = list.find((e) => e.d.id === detail.id);
@@ -879,10 +885,28 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       try {
         const tr = await api.seriesTree(hit.id);
         const s0 = tr.series[0];
-        if (s0) upd(k, { ...initPane(tr.study_uid), series: s0, index: Math.floor(s0.instances.length / 2) });
+        if (!s0) continue;
+        // ⚠ 페인 오버레이는 exams 에서 studyUid 로 검사를 찾고, 없으면 **현재 검사**로 폴백한다 —
+        //    등록하지 않으면 과거검사 페인에 현재 환자 이름이 찍힌다(오판독 위험).
+        if (!exams.some((x) => x.d.id === hit.id)) {
+          try {
+            const d = await api.study(hit.id);
+            setExams((es) => (es.some((x) => x.d.id === hit.id) ? es : [...es, { d, series: imgOnly(tr.series) }]));
+          } catch { /* 메타 실패해도 영상은 띄운다 */ }
+        }
+        upd(k, { ...initPane(tr.study_uid), series: s0, index: Math.floor(s0.instances.length / 2) });
       } catch { /* 개별 실패는 그 칸만 비움 */ }
     }
   };
+
+  // 검사 오픈 자동 적용분의 칸별 영상 시점 — 페인이 만들어진 뒤에 실행해야 배치가 남는다
+  useEffect(() => {
+    const r = hpPendingRef.current;
+    if (!r || !panes.length || !panes[0]?.series) return;
+    hpPendingRef.current = null;
+    void applyHpSources(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panes.length, detail.id]);
 
   const applyHpIn = (rule: HpRule) => {
     const vg = rule.displays?.find((d) => d.role === "viewer")?.grid ?? rule.s;

@@ -485,6 +485,7 @@ def _recover_kr(s: str | None) -> str | None:
 class BackfillHpTagsBody(BaseModel):
     dry_run: bool = True   # true=변경 없이 대상 건수만 반환
     limit: int = 2000      # 한 번에 처리할 최대 검사 수
+    offset: int = 0        # 이어서 처리(응답의 next_offset 을 넣는다)
 
 
 @router.post("/backfill-hp-tags")
@@ -497,43 +498,68 @@ def backfill_hp_tags(body: BackfillHpTagsBody, db: Session = Depends(get_db),
     Orthanc 에서 해당 태그만 다시 읽어 채운다(값이 이미 있는 검사는 건너뛴다 — 멱등).
     """
     from app.api.hospitals import _is_system_admin
-    from app.dicom.orthanc import OrthancClient, _flat_code
+    from app.dicom.orthanc import OrthancClient, _flat_code, client_for_hospital
 
     if not _is_system_admin(user):
         raise HTTPException(status_code=403, detail="시스템 관리자 전용 기능입니다 (전 병원 데이터 스캔)")
 
+    # ⚠ 컬럼이 _sync_columns 로 추가된 환경(개발 SQLite)은 기존 행이 NULL 이라
+    #    == "" 만 보면 대상이 0건이 된다 — NULL 도 함께 잡는다.
+    def _blank(col):
+        return (col.is_(None)) | (col == "")
+
+    empty = (
+        _blank(Study.protocol_name)
+        & _blank(Study.procedure_code)
+        & _blank(Study.procedure_desc)
+        & _blank(Study.step_desc)
+    )
+    if body.dry_run:
+        n = db.query(Study).filter(Study.orthanc_id != "").filter(empty).count()
+        return {"ok": True, "dry_run": True, "candidates": n}
+
+    # offset 으로 넘겨 가며 처리 — '태그가 원래 없는 검사'는 채워도 계속 비어 있어
+    # 매번 앞부분만 다시 잡히면 뒤쪽 검사에 영원히 도달하지 못한다.
     rows = (
         db.query(Study)
         .filter(Study.orthanc_id != "")
-        .filter(
-            (Study.protocol_name == "")
-            & (Study.procedure_code == "")
-            & (Study.procedure_desc == "")
-            & (Study.step_desc == "")
-        )
+        .filter(empty)
+        .order_by(Study.id)
+        .offset(max(0, body.offset))
         .limit(max(1, min(body.limit, 5000)))
         .all()
     )
-    if body.dry_run:
-        return {"ok": True, "dry_run": True, "candidates": len(rows)}
 
-    client = OrthancClient()
+    # 병원별 Orthanc 컨테이너에 있는 검사는 공용 클라이언트로 못 읽는다 — 병원별로 나눠 조회
+    clients: dict[int | None, object] = {}
+
+    def _client_for(hid: int | None):
+        if hid not in clients:
+            try:
+                clients[hid] = client_for_hospital(db, hid) if hid else OrthancClient()
+            except Exception:
+                clients[hid] = OrthancClient()
+        return clients[hid]
+
     updated = failed = 0
-    for st in rows:
+    for i, st in enumerate(rows, 1):
         try:
             # study_metadata 는 RequestedTags 를 MainDicomTags 에 합쳐 준다(동기화 경로와 같은 자리)
-            meta = client.study_metadata(st.orthanc_id) or {}
+            meta = _client_for(st.hospital_id).study_metadata(st.orthanc_id) or {}
             tags = meta.get("MainDicomTags", {}) or {}
-            st.protocol_name = tags.get("ProtocolName", "") or ""
+            st.protocol_name = (tags.get("ProtocolName", "") or "")[:128]
             st.procedure_code = _flat_code(tags.get("ProcedureCodeSequence"))
-            st.procedure_desc = tags.get("RequestedProcedureDescription", "") or ""
-            st.step_desc = tags.get("PerformedProcedureStepDescription", "") or ""
+            st.procedure_desc = (tags.get("RequestedProcedureDescription", "") or "")[:256]
+            st.step_desc = (tags.get("PerformedProcedureStepDescription", "") or "")[:256]
             if any((st.protocol_name, st.procedure_code, st.procedure_desc, st.step_desc)):
                 updated += 1
         except Exception:   # 개별 검사 실패는 건너뛴다(Orthanc 에서 삭제된 검사 등)
             failed += 1
+        if i % 100 == 0:    # 중간 커밋 — 수천 건을 한 트랜잭션에 묶으면 실패 시 전량 소실
+            db.commit()
     db.commit()
-    return {"ok": True, "dry_run": False, "scanned": len(rows), "updated": updated, "failed": failed}
+    return {"ok": True, "dry_run": False, "scanned": len(rows), "updated": updated,
+            "failed": failed, "next_offset": body.offset + len(rows)}
 
 
 class RepairEncodingBody(BaseModel):

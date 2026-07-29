@@ -511,6 +511,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   const [series, setSeries] = useState<SeriesNode[]>([]);
+  const seriesRef = useRef<SeriesNode[]>([]);      // HP 매칭(Series Description 검색)에서 비동기로 읽는다
+  useEffect(() => { seriesRef.current = series; }, [series]);
   // 판독 도크가 보는 검사 — Exam 탭 전환 시 현재 보고 있는 검사를 따라간다(창의 주 검사 고정 아님)
   const [dockDetail, setDockDetail] = useState<StudyDetail>(detail);
   const fullDetailRef = useRef<Record<number, StudyDetail>>({});
@@ -891,7 +893,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   useEffect(() => { selAnnosRef.current = selAnnos; }, [selAnnos]);
   const [marquee, setMarquee] = useState<{ a: [number, number]; b: [number, number] } | null>(null);
   const marqueeRef = useRef<{ pid: string; rect: DOMRect; aspect: number; a: [number, number]; b: [number, number] } | null>(null);
-  const [refOn, setRefOn] = useState(false);
+  // Ref(Reference line) 버튼 = Scout 토글과 같은 기능 — 상태를 나누면 한쪽이 항상 참이라
+  // 다른 쪽 버튼이 눌러도 아무 변화가 없다(별도 refOn 상태였을 때의 실제 증상).
+  const refOn = !!xlink.scout;
+  const setRefOn = (f: (r: boolean) => boolean) => setXlink((x) => ({ ...x, scout: f(!!x.scout) }));
   // TY-2 이식 상태 — Spine Label 연번, Profile 그래프·2D Table 모달 (In Viewer 이식)
   const spineSeq = useRef<{ base: string; n: number }>({ base: "L", n: 1 });
   const [profileData, setProfileData] = useState<{ title: string; vals: number[] } | null>(null);
@@ -1039,7 +1044,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     // MG 는 전용 행잉(2D-MG 분할)이 우선 — HP 규칙이 1×1 등으로 덮으면 맞붙임이 죽는다
     if (cur.modality !== "MG") {
       if (LAYOUTS[key]) setLayout(key);
-      setImgLay({ r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) });
+      const il = { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) };
+      setImgLay(il);
+      // ⚠ imgLay 는 콤보 표시용 — 실제 적용은 페인별 il 이다. 이걸 빼면 저장→재적용 왕복이 깨진다.
+      setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pv]) => [k, {
+        ...pv, il, tz: undefined,
+        index: alignTileIndex(pv.index, il.r * il.c, pv.series?.instances.length ?? 0),
+      }])));
     }
     if (rule.wl !== undefined) {
       setPanes((prev) => Object.fromEntries(
@@ -1157,7 +1168,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setHpRules(rules);
       // '가장 우선 적용' 규칙 먼저 → 없으면 등록 순서. 부위는 규칙이 고른 DICOM 필드에서 찾는다.
       // ('Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외 — 메뉴로 수동 적용)
-      const m = hpPickRule(rules, detail as unknown as Record<string, unknown>);
+      // Series Description 을 부위 검색 대상으로 고른 규칙을 위해 시리즈 설명도 함께 넘긴다
+      // (시리즈 로드가 아직이면 빈 배열 — 그때는 그 항목만 매칭에 기여하지 않는다)
+      const m = hpPickRule(rules, detail as unknown as Record<string, unknown>,
+                           seriesRef.current.map((x) => x.series_desc || ""));
       if (m) applyHp(m);
     }).catch(() => {});
   }, [detail.modality, detail.body_part, detail.study_desc, applyHp]);
@@ -1657,9 +1671,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       return d <= 7 ? "w1" : d <= 30 ? "m1" : d <= 365 ? "y1" : "prior";
     });
     const ap = panes[activePane];
+    // 파고들기(tz) 중이면 화면은 1×1 이지만 사용자가 정한 분할은 tz 에 남아 있다 — 그쪽을 기록한다
+    const apIl = ap?.tz?.il ?? ap?.il ?? { r: 1, c: 1 };
     return {
       s: { r: L.rows, c: L.cols },
-      i: { r: ap?.il?.r ?? 1, c: ap?.il?.c ?? 1 },
+      i: { r: apIl.r, c: apIl.c },
       wl: ap?.wl ?? "",
       xlink: { ...xlink },
       sources,
@@ -1677,6 +1693,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const s = tree.series[0];
         if (!s) continue;
         addOpenTab(examId, tree.uid);
+        // ⚠ 페인 오버레이는 studyMeta[p.studyUid] 가 없으면 **주 검사**로 폴백한다 —
+        //    등록하지 않으면 과거검사 페인에 현재 환자 이름이 찍힌다(오판독 위험).
+        ensureMeta(examId, tree.uid);
         patch(pid, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
       } catch { /* 개별 실패는 그 칸만 비움 — 나머지 배치는 계속 */ }
     }
@@ -2939,7 +2958,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     //                지금 스크롤 중인 이미지는 색·굵기를 달리하고 "현재/전체" 라벨을 붙인다.
     //   crosslink  : 위 선이 없는 페인(기준 자신·평행 평면)에 다른 페인 현재 위치를 축별 1개
     const refSegs: { seg: [number, number][]; current: boolean; cross?: boolean; label?: string }[] = [];
-    const scoutOn = refOn || xlink.scout || xlink.all_lines;
+    const scoutOn = xlink.scout || xlink.all_lines;   // Ref 버튼은 xlink.scout 자체를 토글한다
     if (scoutOn && pid !== activePane) {
       const act = panes[activePane];
       const actInst = act.series?.instances[act.index];
@@ -4660,9 +4679,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
       {prefs.paletteSide === "top" && saintBar}
       {prefs.paletteSide === "top" && palette}
-      {!paletteOpen && (prefs.paletteSide === "top" || prefs.paletteSide === "bottom") && (
-        <ToolsHandle dir="down" onClick={() => setPaletteOpen(true)} />
-      )}
+      {!paletteOpen && prefs.paletteSide === "top" && <ToolsHandle dir="down" onClick={() => setPaletteOpen(true)} />}
       {prefs.thumbSide === "top" && thumbs}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
@@ -4784,6 +4801,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {prefs.thumbSide === "bottom" && thumbs}
       {prefs.paletteSide === "bottom" && palette}
       {prefs.paletteSide === "bottom" && saintBar}
+      {!paletteOpen && prefs.paletteSide === "bottom" && <ToolsHandle dir="down" onClick={() => setPaletteOpen(true)} />}
       {/* 휴대폰 촬영 QR 다이얼로그 */}
       {qrCap && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 600 }}
