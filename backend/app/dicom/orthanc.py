@@ -56,7 +56,7 @@ class OrthancClient:
         # ModalitiesInStudy·부서는 requestedTags로 요청해야 채워짐
         r = self._client.get(
             f"/studies/{orthanc_study_id}",
-            params={"requestedTags": "ModalitiesInStudy;InstitutionalDepartmentName"},
+            params={"requestedTags": "ModalitiesInStudy;InstitutionalDepartmentName";ProtocolName;RequestedProcedureDescription;PerformedProcedureStepDescription"},
         )
         r.raise_for_status()
         data = r.json()

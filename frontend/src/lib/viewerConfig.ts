@@ -85,7 +85,49 @@ export interface HpDisplay {
   resolution: string;     // 정보용 ("2560 * 1080 (100%)")
   grid: { r: number; c: number };   // viewer 그리드(Series 분할)
   cells: (number | null)[];         // 셀별 시리즈 순번(1-base, null=자동) — 길이 r*c
+  /** 이 모니터의 Image 분할(페인 내 타일). 없으면 규칙의 i 를 쓴다 */
+  image?: { r: number; c: number };
+  /** 셀별로 어떤 시점의 영상을 띄울지 — 길이 r*c(없으면 전부 current) */
+  sources?: HpSlotSource[];
+  /** source="range" 인 셀의 기간(일). from~to 일 전 사이의 검사 */
+  range?: { from: number; to: number };
 }
+
+/* ── 행잉 프로토콜 확장 정의 ────────────────────────────────────────────────
+   장비 목록은 고정이 아니다 — 현장에서 쓰는 장비를 추가할 수 있다(설정에서 직접 입력). */
+export const HP_MODALITIES = ["DX", "DR", "CR", "MG", "US", "CT", "MR", "XA", "NM", "PT", "OT"];
+
+/** Body Part 를 찾을 DICOM 필드 — 장비/기관마다 부위를 넣는 자리가 다르다.
+ *  선택한 필드들의 값에서 부위 문자열을 **포함 검색**한다(대소문자 무시). */
+export const HP_BP_SOURCES: { key: string; label: string; tag: string }[] = [
+  { key: "body_part", label: "Body Part Examined", tag: "0018,0015" },
+  { key: "study_desc", label: "Study Description", tag: "0008,1030" },
+  { key: "protocol_name", label: "Protocol Name", tag: "0018,1030" },
+  { key: "procedure_code", label: "Procedure Code", tag: "0008,1032" },
+  { key: "procedure_desc", label: "Requested Procedure Description", tag: "0032,1060" },
+  { key: "step_desc", label: "Performed Procedure Step Description", tag: "0040,0254" },
+  { key: "series_desc", label: "Series Description", tag: "0008,103E" },
+];
+export const HP_BP_SOURCE_DEFAULT = ["body_part", "study_desc"];
+
+/** 이 자리에 띄울 영상 — 현재 검사 또는 과거검사를 시점으로 고른다 */
+export type HpSlotSource =
+  | "current"    // 현재(방금 연) 검사
+  | "prior"      // 바로 이전 영상
+  | "w1"         // 1주 내
+  | "m1"         // 1개월 내
+  | "y1"         // 1년 내
+  | "range"      // 기간 직접 지정(days_from~days_to)
+  | "vol3d";     // 3D(MPR/MIP) 볼륨
+export const HP_SLOT_SOURCES: { k: HpSlotSource; label: string }[] = [
+  { k: "current", label: "현재 검사" },
+  { k: "prior", label: "바로 이전 영상" },
+  { k: "w1", label: "1주 내" },
+  { k: "m1", label: "1개월 내" },
+  { k: "y1", label: "1년 내" },
+  { k: "range", label: "기간 지정" },
+  { k: "vol3d", label: "3D 영상(MPR/MIP)" },
+];
 
 /** 행잉 프로토콜 규칙 (Setting>행잉(HP)) — 장비×부위×Projection → 레이아웃·옵션·디스플레이.
  *  s/i/wl 은 하위호환(단일 뷰어 Series/Image 분할). displays 가 있으면 viewer 디스플레이가 우선. */
@@ -106,6 +148,10 @@ export interface HpRule {
   cross_link?: boolean;         // Cross Link(교차 위치 동기)
   scout_image?: boolean;        // Scout 이미지(교차선) 사용
   displays?: HpDisplay[];       // 디스플레이 레이아웃(멀티모니터)
+  /** Body Part 를 찾을 DICOM 필드들(빈값=기본: Body Part Examined + Study Description) */
+  bp_sources?: string[];
+  /** 가장 우선 적용 — 켜면 다른 판정보다 먼저 이 규칙을 감지해 적용한다. 기본 꺼짐 */
+  priority?: boolean;
 }
 
 /** HP 디스플레이 기본값 — 그림 등가(뷰어 1 + 워크리스트+판독 1) */

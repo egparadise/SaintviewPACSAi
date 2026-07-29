@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "suite-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:/Project/SaintviewViewerSuite/frontend",
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "5185",
+        "--strictPort"
+      ],
+      "port": 5185,
+      "url": "https://localhost:5185"
+    }
+  ]
+}
