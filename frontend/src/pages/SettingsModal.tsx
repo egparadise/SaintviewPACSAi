@@ -2242,6 +2242,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             {page === "hp" && (
               <HpProtocolEditor
                 rules={hpRules}
+                monitors={monitors}
+                monitorCfg={{ screens: monitorSel, worklist: wlMon, report: rptMon }}
                 onChange={async (next) => {
                   setHpRules(next);
                   await api.putSetting("viewer.hp", { rules: next }, "user");
@@ -2494,9 +2496,13 @@ const HP_OPTIONS: { key: keyof HpRule; label: string; desc: string }[] = [
   { key: "priority", label: "가장 우선 적용", desc: "다른 규칙보다 먼저 이 규칙을 감지해 적용합니다(기본 꺼짐)" },
 ];
 
-function HpProtocolEditor({ rules, onChange }: {
+function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
   rules: HpRule[];
   onChange: (next: HpRule[]) => void | Promise<void>;
+  /** 설정>모니터에서 감지된 모니터 목록(해상도 표기용) */
+  monitors?: { label: string; w: number; h: number; primary: boolean }[];
+  /** 설정>모니터에서 지정한 역할 — 뷰어(다중) / 워크리스트 / 판독 */
+  monitorCfg?: { screens: number[]; worklist: number | null; report: number | null };
 }) {
   const [selId, setSelId] = useState<string | null>(null);
   const [draft, setDraft] = useState<HpRule | null>(null);
@@ -2673,6 +2679,7 @@ function HpProtocolEditor({ rules, onChange }: {
               {/* 디스플레이 레이아웃 */}
               {secHead("디스플레이 레이아웃")}
               <HpDisplayEditor displays={draft.displays ?? DEFAULT_HP_DISPLAYS()}
+                               monitors={monitors} monitorCfg={monitorCfg}
                                onChange={(ds) => upd({ displays: ds })} />
             </div>
 
@@ -2690,10 +2697,48 @@ function HpProtocolEditor({ rules, onChange }: {
 }
 
 /* ── HP 디스플레이(모니터) 레이아웃 편집기 — 모니터별 역할·해상도·viewer 그리드(셀별 시리즈) ── */
-function HpDisplayEditor({ displays, onChange }: {
+function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
   displays: HpDisplay[];
   onChange: (ds: HpDisplay[]) => void;
+  monitors?: { label: string; w: number; h: number; primary: boolean }[];
+  monitorCfg?: { screens: number[]; worklist: number | null; report: number | null };
 }) {
+  /** 설정>모니터에서 지정한 구성을 그대로 가져온다 — 뷰어 모니터는 viewer, 워크리스트/판독은 그 역할로.
+   *  기존 디스플레이의 분할·셀 배정은 같은 자리(모니터 번호)끼리 이어받아 다시 짜지 않아도 된다. */
+  const importFromMonitors = () => {
+    const cfg = monitorCfg;
+    if (!cfg || (!cfg.screens.length && cfg.worklist == null && cfg.report == null)) {
+      window.alert("설정 ▸ 모니터(Display) 에서 모니터를 먼저 감지·지정하세요.");
+      return;
+    }
+    const resOf = (i: number) => {
+      const m = monitors?.[i];
+      return m ? `${m.w} * ${m.h}${m.primary ? " (주)" : ""}` : "";
+    };
+    const prevViewer = displays.filter((d) => d.role === "viewer");
+    const next: HpDisplay[] = [];
+    cfg.screens.forEach((idx, k) => {
+      const old = prevViewer[k];
+      next.push({
+        id: `m${idx}`, role: "viewer", label: `${idx + 1}`, resolution: resOf(idx),
+        grid: old?.grid ?? { r: 1, c: 1 },
+        cells: old?.cells ?? [null],
+        image: old?.image ?? { r: 1, c: 1 },
+        sources: old?.sources ?? ["current"],
+        range: old?.range,
+      });
+    });
+    const addRole = (idx: number | null) => {
+      if (idx == null || cfg.screens.includes(idx)) return;   // 뷰어와 겹치면 중복 생성하지 않는다
+      next.push({ id: `m${idx}`, role: "worklist_report", label: `${idx + 1}`,
+                  resolution: resOf(idx), grid: { r: 1, c: 1 }, cells: [null] });
+    };
+    addRole(cfg.worklist);
+    addRole(cfg.report);
+    if (!next.length) { window.alert("가져올 모니터가 없습니다."); return; }
+    onChange(next);
+  };
+
   const patch = (id: string, p: Partial<HpDisplay>) => onChange(displays.map((d) => (d.id === id ? { ...d, ...p } : d)));
   const setGrid = (d: HpDisplay, grid: { r: number; c: number }) => {
     const n = grid.r * grid.c;
@@ -2722,6 +2767,19 @@ function HpDisplayEditor({ displays, onChange }: {
 
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-canvas)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <button onClick={importFromMonitors}
+                title="설정 ▸ 모니터(Display) 에서 지정한 모니터 구성을 그대로 가져옵니다(분할·셀 배정은 유지)">
+          ⬇ 모니터 설정에서 가져오기
+        </button>
+        <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+          {monitorCfg?.screens.length
+            ? `현재 지정 — 뷰어 ${monitorCfg.screens.map((i) => i + 1).join(",")}번`
+              + (monitorCfg.worklist != null ? ` · 워크리스트 ${monitorCfg.worklist + 1}번` : "")
+              + (monitorCfg.report != null ? ` · 판독 ${monitorCfg.report + 1}번` : "")
+            : "설정 ▸ 모니터(Display) 에서 모니터를 지정하면 여기로 가져올 수 있습니다"}
+        </span>
+      </div>
       <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 4 }}>
         {displays.map((d) => {
           const viewer = d.role === "viewer";
