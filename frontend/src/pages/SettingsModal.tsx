@@ -2493,6 +2493,7 @@ const HP_OPTIONS: { key: keyof HpRule; label: string; desc: string }[] = [
   { key: "full_scroll_sync", label: "전체 스크롤 동기화", desc: "페인 스크롤을 함께 이동" },
   { key: "cross_link", label: "Cross Link 사용", desc: "교차 해부학 위치 동기(다른 시리즈)" },
   { key: "scout_image", label: "Scout 이미지 사용", desc: "교차선(Scout) 표시" },
+  { key: "all_lines", label: "All Lines 사용", desc: "기준 시리즈 전체의 교차선을 표시합니다(현재 이미지는 강조)" },
   { key: "priority", label: "가장 우선 적용", desc: "다른 규칙보다 먼저 이 규칙을 감지해 적용합니다(기본 꺼짐)" },
 ];
 

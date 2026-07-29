@@ -230,6 +230,7 @@ export function buildHpRule(
     full_scroll_sync: !!x.sync_other,
     cross_link: !!x.crosslink,
     scout_image: !!x.scout,
+    all_lines: !!x.all_lines,
     displays: [{
       id: "d1", role: "viewer", label: "1", resolution: "",
       grid: { r: cap.s.r, c: cap.s.c },
@@ -258,6 +259,7 @@ export interface HpRule {
   full_scroll_sync?: boolean;   // 전체 스크롤 동기화
   cross_link?: boolean;         // Cross Link(교차 위치 동기)
   scout_image?: boolean;        // Scout 이미지(교차선) 사용
+  all_lines?: boolean;          // All Lines(기준 시리즈 전체 교차선) 사용
   displays?: HpDisplay[];       // 디스플레이 레이아웃(멀티모니터)
   /** Body Part 를 찾을 DICOM 필드들(빈값=기본: Body Part Examined + Study Description) */
   bp_sources?: string[];

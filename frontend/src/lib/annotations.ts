@@ -154,9 +154,15 @@ export function refLineOn(src: InstanceNode, dst: InstanceNode): [number, number
   if (src.orientation?.length !== 6 || src.position?.length !== 3) return null;
   if (dst.orientation?.length !== 6 || dst.position?.length !== 3) return null;
   if (!dst.cols || !dst.rows) return null;
+  // PixelSpacing 이 없으면 그리지 않는다 — 1mm 로 가정하면 기울기가 틀린 선을 그린다(I-View 동일).
+  if (dst.pixel_spacing?.length !== 2) return null;
   const n = cross(src.orientation.slice(0, 3), src.orientation.slice(3, 6)); // src 법선
   const rD = dst.orientation.slice(0, 3), cD = dst.orientation.slice(3, 6);
-  const psD = dst.pixel_spacing?.length === 2 ? dst.pixel_spacing : [1, 1];
+  const psD = dst.pixel_spacing;
+  // 준평행(약 2.6° 이내)도 배제 — 거의 같은 평면끼리는 교차선이 영상 밖으로 튀거나 요동친다(I-View 동일)
+  const nD = cross(rD, cD);
+  const ln = Math.hypot(n[0], n[1], n[2]) || 1, lnD = Math.hypot(nD[0], nD[1], nD[2]) || 1;
+  if (Math.abs(dot(n, nD) / (ln * lnD)) > 0.999) return null;
   // dst 픽셀 (i=col, j=row): P = oD + rD·i·ps[1] + cD·j·ps[0] — 평면식 n·(P−oS)=0
   const a = dot(n, rD) * psD[1];
   const b = dot(n, cD) * psD[0];

@@ -673,6 +673,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     return off;
   }, []);
   const [activePane, setActivePane] = useState("p0");
+  // 분할이 줄어 활성 페인이 화면 밖으로 나가면 마지막 보이는 페인으로 보정.
+  // (panes 는 p0~p99 를 상시 보유하므로 보정하지 않으면 안 보이는 페인이 Scout·스크롤 기준이 된다)
+  useEffect(() => {
+    const n = LAYOUTS[layout]?.count ?? 1;
+    const idx = PANE_IDS.indexOf(activePane);
+    if (idx >= n) setActivePane(PANE_IDS[n - 1]);
+  }, [layout, activePane]);
   const [panes, setPanes] = useState<Record<string, PaneState>>(
     Object.fromEntries(PANE_IDS.map((p) => [p, initPane(detail.study_uid)])),
   );
@@ -1061,6 +1068,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       auto_sync: rule.full_link ?? x.auto_sync,
       sync_other: rule.full_scroll_sync ?? x.sync_other,
       scout: rule.scout_image ?? x.scout,
+      all_lines: rule.all_lines ?? x.all_lines,
     }));
     setHpName(rule.name);
   }, []);
@@ -1836,7 +1844,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         if ((xlink.auto_sync && same) || (xlink.sync_other && !same)) targets.add(v);
       });
       const sel = selPanesRef.current;
-      if (sel.size > 1 && sel.has(pid)) sel.forEach((v) => { if (v !== pid) targets.add(v); });
+      // 다중선택 연동도 Crosslink 마스터를 따른다 — 같은 파일 targetsOf(W/L 등)와 같은 게이트
+      if (xlink.crosslink && sel.size > 1 && sel.has(pid)) sel.forEach((v) => { if (v !== pid) targets.add(v); });
       // 3) 타깃 동기 — 듀얼모드: Spatial(DICOM 좌표 해부학적 최근접) 우선, 좌표 없으면 Index(1:1) 폴백
       targets.forEach((id) => {
         const tp = next[id];
@@ -2934,7 +2943,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     if (scoutOn && pid !== activePane) {
       const act = panes[activePane];
       const actInst = act.series?.instances[act.index];
-      if (act.series && actInst) {
+      // 같은 시리즈면 그리지 않는다 — I-View 와 같은 기준(3-plane localizer 처럼 한 시리즈에
+      // 여러 평면이 섞인 경우, 페인/SOP 비교만으로는 자기 시리즈 위에 자기 선을 그리게 된다)
+      if (act.series && actInst && act.series.series_uid !== p.series?.series_uid) {
         const total = act.series.instances.length;
         const srcs = xlink.all_lines ? act.series.instances : [actInst];
         srcs.forEach((si, k) => {
@@ -2946,8 +2957,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         });
       }
     }
-    // 상호 참조(십자) — Crosslink 마스터가 켜졌을 때만, 축이 겹치지 않는 페인 1개씩
-    if (!refSegs.length && xlink.crosslink) {
+    // 상호 참조(십자) — Crosslink 마스터가 켜졌을 때만, 축이 겹치지 않는 페인 1개씩.
+    // ⚠ Scout·All Lines 를 모두 끄면 교차선은 하나도 그리지 않는다(I-View 의 이른 반환과 동일).
+    if (scoutOn && !refSegs.length && xlink.crosslink) {
       const seenS = new Set<string>([p.series?.series_uid ?? ""]);
       const usedAxis = new Set<number>();
       const tg0 = geomOf(inst);
@@ -3090,12 +3102,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
               <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color}
                     strokeWidth={fs * (r.current ? 0.09 : r.cross ? 0.07 : 0.045)}
                     opacity={r.current ? 1 : r.cross ? 0.85 : 0.6} />
-              {r.label && (
-                <text x={Math.min(Math.max(ex - fs * 2.4, fs * 0.2), cols - fs * 2.6)}
-                      y={Math.min(Math.max(ey - fs * 0.3, fs), rows - fs * 0.3)}
-                      fill={color} fontSize={fs * 0.8} fontWeight={700}
-                      style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: fs * 0.2 }}>{r.label}</text>
-              )}
+              {r.label && (() => {
+                // ⚠ 이 SVG 는 페인 변환(zoom·flip·rotate) 안에 있다 — 글자에 역변환을 걸어야
+                //    반전 시 거울 글자, 회전 시 눕는 글자, 확대 시 거대한 글자가 되지 않는다.
+                const z = p.zoom || 1;
+                const lx = Math.min(Math.max(ex - fs * 2.4, fs * 0.2), cols - fs * 2.6);
+                const ly = Math.min(Math.max(ey - fs * 0.3, fs), rows - fs * 0.3);
+                const inv = `translate(${lx},${ly}) rotate(${-(p.rot || 0)}) `
+                          + `scale(${(p.flipH ? -1 : 1) / z},${(p.flipV ? -1 : 1) / z})`;
+                return (
+                  <text transform={inv} x={0} y={0}
+                        fill={color} fontSize={fs * 0.8} fontWeight={700}
+                        style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: fs * 0.2 }}>{r.label}</text>
+                );
+              })()}
             </g>
           );
         })}

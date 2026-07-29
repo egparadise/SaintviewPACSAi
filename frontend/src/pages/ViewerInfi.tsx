@@ -682,6 +682,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
           auto_sync: hpMatch.full_link ?? x.auto_sync,
           sync_other: hpMatch.full_scroll_sync ?? x.sync_other,
           scout: hpMatch.scout_image ?? x.scout,
+        all_lines: hpMatch.all_lines ?? x.all_lines,
         }));
       }
       else if (defCfg?.s) { r = defCfg.s.r; c = defCfg.s.c; }
@@ -900,6 +901,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       auto_sync: rule.full_link ?? x.auto_sync,
       sync_other: rule.full_scroll_sync ?? x.sync_other,
       scout: rule.scout_image ?? x.scout,
+      all_lines: rule.all_lines ?? x.all_lines,
     }));
 void applyHpSources(rule);
     setHpName(rule.name);
