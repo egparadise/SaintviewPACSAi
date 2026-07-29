@@ -864,9 +864,10 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   /** HP 칸별 영상 시점 — current 가 아닌 칸에 해당 시점 과거검사를 띄운다(분할은 건드리지 않음) */
   const applyHpSources = async (rule: HpRule) => {
     const vd = rule.displays?.find((d) => d.role === "viewer");
-    const srcs = vd?.sources ?? [];
-    if (!srcs.some((v) => v && v !== "current")) return;
     const base = exams[activeExam]?.d ?? detail;
+    // MG 는 좌우 맞붙임 전제(페인당 1장·좌우 쌍)가 깨지므로 과거검사 자동 배치를 하지 않는다
+    const srcs = base.modality === "MG" ? [] : (vd?.sources ?? []);
+    if (!srcs.some((v) => v && v !== "current")) return;
     const used = new Set<number>();
     for (let k = 0; k < srcs.length; k++) {
       const src = srcs[k];

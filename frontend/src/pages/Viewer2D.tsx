@@ -515,6 +515,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [dockDetail, setDockDetail] = useState<StudyDetail>(detail);
   const fullDetailRef = useRef<Record<number, StudyDetail>>({});
   useEffect(() => { setDockDetail(detail); }, [detail]);   // 창의 주 검사가 바뀌면 도크도 초기화
+  // ⚠ applyHp 는 deps [] 라 값을 첫 렌더로 굳힌다 — 활성 Exam 기준 값은 ref 로 읽어야 한다
+  //    (안 그러면 Exam 전환 후 HP 적용이 '창을 처음 열 때의 검사' 기준으로 과거검사를 고른다)
+  const curDetailRef = useRef<StudyDetail>(detail);
+  useEffect(() => { curDetailRef.current = dockDetail; }, [dockDetail]);
   // 시리즈 페이지 — Series 분할보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음을 본다
   const [seriesPage, setSeriesPage] = useState(0);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
@@ -1024,8 +1028,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const vd = rule.displays?.find((d) => d.role === "viewer");
     const sg = vd?.grid ?? rule.s;
     const key = `${Math.min(sg.r, 10)}x${Math.min(sg.c, 10)}`;
+    const cur = curDetailRef.current;
     // MG 는 전용 행잉(2D-MG 분할)이 우선 — HP 규칙이 1×1 등으로 덮으면 맞붙임이 죽는다
-    if (detail.modality !== "MG") {
+    if (cur.modality !== "MG") {
       if (LAYOUTS[key]) setLayout(key);
       setImgLay({ r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) });
     }
@@ -1035,18 +1040,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     }
     // 칸별 영상 시점 — current 가 아닌 칸은 그 시점에 해당하는 과거검사를 찾아 그 페인에 띄운다.
     // (같은 과거검사가 두 칸에 겹치지 않도록 used 로 소진 처리)
-    const srcs = vd?.sources ?? [];
+    // MG 는 좌우 맞붙임 전제(페인당 1장·좌우 쌍)가 깨지므로 과거검사 자동 배치를 하지 않는다
+    const srcs = cur.modality === "MG" ? [] : (vd?.sources ?? []);
     if (srcs.some((v) => v && v !== "current")) {
       const used = new Set<number>();
       const plan: { pid: string; examId: number }[] = [];
       srcs.forEach((src, k) => {
         if (!src || src === "current" || src === "vol3d") return;
-        const hit = hpPickPrior(detail.related_exams ?? [], detail.study_date, src, vd?.range, used);
+        const hit = hpPickPrior(cur.related_exams ?? [], cur.study_date, src, vd?.range, used);
         if (!hit) return;
         used.add(hit.id);
         plan.push({ pid: PANE_IDS[k], examId: hit.id });
       });
-      if (plan.length) void loadPriorInto(plan);
+      if (plan.length) void loadPriorIntoRef.current(plan);
     }
     // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영, 미정의는 유지) — In-View 동일
     setXlink((x) => ({
@@ -1626,16 +1632,17 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const captureHp = (): HpCapture => {
     const L = LAYOUTS[layout];
     const ids = PANE_IDS.slice(0, L.count);
-    const rel = detail.related_exams ?? [];
+    const cur = dockDetail;                       // 활성 Exam 기준(창의 주 검사가 아니라)
+    const rel = cur.related_exams ?? [];
     const sources = ids.map((pid): HpSlotSource => {
       const p = panes[pid];
-      if (!p?.series || p.studyUid === detail.study_uid) return "current";
+      if (!p?.series || p.studyUid === cur.study_uid) return "current";
       const ex = rel.find((r) => r.study_uid === p.studyUid);
       if (!ex) return "current";
       // 경과일 → 가장 좁은 시점 구간으로 기록(1주 → 1개월 → 1년 → 바로 이전)
       const d = ((): number | null => {
         const f = (v: string) => (/^\d{8}$/.test(v) ? new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) : null);
-        const a0 = f(detail.study_date), b0 = f(ex.study_date);
+        const a0 = f(cur.study_date), b0 = f(ex.study_date);
         return a0 && b0 ? Math.round((a0.getTime() - b0.getTime()) / 86400000) : null;
       })();
       if (d == null || d < 0) return "prior";
@@ -1654,6 +1661,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
 
   /* HP 칸별 영상 시점 적용 — 계획한 (페인, 과거검사) 쌍을 그대로 채운다.
      loadPrior 와 달리 레이아웃을 바꾸지 않는다(분할은 이미 규칙이 정했다). */
+  const loadPriorIntoRef = useRef<(plan: { pid: string; examId: number }[]) => Promise<void>>(async () => {});
   const loadPriorInto = async (plan: { pid: string; examId: number }[]) => {
     for (const { pid, examId } of plan) {
       try {
@@ -1665,6 +1673,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       } catch { /* 개별 실패는 그 칸만 비움 — 나머지 배치는 계속 */ }
     }
   };
+
+  loadPriorIntoRef.current = loadPriorInto;   // applyHp(deps []) 가 항상 최신 함수를 쓰도록
 
   /* 과거검사 비교 로드(요청 5): related exam 클릭 → 활성 페인에 */
   const loadPrior = async (examId: number) => {
@@ -4893,7 +4903,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       )}
       {/* 직접설정 저장 — 지금 화면 구성을 행잉 프로토콜로 등록(설정>행잉 목록에 이어서 나온다) */}
       {hpSaveCap && (
-        <HpSaveDialog capture={hpSaveCap} study={detail}
+        <HpSaveDialog capture={hpSaveCap} study={dockDetail}
                       onClose={() => setHpSaveCap(null)}
                       onSaved={(rules, saved) => {
                         setHpRules(rules); setHpName(saved.name); setHpDirect(false);
