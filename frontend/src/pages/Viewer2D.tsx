@@ -155,13 +155,14 @@ const initPane = (studyUid: string): PaneState => ({
 });
 
 /* ── TY-3: Crosslink 5모드 — 기존 Link 단일 토글을 확장 (In IN_CROSSLINK_MODES 이식, 단일 선택형) ── */
-type XlinkMode = "off" | "auto_sync" | "sync_other" | "scout" | "all_lines";
+/** Crosslink 토글 — In-View 와 동일 구성(배타 모드가 아니라 독립 체크) */
+type XlinkMode = "crosslink" | "auto_sync" | "sync_other" | "scout" | "all_lines";
 const XLINK_MODES: { key: XlinkMode; label: string; desc: string }[] = [
-  { key: "off", label: "Link:Off", desc: "연동 없음" },
-  { key: "auto_sync", label: "AutoSync", desc: "같은 검사 페인 동기 스크롤" },
-  { key: "sync_other", label: "SyncOther", desc: "다른 검사(과거) 포함 전체 페인 동기 스크롤" },
-  { key: "scout", label: "Scout", desc: "활성 페인 현재 이미지의 교차선 표시 (기존 Ref 통합)" },
-  { key: "all_lines", label: "AllLines", desc: "활성 시리즈 전체 이미지의 교차선 표시" },
+  { key: "crosslink", label: "Crosslink", desc: "페인 간 연동 마스터 — 스크롤 동기·다중선택 연동의 게이트" },
+  { key: "auto_sync", label: "Auto Sync", desc: "같은 검사 페인끼리 동기 스크롤 (Crosslink 필요)" },
+  { key: "sync_other", label: "Sync With Other Exams", desc: "다른 검사(과거검사 포함) 페인까지 동기 스크롤 (Crosslink 필요)" },
+  { key: "scout", label: "Scout Line", desc: "기준(활성) 페인 현재 이미지의 교차선을 다른 페인에 표시" },
+  { key: "all_lines", label: "All Lines", desc: "기준 시리즈 전체 이미지의 교차선 표시 — 현재 스크롤 중인 선은 노랑·굵게+번호" },
 ];
 
 /* ── TY-3: 3D Cursor 기하 — DICOM Position/Orientation 평면 계산 (In geomOf 이식, 최소 부분) ── */
@@ -171,6 +172,11 @@ const vdot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const vcross = (a: V3, b: V3): V3 =>
   [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 interface Geom3 { pos: V3; row: V3; col: V3; rs: number; cs: number; n: V3 }
+/** 평면의 주축(0=Sagittal, 1=Coronal, 2=Axial) — 같은 축 평면끼리는 교차선이 의미 없다(In-View 동일) */
+function axisOf(g: Geom3): number {
+  const a = [Math.abs(g.n[0]), Math.abs(g.n[1]), Math.abs(g.n[2])];
+  return a.indexOf(Math.max(...a));
+}
 function geomOf(inst: InstanceNode): Geom3 | null {
   if (inst.position?.length !== 3 || inst.orientation?.length !== 6 || inst.pixel_spacing?.length !== 2) return null;
   const row = inst.orientation.slice(0, 3), col = inst.orientation.slice(3, 6);
@@ -664,9 +670,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     return n;
   });
   // TY-3(3): Crosslink 5모드 — 기존 syncScroll(Link 단일)을 확장. off/auto_sync/sync_other/scout/all_lines
-  const [xmode, setXmode] = useState<XlinkMode>("off");
-  const xmodeRef = useRef(xmode);
-  useEffect(() => { xmodeRef.current = xmode; }, [xmode]);
+  // In-View 기준으로 통일 — 배타 모드(xmode)가 아니라 **독립 토글**.
+  //   crosslink = 연동 마스터(스크롤 동기·다중선택 연동의 게이트)
+  //   auto_sync = 같은 검사 / sync_other = 다른 검사(과거 포함)
+  //   scout = 기준 이미지 1선 / all_lines = 기준 시리즈 전체 선(현재 이미지 강조)
+  const [xlink, setXlink] = useState<Record<string, boolean>>({ crosslink: true, auto_sync: true, scout: true });
+  const xlinkRef = useRef(xlink);
+  useEffect(() => { xlinkRef.current = xlink; }, [xlink]);
+  const setX = (k: string, v: boolean) => setXlink((x) => ({ ...x, [k]: v }));
   // 듀얼모드 Stack 동기 — true=Spatial(DICOM 좌표 해부학적 정합, Infinitt식), false=Index(1:1 인덱스, TY식). 'G' 로 토글.
   const [spatialSync, setSpatialSync] = useState(true);
   const spatialSyncRef = useRef(spatialSync);
@@ -906,7 +917,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const targetsOf = (pid: string): string[] => {
     // In Viewer 정합: 멀티 선택 연동 조작은 Crosslink 마스터(xmode≠off)일 때만 (In targetsOf 동일 게이트)
     const s = selPanesRef.current;
-    return xmodeRef.current !== "off" && s.size > 1 && s.has(pid) ? [...s] : [pid];
+    return xlinkRef.current.crosslink && s.size > 1 && s.has(pid) ? [...s] : [pid];
   };
 
   /* ── TY-3(1): 작업 히스토리 ◀◯▶ — 스냅샷 최대 50, Undo/초기화/Redo (In pushHist/histGo 이식) ── */
@@ -1009,10 +1020,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       setPanes((prev) => Object.fromEntries(
         Object.entries(prev).map(([k, p]) => [k, { ...p, wl: rule.wl ?? "" }])));
     }
-    // 옵션 → 단일 xmode 매핑(우선순위: cross_link>scout>scroll_sync>link). 켜진 옵션 없으면 유지.
-    const xm = rule.cross_link ? "all_lines" : rule.scout_image ? "scout"
-             : rule.full_scroll_sync ? "sync_other" : rule.full_link ? "auto_sync" : null;
-    if (xm) setXmode(xm);
+    // 옵션 → Crosslink/스크롤 동기/Scout (정의된 것만 반영, 미정의는 유지) — In-View 동일
+    setXlink((x) => ({
+      ...x,
+      crosslink: rule.cross_link ?? rule.full_link ?? x.crosslink,
+      auto_sync: rule.full_link ?? x.auto_sync,
+      sync_other: rule.full_scroll_sync ?? x.sync_other,
+      scout: rule.scout_image ?? x.scout,
+    }));
     setHpName(rule.name);
   }, []);
 
@@ -1592,7 +1607,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     } else {
       patch(activePane, { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
     }
-    setXmode("sync_other");
+    setXlink((x) => ({ ...x, crosslink: true, sync_other: true }));
     setStatus("비교 모드: 과거검사 로드 + 동기 스크롤 ON (SyncOther)");
   };
 
@@ -1700,7 +1715,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         patch(PANE_IDS[i + 1], { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
       } catch { /* 개별 실패 무시 */ }
     }
-    setXmode("sync_other");
+    setXlink((x) => ({ ...x, crosslink: true, sync_other: true }));
     setStatus(`Study With Open (ADD VIEW): Related ${take.length}건 함께 오픈`);
   };
   const loadStackMany = async (ids: number[]) => {
@@ -1732,8 +1747,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 2) 동기 타깃(마스터 제외): auto_sync=같은 검사, sync_other=전체(과거검사 포함), 멀티선택 연동
       const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
       const targets = new Set<string>();
-      if (xmode === "sync_other") vis.forEach((v) => { if (v !== pid) targets.add(v); });
-      else if (xmode === "auto_sync") vis.forEach((v) => { if (v !== pid && prev[v]?.studyUid === prev[pid]?.studyUid) targets.add(v); });
+      if (xlink.crosslink) vis.forEach((v) => {
+        if (v === pid) return;
+        const same = prev[v]?.studyUid === prev[pid]?.studyUid;
+        if ((xlink.auto_sync && same) || (xlink.sync_other && !same)) targets.add(v);
+      });
       const sel = selPanesRef.current;
       if (sel.size > 1 && sel.has(pid)) sel.forEach((v) => { if (v !== pid) targets.add(v); });
       // 3) 타깃 동기 — 듀얼모드: Spatial(DICOM 좌표 해부학적 최근접) 우선, 좌표 없으면 Index(1:1) 폴백
@@ -1749,7 +1767,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       });
       return next;
     });
-  }, [xmode, layout]);
+  }, [xlink, layout]);
 
   // ── 인접 슬라이스 프리페치 — 인덱스/시리즈가 바뀔 때만 진행 방향 앞 8·뒤 3장 선제 로드.
   //    (W/L·zoom 등 다른 페인 상태 변경에는 발동하지 않음 — 드래그 중 요청 폭주 방지) ──
@@ -2782,7 +2800,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         patch(PANE_IDS[i + 1], { ...initPane(tree.uid), series: s, index: Math.floor(s.instances.length / 2) });
       } catch { /* 개별 실패 무시 */ }
     }
-    setXmode("sync_other");
+    setXlink((x) => ({ ...x, crosslink: true, sync_other: true }));
     setStatus(`Compare — 과거검사 ${ids.length}건 비교 오픈 (SyncOther ON)`);
   };
   const openCompare = async () => {
@@ -2823,21 +2841,51 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const dr = draft && draft.pid === pid ? draft : null;
     // 교차선(Scout) — 기존 Ref 토글 + TY-3(3) Crosslink scout/all_lines 모드 통합.
     // scout/Ref=활성 페인 현재 이미지 1선, all_lines=활성 시리즈 전체(현재 이미지는 진하게)
-    const refSegs: { seg: [number, number][]; current: boolean }[] = [];
-    if ((refOn || xmode === "scout" || xmode === "all_lines") && pid !== activePane) {
+    // 교차선(Scout) — In-View 와 동일 규칙.
+    //   scout      : 기준(활성) 페인의 **현재 이미지** 절단선 1개
+    //   all_lines  : 기준 시리즈 **전체** 절단선(= 기준 뷰가 Axial 이면 Axial 전 슬라이스).
+    //                지금 스크롤 중인 이미지는 색·굵기를 달리하고 "현재/전체" 라벨을 붙인다.
+    //   crosslink  : 위 선이 없는 페인(기준 자신·평행 평면)에 다른 페인 현재 위치를 축별 1개
+    const refSegs: { seg: [number, number][]; current: boolean; cross?: boolean; label?: string }[] = [];
+    const scoutOn = refOn || xlink.scout || xlink.all_lines;
+    if (scoutOn && pid !== activePane) {
       const act = panes[activePane];
       const actInst = act.series?.instances[act.index];
       if (act.series && actInst) {
-        if (xmode === "all_lines") {
-          act.series.instances.forEach((si, k) => {
-            if (si.sop_uid === inst.sop_uid) return;
-            const seg = refLineOn(si, inst);
-            if (seg) refSegs.push({ seg, current: k === act.index });
-          });
-        } else if (actInst.sop_uid !== inst.sop_uid) {
-          const seg = refLineOn(actInst, inst);
-          if (seg) refSegs.push({ seg, current: true });
-        }
+        const total = act.series.instances.length;
+        const srcs = xlink.all_lines ? act.series.instances : [actInst];
+        srcs.forEach((si, k) => {
+          if (si.sop_uid === inst.sop_uid) return;                 // 자기 자신엔 안 그린다
+          const seg = refLineOn(si, inst);
+          if (!seg) return;
+          const current = xlink.all_lines ? k === act.index : true;
+          refSegs.push({ seg, current, label: current ? `${act.index + 1}/${total}` : undefined });
+        });
+      }
+    }
+    // 상호 참조(십자) — Crosslink 마스터가 켜졌을 때만, 축이 겹치지 않는 페인 1개씩
+    if (!refSegs.length && xlink.crosslink) {
+      const seenS = new Set<string>([p.series?.series_uid ?? ""]);
+      const usedAxis = new Set<number>();
+      const tg0 = geomOf(inst);
+      if (tg0) usedAxis.add(axisOf(tg0));
+      const order = PANE_IDS.slice(0, LAYOUTS[layout].count)
+        .sort((x, y) => Number(selPanes.has(y)) - Number(selPanes.has(x)));
+      for (const k of order) {
+        const q = panes[k];
+        const qs = q?.series;
+        if (!qs || seenS.has(qs.series_uid)) continue;
+        seenS.add(qs.series_uid);
+        const qi = qs.instances[q.index];
+        if (!qi) continue;
+        const qg = geomOf(qi);
+        if (!qg) continue;
+        const ax = axisOf(qg);
+        if (usedAxis.has(ax)) continue;
+        const seg = refLineOn(qi, inst);
+        if (!seg) continue;
+        usedAxis.add(ax);
+        refSegs.push({ seg, current: false, cross: true, label: `${q.index + 1}/${qs.instances.length}` });
       }
     }
     // TY-3(4): 3D Cursor 십자 마커 — 해당 페인의 마커가 현재 이미지에 귀속될 때만
@@ -2949,11 +2997,25 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                 width={sx(Math.abs(marquee.b[0] - marquee.a[0]))} height={sy(Math.abs(marquee.b[1] - marquee.a[1]))}
                 fill="rgba(34,197,94,0.10)" stroke="#22c55e" strokeWidth={fs * 0.06} strokeDasharray={`${fs * 0.5} ${fs * 0.3}`} />
         )}
-        {refSegs.map((r, i) => (
-          <line key={`ref${i}`} x1={sx(r.seg[0][0])} y1={sy(r.seg[0][1])} x2={sx(r.seg[1][0])} y2={sy(r.seg[1][1])}
-                stroke="#4dd0e1" strokeDasharray={`${fs * 0.6} ${fs * 0.4}`}
-                strokeWidth={fs * (r.current ? 0.08 : 0.05)} opacity={r.current ? 1 : 0.35} />
-        ))}
+        {refSegs.map((r, i) => {
+          // 현재 스크롤 중인 이미지의 선만 노랑·굵게 — 몇 번째인지 라벨로도 표시(In-View 동일)
+          const color = r.current ? "#facc15" : r.cross ? "#22d3ee" : "#38bdf8";
+          const x1 = sx(r.seg[0][0]), y1 = sy(r.seg[0][1]), x2 = sx(r.seg[1][0]), y2 = sy(r.seg[1][1]);
+          const ex = x1 >= x2 ? x1 : x2, ey = x1 >= x2 ? y1 : y2;
+          return (
+            <g key={`ref${i}`}>
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color}
+                    strokeWidth={fs * (r.current ? 0.09 : r.cross ? 0.07 : 0.045)}
+                    opacity={r.current ? 1 : r.cross ? 0.85 : 0.6} />
+              {r.label && (
+                <text x={Math.min(Math.max(ex - fs * 2.4, fs * 0.2), cols - fs * 2.6)}
+                      y={Math.min(Math.max(ey - fs * 0.3, fs), rows - fs * 0.3)}
+                      fill={color} fontSize={fs * 0.8} fontWeight={700}
+                      style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: fs * 0.2 }}>{r.label}</text>
+              )}
+            </g>
+          );
+        })}
         {c3on && (
           <g stroke="#22d3ee" strokeWidth={fs * 0.1}>
             <line x1={sx(c3.x) - fs} y1={sy(c3.y)} x2={sx(c3.x) + fs} y2={sy(c3.y)} />
@@ -3579,13 +3641,22 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       {/* TY-3(3): Crosslink 5모드 — off/AutoSync(같은 검사)/SyncOther(과거 포함)/Scout/AllLines (In §3.3) */}
       {tbOn("xlink") && (
         <>
-          <select value={xmode} onChange={(e) => setXmode(e.target.value as XlinkMode)}
-                  title={`Crosslink 모드 (L 키=Off↔AutoSync 토글) — ${XLINK_MODES.map((m) => `${m.label}: ${m.desc}`).join(" · ")}`}
-                  style={{ fontSize: 11, width: paletteHoriz ? 86 : "100%", padding: "4px 2px",
-                           background: xmode !== "off" ? "var(--accent)" : undefined,
-                           color: xmode !== "off" ? "#fff" : undefined }}>
-            {XLINK_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-          </select>
+          {/* In-View 동일 — 독립 토글. Crosslink 가 스크롤 동기의 마스터, Scout/All Lines 는 독립 */}
+          <div style={{ display: "flex", flexDirection: paletteHoriz ? "row" : "column", gap: 2,
+                        width: paletteHoriz ? undefined : "100%",
+                        border: "1px solid var(--border)", borderRadius: 4, padding: "3px 4px" }}>
+            {XLINK_MODES.map((m) => (
+              <label key={m.key} title={m.desc}
+                     style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              opacity: m.key === "crosslink" || xlink.crosslink
+                                       || m.key === "scout" || m.key === "all_lines" ? 1 : 0.45 }}>
+                <input type="checkbox" checked={!!xlink[m.key]}
+                       onChange={(e) => setX(m.key, e.target.checked)} />
+                {m.label}
+              </label>
+            ))}
+          </div>
           {/* 듀얼모드 Stack 동기 방식 (G 키) — Spatial=DICOM 좌표 정합 / Index=1:1 */}
           <button title="Stack 동기 방식 (G 키) — Spatial: DICOM 좌표로 해부학적 정합(두께·각도·장수 달라도) / Index: 1:1 인덱스(좌표 없는 로컬 데이터·강제 정합)"
                   onClick={() => setSpatialSync((s) => !s)}
@@ -3894,7 +3965,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       case "invert": act("invert"); break;
       case "rotate_r": act("rotR"); break;
       case "fit": act("fit"); break;
-      case "crosslink": setXmode((x) => (x === "off" ? "auto_sync" : "off")); break;
+      case "crosslink": setXlink((x) => ({ ...x, crosslink: !x.crosslink })); break;
       case "spatial":
         setSpatialSync((s0) => { setStatus(!s0 ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !s0; });
         break;
@@ -4442,30 +4513,19 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {skin === "saint" && (() => {
           const XB: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4, fontSize: 11.5,
                                             whiteSpace: "nowrap", cursor: "pointer" };
-          const linkOn = xmode !== "off";
-          const syncSub = xmode === "auto_sync" || xmode === "sync_other";
+          const linkOn = !!xlink.crosslink;
           return (
             <span style={{ display: "flex", alignItems: "center", gap: 14, marginRight: 16 }}>
-              <label style={XB} title="Crosslink — 페인 간 스크롤 동기 마스터(켜면 Auto Sync 기본)">
-                <input type="checkbox" checked={linkOn}
-                       onChange={(e) => setXmode(e.target.checked ? "auto_sync" : "off")} />Crosslink
-              </label>
-              <label style={{ ...XB, opacity: linkOn ? 1 : 0.45 }} title="같은 검사 페인끼리 스크롤 동기">
-                <input type="checkbox" checked={xmode === "auto_sync"} disabled={!linkOn && !syncSub}
-                       onChange={(e) => setXmode(e.target.checked ? "auto_sync" : "off")} />Auto Sync
-              </label>
-              <label style={{ ...XB, opacity: linkOn ? 1 : 0.45 }} title="다른 검사(과거검사 포함) 페인까지 스크롤 동기">
-                <input type="checkbox" checked={xmode === "sync_other"} disabled={!linkOn && !syncSub}
-                       onChange={(e) => setXmode(e.target.checked ? "sync_other" : "auto_sync")} />Sync With Other Exams
-              </label>
-              <label style={XB} title="Scout Line — 활성 페인 현재 이미지의 교차선을 다른 페인에 표시">
-                <input type="checkbox" checked={xmode === "scout"}
-                       onChange={(e) => setXmode(e.target.checked ? "scout" : "off")} />Scout Line
-              </label>
-              <label style={XB} title="All Lines — 활성 시리즈 전체 이미지의 교차선 표시(현재 이미지는 진하게)">
-                <input type="checkbox" checked={xmode === "all_lines"}
-                       onChange={(e) => setXmode(e.target.checked ? "all_lines" : "off")} />All Lines
-              </label>
+              {XLINK_MODES.map((m) => {
+                const sub = m.key === "auto_sync" || m.key === "sync_other";
+                return (
+                  <label key={m.key} style={{ ...XB, opacity: sub && !linkOn ? 0.45 : 1 }} title={m.desc}>
+                    <input type="checkbox" checked={!!xlink[m.key]}
+                           onChange={(e) => setX(m.key, e.target.checked)} />
+                    {m.label}
+                  </label>
+                );
+              })}
             </span>
           );
         })()}
