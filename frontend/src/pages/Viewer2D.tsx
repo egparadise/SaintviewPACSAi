@@ -9,7 +9,7 @@ import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjac
 import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
-         type CompareBasis, type HpRule } from "../lib/viewerConfig";
+         type CompareBasis, type HpRule, hpPickRule } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
@@ -347,7 +347,7 @@ function savePersistedTabs(tabs: { id: number; uid: string; label: string }[]) {
 // eslint-disable-next-line react-refresh/only-export-components
 /* SAINT VIEW 스킨 상단 가로 메뉴 툴바 — 드롭다운 4종(Image Tool/Measurement/Reading Support/Additional)
    + 좌측 환자 ◀▶ 이동 + 활성 마우스모드/툴 칩. 항목 run 은 기존 툴 함수 그대로 호출(기능=TY 뷰어 동일). */
-function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled, side = "top", onGripDown, quick }: {
+function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled, side = "top", onGripDown, quick, onHide }: {
   menus: { title: string; items: { id: string; label: string; icon?: string; run: () => void }[] }[];
   activeId: string;                 // 현재 활성 마우스모드/툴 id (드롭다운·칩 하이라이트)
   onNav: (dir: 1 | -1) => void;     // 환자(검사) ◀▶ 이동
@@ -356,6 +356,7 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
   side?: "top" | "bottom" | "left" | "right";   // 도킹 위치(설정 툴 팔레트 위치와 연동)
   onGripDown?: (e: React.PointerEvent) => void; // ⠿ 그립 — 드래그 도킹 시작
   quick?: { id: string; label: string; icon?: string; run: () => void }[];  // ★Quick — 세로 모드 2열 그리드(최대 6)
+  onHide?: () => void;              // Tools 감추기 — 감춘 뒤에는 얇은 손잡이로 다시 편다
 }) {
   const vertical = side === "left" || side === "right";
   // 세로(좌/우) = 모든 섹션 펼침이 기본, 상/하 = 닫힘이 기본. 항목은 헤더 '아래'로 펼쳐진다.
@@ -380,6 +381,13 @@ function SaintMenuBar({ menus, activeId, onNav, navPrevDisabled, navNextDisabled
            onPointerDown={onGripDown}
            style={{ cursor: "grab", fontSize: 10, color: "var(--text-secondary)", userSelect: "none",
                     textAlign: "center", padding: vertical ? "0 0 2px" : "0 4px", flexShrink: 0 }}>⠿</div>
+      {/* Tools 감추기 — 세 뷰어 공통 동작 */}
+      {onHide && (
+        <button onClick={onHide} title="Tools 감추기 (다시 펴려면 가장자리 손잡이 클릭)"
+                style={{ padding: vertical ? "3px 0" : "2px 7px", fontSize: 10.5, flexShrink: 0 }}>
+          {vertical ? "◂ Hide" : "Hide"}
+        </button>
+      )}
       {/* 환자 ◀▶ 이동 — 한 줄 */}
       <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
         <button title="◀ 이전 검사" disabled={navPrevDisabled} onClick={() => onNav(-1)}
@@ -1113,12 +1121,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     api.getSetting("viewer.hp").then((r) => {
       const rules = ((r.value as { rules?: HpRule[] }).rules) ?? [];
       setHpRules(rules);
-      const up = (s: string) => (s || "").toUpperCase();
-      const m = rules.find((x) =>
-        (!x.modality || x.modality === detail.modality) &&
-        (!x.body_part || up(detail.body_part).includes(up(x.body_part))) &&
-        (!x.projection || up(detail.study_desc).includes(up(x.projection))));
-      if (m && m.use_on_exam_open !== false) applyHp(m);   // 'Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외(수동 메뉴로 적용)
+      // '가장 우선 적용' 규칙 먼저 → 없으면 등록 순서. 부위는 규칙이 고른 DICOM 필드에서 찾는다.
+      // ('Exam 열 때 HP 사용' 꺼진 규칙은 자동적용 제외 — 메뉴로 수동 적용)
+      const m = hpPickRule(rules, detail as unknown as Record<string, unknown>);
+      if (m) applyHp(m);
     }).catch(() => {});
   }, [detail.modality, detail.body_part, detail.study_desc, applyHp]);
 
@@ -3570,7 +3576,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   ];
 
   /* SaintView 툴 파레트 = 메뉴바 — 설정 paletteSide(좌/우/상/하) 연동 + ⠿ 드래그 도킹 */
-  const saintBar = skin === "saint" && (
+  const saintBar = skin === "saint" && paletteOpen && (
     <SaintMenuBar menus={saintMenus} activeId={tool || (saintModeOn ? mouseMode : "")} side={prefs.paletteSide}
                   quick={quickIds.slice(0, 6).filter((id) => quickDefs[id]).map((id) => ({
                     id, label: quickDefs[id].label, icon: quickDefs[id].icon,
@@ -3581,6 +3587,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     },
                   }))}
                   onGripDown={(e) => { dockDragRef.current = { kind: "palette", sx: e.clientX, sy: e.clientY }; }}
+                  onHide={() => setPaletteOpen(false)}
                   onNav={navPatient}
                   navPrevDisabled={navTarget(-1) === undefined}
                   navNextDisabled={navTarget(1) === undefined} />
@@ -4541,19 +4548,20 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         )}
       </div>
 
-      {skin === "saint" && prefs.paletteSide === "top" && saintBar}
+      {prefs.paletteSide === "top" && saintBar}
       {prefs.paletteSide === "top" && palette}
+      {!paletteOpen && (prefs.paletteSide === "top" || prefs.paletteSide === "bottom") && (
+        <ToolsHandle dir="down" onClick={() => setPaletteOpen(true)} />
+      )}
       {prefs.thumbSide === "top" && thumbs}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {prefs.paletteSide === "left" && palette}
-        {skin === "saint" && prefs.paletteSide === "left" && saintBar}
+        {prefs.paletteSide === "left" && saintBar}
         {skin !== "saint" && prefs.paletteSide === "left" && paletteOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW + dx, 64, 240) }))} />
         )}
-        {skin !== "saint" && !paletteOpen && prefs.paletteSide === "left" && (
-          <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>▸</button>
-        )}
+        {!paletteOpen && prefs.paletteSide === "left" && <ToolsHandle dir="right" onClick={() => setPaletteOpen(true)} />}
         {prefs.thumbSide === "left" && thumbs}
         {prefs.thumbSide === "left" && thumbOpen && (
           <Splitter dir="v" onEnd={persistViewerSizes}
@@ -4616,11 +4624,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, paletteW: clampSz(p.paletteW - dx, 64, 240) }))} />
         )}
-        {skin === "saint" && prefs.paletteSide === "right" && saintBar}
+        {prefs.paletteSide === "right" && saintBar}
         {paletteRight && palette}
-        {skin !== "saint" && !paletteOpen && paletteRight && (
-          <button onClick={() => setPaletteOpen(true)} style={{ width: 18, borderRadius: 0, padding: 0 }}>◂</button>
-        )}
+        {!paletteOpen && paletteRight && <ToolsHandle dir="left" onClick={() => setPaletteOpen(true)} />}
         {prefs.reportDock && !reportCollapsed && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, dockW: clampSz(p.dockW - dx, 180, 480) }))} />
@@ -4667,7 +4673,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       </div>
       {prefs.thumbSide === "bottom" && thumbs}
       {prefs.paletteSide === "bottom" && palette}
-      {skin === "saint" && prefs.paletteSide === "bottom" && saintBar}
+      {prefs.paletteSide === "bottom" && saintBar}
       {/* 휴대폰 촬영 QR 다이얼로그 */}
       {qrCap && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 600 }}
@@ -4864,6 +4870,25 @@ type TitleMenuItem = {
   onClose?: () => void;               // 항목별 ✕ — 그 Exam 탭만 닫기
   actions?: { label: string; title?: string; onClick: () => void }[];  // [Open]/[+Add]
 };
+/** Tools 감춤 손잡이 — 팔레트를 감췄을 때 다시 펼 수 있는 얇은 띠.
+ *  세로 배치에서는 "T o o l s" 세로 글자로 무엇을 여는 손잡이인지 알려 준다. */
+function ToolsHandle({ dir, onClick }: { dir: "left" | "right" | "down"; onClick: () => void }) {
+  const vertical = dir !== "down";
+  return (
+    <button onClick={onClick} title="Tools 팔레트 펼치기"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+              borderRadius: 0, padding: 0, flexShrink: 0,
+              ...(vertical
+                ? { width: 20, writingMode: "vertical-rl" as const, letterSpacing: 2, fontSize: 10.5 }
+                : { height: 18, width: "100%", fontSize: 11 }),
+            }}>
+      <span>{dir === "right" ? "▸" : dir === "left" ? "◂" : "▾"}</span>
+      <span style={{ opacity: 0.8 }}>Tools</span>
+    </button>
+  );
+}
+
 function TitleMenu({ id, icon, title, items, menu, setMenu }: {
   id: "opened" | "related" | "series" | "hp";
   icon: string; title: string;

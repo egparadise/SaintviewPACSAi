@@ -17,6 +17,25 @@ _POOL: dict[str, httpx.Client] = {}
 _POOL_LOCK = threading.Lock()
 
 
+
+def _flat_code(v: object) -> str:
+    """ProcedureCodeSequence 처럼 시퀀스로 오는 태그를 검색 가능한 한 줄 문자열로.
+    Orthanc 는 requestedTags 로 시퀀스를 리스트[dict] 또는 문자열로 돌려준다 — 둘 다 받는다."""
+    if not v:
+        return ""
+    if isinstance(v, str):
+        return v[:128]
+    items = v if isinstance(v, list) else [v]
+    out: list[str] = []
+    for it in items:
+        if isinstance(it, dict):
+            for k in ("CodeMeaning", "CodeValue"):
+                if it.get(k):
+                    out.append(str(it[k]))
+        elif it:
+            out.append(str(it))
+    return " ".join(out)[:128]
+
 def _pooled_client(base_url: str, auth: tuple[str, str]) -> httpx.Client:
     with _POOL_LOCK:
         c = _POOL.get(base_url)
@@ -56,7 +75,9 @@ class OrthancClient:
         # ModalitiesInStudy·부서는 requestedTags로 요청해야 채워짐
         r = self._client.get(
             f"/studies/{orthanc_study_id}",
-            params={"requestedTags": "ModalitiesInStudy;InstitutionalDepartmentName";ProtocolName;RequestedProcedureDescription;PerformedProcedureStepDescription"},
+            params={"requestedTags": "ModalitiesInStudy;InstitutionalDepartmentName;"
+                                      "ProtocolName;RequestedProcedureDescription;"
+                                      "PerformedProcedureStepDescription;ProcedureCodeSequence"},
         )
         r.raise_for_status()
         data = r.json()
@@ -292,6 +313,10 @@ def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, in
             institution=tags.get("InstitutionName", ""),
             referring_physician=str(tags.get("ReferringPhysicianName", "")),
             department=tags.get("InstitutionalDepartmentName", ""),
+            protocol_name=tags.get("ProtocolName", ""),
+            procedure_code=_flat_code(tags.get("ProcedureCodeSequence")),
+            procedure_desc=tags.get("RequestedProcedureDescription", ""),
+            step_desc=tags.get("PerformedProcedureStepDescription", ""),
             source_aet=client.study_source_aet(ch["ID"]),
             orthanc_id=ch["ID"],
         )

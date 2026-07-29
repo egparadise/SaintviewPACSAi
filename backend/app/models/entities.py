@@ -69,6 +69,11 @@ class Study(Base):
     referring_physician: Mapped[str] = mapped_column(String(128), default="")
     memo: Mapped[str] = mapped_column(Text, default="")  # MEMO window (사용자 메모)
     department: Mapped[str] = mapped_column(String(64), default="")   # DEPT (InstitutionalDepartmentName)
+    # 행잉 프로토콜(HP) 부위 매칭 대상 — 부위 값이 어느 태그에 들어오는지는 장비·기관마다 다르다
+    protocol_name: Mapped[str] = mapped_column(String(128), default="")   # (0018,1030) ProtocolName
+    procedure_code: Mapped[str] = mapped_column(String(128), default="")  # (0008,1032) ProcedureCodeSequence
+    procedure_desc: Mapped[str] = mapped_column(String(256), default="")  # (0032,1060) RequestedProcedureDescription
+    step_desc: Mapped[str] = mapped_column(String(256), default="")       # (0040,0254) PerformedProcedureStepDescription
     source_aet: Mapped[str] = mapped_column(String(32), default="")   # AETITLE (수신 RemoteAET)
     bookmark: Mapped[bool] = mapped_column(Boolean, default=False)    # BOOKMARK (★)
     orthanc_id: Mapped[str] = mapped_column(String(64), default="")

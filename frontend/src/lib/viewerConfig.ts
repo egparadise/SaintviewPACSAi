@@ -129,6 +129,117 @@ export const HP_SLOT_SOURCES: { k: HpSlotSource; label: string }[] = [
   { k: "vol3d", label: "3D 영상(MPR/MIP)" },
 ];
 
+/** 검사에서 부위 문자열을 찾을 대상 값들 — HpRule.bp_sources 가 고른 필드만 모은다.
+ *  study 는 StudyDetail 류(느슨한 레코드), extra 는 시리즈 설명 등 추가 후보. */
+export function hpBodyPartHaystack(
+  study: Record<string, unknown>, sources?: string[], extra: string[] = [],
+): string {
+  const keys = sources && sources.length ? sources : HP_BP_SOURCE_DEFAULT;
+  const vals = keys.map((k) => (k === "series_desc" ? extra.join(" ") : String(study[k] ?? "")));
+  return vals.join(" ").toUpperCase();
+}
+
+/** 이 규칙이 이 검사에 맞는가 — 장비·부위·Projection 전부 통과해야 한다(빈값=무관) */
+export function hpMatches(
+  rule: HpRule, study: Record<string, unknown>, seriesDescs: string[] = [],
+): boolean {
+  const up = (v: unknown) => String(v ?? "").toUpperCase();
+  if (rule.modality && up(rule.modality) !== up(study.modality)) return false;
+  if (rule.body_part && !hpBodyPartHaystack(study, rule.bp_sources, seriesDescs).includes(up(rule.body_part))) return false;
+  if (rule.projection && !up(study.study_desc).includes(up(rule.projection))) return false;
+  return true;
+}
+
+/** 자동 적용할 규칙 하나 — '가장 우선 적용'(priority) 규칙을 먼저 훑고, 없으면 등록 순서.
+ *  use_on_exam_open === false 인 규칙은 자동 적용 대상에서 제외(메뉴로 수동 적용). */
+export function hpPickRule(
+  rules: HpRule[], study: Record<string, unknown>, seriesDescs: string[] = [],
+): HpRule | null {
+  const usable = rules.filter((r) => r.use_on_exam_open !== false);
+  const ordered = [...usable.filter((r) => r.priority), ...usable.filter((r) => !r.priority)];
+  return ordered.find((r) => hpMatches(r, study, seriesDescs)) ?? null;
+}
+
+/** 검사일(YYYYMMDD) 사이의 일수 — 과거검사 시점 판정용 */
+function daysBetween(baseYmd: string, otherYmd: string): number | null {
+  const d = (v: string) => (/^\d{8}$/.test(v) ? new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) : null);
+  const a = d(baseYmd), b = d(otherYmd);
+  if (!a || !b) return null;
+  return Math.round((a.getTime() - b.getTime()) / 86400000);
+}
+
+/** HP 슬롯(칸)에 넣을 과거검사 하나를 고른다.
+ *  · prior  = 바로 이전 검사(현재보다 과거인 것 중 가장 최근)
+ *  · w1/m1/y1 = 각각 7·30·365일 이내(현재 검사일 기준)에서 가장 최근
+ *  · range  = from~to 일 전 사이
+ *  후보는 항상 **같은 환자의 과거검사**(related_exams)이며, 이미 쓰인 id 는 건너뛴다.
+ *  current/vol3d 는 과거검사를 쓰지 않으므로 null 을 돌려준다. */
+export function hpPickPrior<T extends { id: number; study_date: string }>(
+  related: T[], baseYmd: string, source: HpSlotSource,
+  range?: { from: number; to: number }, used: Set<number> = new Set(),
+): T | null {
+  if (source === "current" || source === "vol3d") return null;
+  // 경과일 경계 — related_exams 는 현재 검사를 이미 제외하므로 같은 날(0일) 과거검사도 후보다
+  const win: Record<string, [number, number]> = { prior: [0, Infinity], w1: [0, 7], m1: [0, 30], y1: [0, 365] };
+  const [lo, hi] = source === "range"
+    ? [Math.min(range?.from ?? 0, range?.to ?? 0), Math.max(range?.from ?? 0, range?.to ?? 0)]
+    : win[source] ?? [1, Infinity];
+  const cand = related
+    .filter((r) => !used.has(r.id))
+    .map((r) => ({ r, d: daysBetween(baseYmd, r.study_date) }))
+    .filter((x) => x.d != null && (x.d as number) >= 0 && (x.d as number) >= lo && (x.d as number) <= hi)
+    .sort((a, b) => (a.d as number) - (b.d as number));   // 가장 최근(경과일 작은 것) 우선
+  return cand[0]?.r ?? null;
+}
+
+/** 현재 뷰어 화면에서 읽어낸 구성 — '직접설정' 저장이 이 형태로 규칙을 만든다 */
+export interface HpCapture {
+  s: { r: number; c: number };            // Series 분할
+  i: { r: number; c: number };            // Image 분할(활성 페인 기준)
+  wl?: string;                            // 활성 페인 W/L ("c,w", 빈값=서버 기본)
+  xlink?: Record<string, boolean>;        // Crosslink/AutoSync/Scout 토글 현재 상태
+  /** 페인별 영상 시점 — 과거검사를 띄운 페인은 prior 로 기록(길이=s.r*s.c) */
+  sources?: HpSlotSource[];
+  /** 페인별 시리즈 순번(1-base, null=자동) */
+  cells?: (number | null)[];
+}
+
+/** 화면 구성 + 검사 정보 → 저장할 HpRule. 이름·매칭 조건은 저장 다이얼로그가 채운다. */
+export function buildHpRule(
+  base: { name: string; modality: string; body_part: string; projection: string;
+          description?: string; bp_sources?: string[]; priority?: boolean; use_on_exam_open?: boolean },
+  cap: HpCapture,
+  id = `hp${Date.now().toString(36)}`,
+): HpRule {
+  const n = Math.max(1, cap.s.r * cap.s.c);
+  const x = cap.xlink ?? {};
+  return {
+    id,
+    name: base.name.trim() || "새 프로토콜",
+    modality: (base.modality || "").toUpperCase().trim(),
+    body_part: (base.body_part || "").toUpperCase().trim(),
+    projection: (base.projection || "").toUpperCase().trim(),
+    description: base.description ?? "",
+    s: { r: cap.s.r, c: cap.s.c },
+    i: { r: cap.i.r, c: cap.i.c },
+    wl: cap.wl ?? "",
+    bp_sources: base.bp_sources ?? [...HP_BP_SOURCE_DEFAULT],
+    priority: !!base.priority,
+    use_on_exam_open: base.use_on_exam_open !== false,
+    full_link: !!x.auto_sync,
+    full_scroll_sync: !!x.sync_other,
+    cross_link: !!x.crosslink,
+    scout_image: !!x.scout,
+    displays: [{
+      id: "d1", role: "viewer", label: "1", resolution: "",
+      grid: { r: cap.s.r, c: cap.s.c },
+      cells: Array.from({ length: n }, (_, k) => cap.cells?.[k] ?? null),
+      image: { r: cap.i.r, c: cap.i.c },
+      sources: Array.from({ length: n }, (_, k) => cap.sources?.[k] ?? "current"),
+    }],
+  };
+}
+
 /** 행잉 프로토콜 규칙 (Setting>행잉(HP)) — 장비×부위×Projection → 레이아웃·옵션·디스플레이.
  *  s/i/wl 은 하위호환(단일 뷰어 Series/Image 분할). displays 가 있으면 viewer 디스플레이가 우선. */
 export interface HpRule {

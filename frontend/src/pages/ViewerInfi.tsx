@@ -2372,6 +2372,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
 
   // 기능 영역(툴바/썸네일/W-L/Report) 폭 — 경계 스플리터로 조절, localStorage 보존
   const UI_KEY = "sv_infi_ui";
+  // Tools 팔레트 감춤 — 감추면 왼쪽에 얇은 손잡이만 남는다(T-View·SaintView 동일 동작)
+  const [toolsOpen, setToolsOpen] = useState(true);
   const [ui, setUi] = useState<{ toolW: number; thumbW: number; wlW: number; dockW: number }>(() => {
     const def = { toolW: 158, thumbW: 88, wlW: 108, dockW: 320 };   // 툴 아이콘+이름 행 기준, 도크 최소 320px
     try { return { ...def, ...JSON.parse(localStorage.getItem(UI_KEY) ?? "{}") }; } catch { return def; }
@@ -3282,7 +3284,17 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {/* Tools 를 감췄을 때 — 다시 펼 수 있는 얇은 손잡이 */}
+        {!toolsOpen && (
+          <button onClick={() => setToolsOpen(true)} title="Tools 팔레트 펼치기"
+                  style={{ width: 20, borderRadius: 0, padding: 0, flexShrink: 0, fontSize: 10.5,
+                           display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                           writingMode: "vertical-rl", letterSpacing: 2 }}>
+            <span>▸</span><span style={{ opacity: 0.8 }}>Tools</span>
+          </button>
+        )}
         {/* ── 좌측 2열 아이콘 툴바 (p.11~14 전 툴) ── */}
+        {toolsOpen && (
         <div style={{ width: ui.toolW, background: "var(--bg-panel)", borderRight: "1px solid var(--border)",
                       display: "flex", flexDirection: "column", padding: "6px 5px", gap: 5, flexShrink: 0 }}>
           {/* §3.1 툴바 상단(원본 이미지2): Prev/Next · Crosslink · 행잉 · Worklist/Report · Close */}
@@ -3475,12 +3487,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
                              color: settingsOpen ? "#fff" : undefined }}>
               Setting
             </button>
+            {/* Tools 감추기 — 왼쪽 손잡이로 다시 편다(T-View·SaintView 동일) */}
+            <button title="Tools 감추기 (다시 펴려면 왼쪽 가장자리 손잡이 클릭)"
+                    onClick={() => setToolsOpen(false)}
+                    style={{ fontSize: 12.5, padding: "5px 0" }}>◂ Hide</button>
           </div>
         </div>
+        )}
 
         {/* 툴바 ↔ 썸네일 폭 조절 */}
-        <Splitter dir="v" onEnd={saveUi}
-                  onDrag={(dx) => setUi((u) => ({ ...u, toolW: clampW(u.toolW + dx, 72, 240) }))} />
+        {toolsOpen && (
+          <Splitter dir="v" onEnd={saveUi}
+                    onDrag={(dx) => setUi((u) => ({ ...u, toolW: clampW(u.toolW + dx, 72, 240) }))} />
+        )}
 
         {/* ── 세로 시리즈 썸네일 열 (원본 이미지4) ── */}
         {thumbCol}
