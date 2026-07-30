@@ -274,6 +274,15 @@ def restore(body: RestoreBody, db: Session = Depends(get_db), user: dict = Depen
     DB=pg_restore 직접 실행은 위험하므로 파일 준비+수동 절차 안내로 우아 강등."""
     if body.scope not in ("system", "hospital"):
         raise HTTPException(status_code=400, detail="scope는 system|hospital")
+    # ⚠ admin_user 는 role 만 본다 — 가입 병원 admin 도 통과한다.
+    #   system 범위(전 병원)는 시스템 관리자만, hospital 범위는 자기 병원만 허용한다.
+    from app.api.hospitals import _is_system_admin
+
+    sysadmin = _is_system_admin(user)
+    if body.scope == "system" and not sysadmin:
+        raise HTTPException(status_code=403, detail="전체 범위는 시스템 관리자 전용입니다")
+    if body.scope == "hospital" and not sysadmin and body.hid != user.get("hid"):
+        raise HTTPException(status_code=403, detail="자기 병원 데이터만 처리할 수 있습니다")
     if body.scope == "hospital":
         if body.hid is None or not db.get(Hospital, body.hid):
             raise HTTPException(status_code=400, detail="hospital 범위에는 유효한 hid가 필요합니다")
@@ -373,6 +382,15 @@ def wipe(body: WipeBody, db: Session = Depends(get_db), user: dict = Depends(adm
         raise HTTPException(status_code=400, detail="확인 토큰(confirm='WIPE')이 필요합니다")
     if body.scope not in ("hospital", "system"):
         raise HTTPException(status_code=400, detail="scope는 hospital|system")
+    # ⚠ admin_user 는 role 만 본다 — 가입 병원 admin 도 통과한다.
+    #   system 범위(전 병원)는 시스템 관리자만, hospital 범위는 자기 병원만 허용한다.
+    from app.api.hospitals import _is_system_admin
+
+    sysadmin = _is_system_admin(user)
+    if body.scope == "system" and not sysadmin:
+        raise HTTPException(status_code=403, detail="전체 범위는 시스템 관리자 전용입니다")
+    if body.scope == "hospital" and not sysadmin and body.hid != user.get("hid"):
+        raise HTTPException(status_code=403, detail="자기 병원 데이터만 처리할 수 있습니다")
     if body.scope == "hospital":
         if body.hid is None or not db.get(Hospital, body.hid):
             raise HTTPException(status_code=400, detail="hospital 범위에는 유효한 hid가 필요합니다")
@@ -485,7 +503,7 @@ def _recover_kr(s: str | None) -> str | None:
 class BackfillHpTagsBody(BaseModel):
     dry_run: bool = True   # true=변경 없이 대상 건수만 반환
     limit: int = 2000      # 한 번에 처리할 최대 검사 수
-    offset: int = 0        # 이어서 처리(응답의 next_offset 을 넣는다)
+    after_id: int = 0      # 이어서 처리(응답의 next_after_id 를 넣는다 — offset 은 쓰지 않는다)
 
 
 @router.post("/backfill-hp-tags")
@@ -518,14 +536,15 @@ def backfill_hp_tags(body: BackfillHpTagsBody, db: Session = Depends(get_db),
         n = db.query(Study).filter(Study.orthanc_id != "").filter(empty).count()
         return {"ok": True, "dry_run": True, "candidates": n}
 
-    # offset 으로 넘겨 가며 처리 — '태그가 원래 없는 검사'는 채워도 계속 비어 있어
-    # 매번 앞부분만 다시 잡히면 뒤쪽 검사에 영원히 도달하지 못한다.
+    # ⚠ offset 을 쓰면 안 된다 — 값이 채워진 검사는 다음 호출의 필터에서 빠지므로
+    #   대상 집합이 줄어들고, 그만큼 offset 이 앞쪽을 건너뛰어 검사를 영구히 놓친다.
+    #   대신 **마지막으로 처리한 id 이후**(after_id)로 커서를 옮긴다.
     rows = (
         db.query(Study)
         .filter(Study.orthanc_id != "")
         .filter(empty)
+        .filter(Study.id > max(0, body.after_id))
         .order_by(Study.id)
-        .offset(max(0, body.offset))
         .limit(max(1, min(body.limit, 5000)))
         .all()
     )
@@ -545,7 +564,11 @@ def backfill_hp_tags(body: BackfillHpTagsBody, db: Session = Depends(get_db),
     for i, st in enumerate(rows, 1):
         try:
             # study_metadata 는 RequestedTags 를 MainDicomTags 에 합쳐 준다(동기화 경로와 같은 자리)
-            meta = _client_for(st.hospital_id).study_metadata(st.orthanc_id) or {}
+            try:
+                meta = _client_for(st.hospital_id).study_metadata(st.orthanc_id) or {}
+            except Exception:
+                # 병원 전용 컨테이너에 없으면 공용에서 재시도(이 환경은 영상이 공용에 있다)
+                meta = _client_for(None).study_metadata(st.orthanc_id) or {}
             tags = meta.get("MainDicomTags", {}) or {}
             st.protocol_name = (tags.get("ProtocolName", "") or "")[:128]
             st.procedure_code = _flat_code(tags.get("ProcedureCodeSequence"))
@@ -559,7 +582,7 @@ def backfill_hp_tags(body: BackfillHpTagsBody, db: Session = Depends(get_db),
             db.commit()
     db.commit()
     return {"ok": True, "dry_run": False, "scanned": len(rows), "updated": updated,
-            "failed": failed, "next_offset": body.offset + len(rows)}
+            "failed": failed, "next_after_id": (rows[-1].id if rows else body.after_id)}
 
 
 class RepairEncodingBody(BaseModel):

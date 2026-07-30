@@ -21,35 +21,77 @@ ORTHANC_SYNC_EVERY = 5  # 워커 폴링 N회마다 Orthanc 동기화 (≈10초)
 _SYNC_SEQ_KEY = "orthanc.last_change_seq"
 
 
+def _sync_one_orthanc(seq_key: str, client, label: str) -> int:
+    """한 Orthanc 인스턴스의 변경 피드를 1회 동기화. seq 는 인스턴스별로 따로 영속화한다."""
+    from app.dicom.orthanc import sync_new_studies
+
+    if not client.alive():
+        return 0
+    with SessionLocal() as db:
+        row = db.execute(
+            select(AppSetting).where(AppSetting.scope == "global", AppSetting.key == seq_key)
+        ).scalar_one_or_none()
+        since = int((row.value or {}).get("seq", 0)) if row else 0
+        registered, last = sync_new_studies(db, client, since=since)
+        if row is None:
+            db.add(AppSetting(scope="global", scope_id="", key=seq_key, value={"seq": last}))
+        else:
+            row.value = {"seq": last}
+        db.commit()
+        if registered:
+            logger.info("Orthanc 동기화[%s]: 신규 검사 %d건 (seq→%s)", label, registered, last)
+        return registered
+
+
 def sync_orthanc_once() -> int:
     """Orthanc 변경 피드 1회 동기화. last seq는 app_setting에 영속화.
 
+    공용 Orthanc + **병원별 전용 컨테이너**를 모두 폴링한다.
+    (전용 컨테이너를 빼면 그쪽으로 수신된 검사가 DB 에 영원히 등록되지 않는다 —
+     seq 는 인스턴스마다 별도 키로 관리해야 서로 진행을 덮어쓰지 않는다.)
     Orthanc 미가동이면 0 반환(다음 주기 재시도) — 검사 도착 자동 감지의 본체.
     """
-    from app.dicom.orthanc import OrthancClient, sync_new_studies
+    from app.dicom.orthanc import OrthancClient, client_for_hospital
+    from app.models import Hospital
 
+    total = 0
     client = OrthancClient()
     try:
-        if not client.alive():
-            return 0
-        with SessionLocal() as db:
-            row = db.execute(
-                select(AppSetting).where(
-                    AppSetting.scope == "global", AppSetting.key == _SYNC_SEQ_KEY
-                )
-            ).scalar_one_or_none()
-            since = int((row.value or {}).get("seq", 0)) if row else 0
-            registered, last = sync_new_studies(db, client, since=since)
-            if row is None:
-                db.add(AppSetting(scope="global", scope_id="", key=_SYNC_SEQ_KEY, value={"seq": last}))
-            else:
-                row.value = {"seq": last}
-            db.commit()
-            if registered:
-                logger.info("Orthanc 동기화: 신규 검사 %d건 (seq→%s)", registered, last)
-            return registered
+        total += _sync_one_orthanc(_SYNC_SEQ_KEY, client, "공용")
+    except Exception:
+        logger.exception("Orthanc 동기화 실패(공용)")
     finally:
         client.close()
+
+    # 병원별 전용 컨테이너 — 등록돼 있는 병원만(미등록이면 client_for_hospital 이 공용을 준다)
+    try:
+        with SessionLocal() as db:
+            hids = [h.id for h in db.execute(select(Hospital)).scalars().all()]
+        for hid in hids:
+            hc = None
+            try:
+                from app.dicom.orthanc import orthanc_url_for_hospital
+
+                with SessionLocal() as db2:
+                    url = orthanc_url_for_hospital(db2, hid)
+                if not url:
+                    continue          # 전용 컨테이너 없음 = 공용에서 이미 처리됨
+                hc = client_for_hospital_url(url)
+                total += _sync_one_orthanc(f"{_SYNC_SEQ_KEY}.h{hid}", hc, f"병원{hid}")
+            except Exception:
+                logger.exception("Orthanc 동기화 실패(병원 %s)", hid)
+            finally:
+                if hc is not None:
+                    hc.close()
+    except Exception:
+        logger.exception("병원별 Orthanc 목록 조회 실패")
+    return total
+
+
+def client_for_hospital_url(url: str):
+    from app.dicom.orthanc import OrthancClient
+
+    return OrthancClient(base_url=url)
 
 
 def process_once() -> int:

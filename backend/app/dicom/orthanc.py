@@ -283,6 +283,59 @@ def client_for_hospital(db, hospital_id) -> OrthancClient:
     return OrthancClient(base_url=orthanc_url_for_hospital(db, hospital_id))
 
 
+def _sync_one_study(db, client: "OrthancClient", ch: dict) -> None:
+    """변경 피드 1건(StableStudy)을 studies 에 등록 + AI 잡 큐잉.
+
+    sync_new_studies 에서 **검사 단위로 예외 격리**하려고 분리했다 —
+    한 건이 터지면 seq 가 전진하지 못해 같은 change 를 영원히 재시도하고
+    그 뒤 신규 검사가 하나도 등록되지 않는다(수신 등록 영구 정지).
+    """
+    from app.config import get_settings
+    from app.services.study_service import queue_ai_job, register_study
+
+    meta = client.study_metadata(ch["ID"])
+    tags = meta.get("MainDicomTags", {})
+    ptags = meta.get("PatientMainDicomTags", {})
+    study = register_study(
+        db,
+        study_uid=tags.get("StudyInstanceUID", ""),
+        patient_key=ptags.get("PatientID", "UNKNOWN"),
+        patient_name=ptags.get("PatientName", ""),
+        birth_date=ptags.get("PatientBirthDate", ""),
+        sex=ptags.get("PatientSex", ""),
+        accession_no=tags.get("AccessionNumber", ""),
+        study_date=tags.get("StudyDate", ""),
+        study_time=tags.get("StudyTime", ""),
+        modality=tags.get("ModalitiesInStudy", "").split("\\")[0]
+        if tags.get("ModalitiesInStudy")
+        else "",
+        study_desc=tags.get("StudyDescription", ""),
+        institution=tags.get("InstitutionName", ""),
+        referring_physician=str(tags.get("ReferringPhysicianName", "")),
+        department=tags.get("InstitutionalDepartmentName", ""),
+        protocol_name=tags.get("ProtocolName", ""),
+        procedure_code=_flat_code(tags.get("ProcedureCodeSequence")),
+        procedure_desc=tags.get("RequestedProcedureDescription", ""),
+        step_desc=tags.get("PerformedProcedureStepDescription", ""),
+        source_aet=client.study_source_aet(ch["ID"]),
+        orthanc_id=ch["ID"],
+    )
+    if study.status == "received" and get_settings().ai_auto_generate:
+        # 중복 큐잉 가드: 같은 검사에 미완료 잡이 있으면 재큐잉하지 않는다
+        # (since=0 재폴링·재기동 시 잡 폭증 방지)
+        from sqlalchemy import select as _select
+
+        from app.models import AiJob
+
+        pending = db.execute(
+            _select(AiJob.id).where(
+                AiJob.study_id == study.id, AiJob.status.in_(["queued", "running"])
+            ).limit(1)
+        ).first()
+        if not pending:
+            queue_ai_job(db, study)
+
+
 def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, int]:
     """Orthanc 변경 피드 → studies 테이블 동기화 + AI 작업 큐 등록.
 
@@ -296,46 +349,10 @@ def sync_new_studies(db, client: OrthancClient, since: int = 0) -> tuple[int, in
     for ch in changes.get("Changes", []):
         if ch.get("ChangeType") != "StableStudy":
             continue
-        meta = client.study_metadata(ch["ID"])
-        tags = meta.get("MainDicomTags", {})
-        ptags = meta.get("PatientMainDicomTags", {})
-        study = register_study(
-            db,
-            study_uid=tags.get("StudyInstanceUID", ""),
-            patient_key=ptags.get("PatientID", "UNKNOWN"),
-            patient_name=ptags.get("PatientName", ""),
-            birth_date=ptags.get("PatientBirthDate", ""),
-            sex=ptags.get("PatientSex", ""),
-            accession_no=tags.get("AccessionNumber", ""),
-            study_date=tags.get("StudyDate", ""),
-            study_time=tags.get("StudyTime", ""),
-            modality=tags.get("ModalitiesInStudy", "").split("\\")[0]
-            if tags.get("ModalitiesInStudy")
-            else "",
-            study_desc=tags.get("StudyDescription", ""),
-            institution=tags.get("InstitutionName", ""),
-            referring_physician=str(tags.get("ReferringPhysicianName", "")),
-            department=tags.get("InstitutionalDepartmentName", ""),
-            protocol_name=tags.get("ProtocolName", ""),
-            procedure_code=_flat_code(tags.get("ProcedureCodeSequence")),
-            procedure_desc=tags.get("RequestedProcedureDescription", ""),
-            step_desc=tags.get("PerformedProcedureStepDescription", ""),
-            source_aet=client.study_source_aet(ch["ID"]),
-            orthanc_id=ch["ID"],
-        )
-        if study.status == "received" and get_settings().ai_auto_generate:
-            # 중복 큐잉 가드: 같은 검사에 미완료 잡이 있으면 재큐잉하지 않는다
-            # (since=0 재폴링·재기동 시 잡 폭증 방지)
-            from sqlalchemy import select as _select
-
-            from app.models import AiJob
-
-            pending = db.execute(
-                _select(AiJob.id).where(
-                    AiJob.study_id == study.id, AiJob.status.in_(["queued", "running"])
-                ).limit(1)
-            ).first()
-            if not pending:
-                queue_ai_job(db, study)
-        registered += 1
+        # 검사 단위 예외 격리 — 실패한 건만 건너뛰고 seq 는 계속 전진시킨다
+        try:
+            _sync_one_study(db, client, ch)
+            registered += 1
+        except Exception:
+            db.rollback()
     return registered, changes.get("Last", since)
