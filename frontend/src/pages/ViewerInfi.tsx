@@ -839,7 +839,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
     const ids = [...new Set(exams.map((e) => e.d.id))];
     if (!ids.length) return;
     let alive = true;
-    Promise.all(ids.map((id) => api.instances(id).then((r) => (r.key_images ?? []).map((k) => k.sop_uid)).catch(() => [])))
+    Promise.all(ids.map((id) => api.keyImages(id).then((r) => (r.key_images ?? []).map((k) => k.sop_uid)).catch(() => [])))
       .then((lists) => { if (alive) setKeyMarks(new Set(lists.flat())); });
     return () => { alive = false; };
   }, [exams]);

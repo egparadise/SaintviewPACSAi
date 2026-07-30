@@ -1541,7 +1541,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const ids = [...new Set(openTabs.map((t) => t.id))];
     if (!ids.length) return;
     let alive = true;
-    Promise.all(ids.map((id) => api.instances(id).then((r) => (r.key_images ?? []).map((k) => k.sop_uid)).catch(() => [])))
+    Promise.all(ids.map((id) => api.keyImages(id).then((r) => (r.key_images ?? []).map((k) => k.sop_uid)).catch(() => [])))
       .then((lists) => { if (alive) setKeyMarks(new Set(lists.flat())); });
     return () => { alive = false; };
   }, [openTabs]);
@@ -2213,12 +2213,43 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   }, []);
 
   /* 드래그 그리기 시작 — 시작 이미지좌표 기록 + draft=[start,start] + annoDrag 세팅(dragRef 미사용) */
+  /** 커서 아래의 **실제 타일**을 해석한다 — Image 분할(N×M)에서 클릭 지점이 속한 칸의
+   *  이미지와 그 칸의 화면 사각형을 돌려준다.
+   *
+   *  ⚠ 이게 없으면 4번 칸을 클릭해도 좌표는 **페인 전체** 기준으로 정규화되고 소속 이미지는
+   *    **첫 칸**으로 기록된다 → 틀린 mm 가 틀린 SOP 에 저장된다(임상 위험).
+   *    분할이 1×1 이면 결과가 페인 전체와 동일해 기존 동작과 정확히 같다. */
+  const tileAt = (pid: string, e: React.MouseEvent):
+    { inst: InstanceNode; rect: DOMRect; idx: number } | null => {
+    const p = panes[pid];
+    if (!p?.series) return null;
+    const paneRect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const il = p.il ?? { r: 1, c: 1 };
+    const cols = Math.max(1, il.c), rows = Math.max(1, il.r);
+    if (cols === 1 && rows === 1) {
+      const inst0 = p.series.instances[p.index];
+      return inst0 ? { inst: inst0, rect: paneRect, idx: p.index } : null;
+    }
+    const gap = 1;   // 타일 그리드의 gap(px) — 칸 폭 계산에 반영
+    const cw = (paneRect.width - gap * (cols - 1)) / cols;
+    const ch = (paneRect.height - gap * (rows - 1)) / rows;
+    const ci = Math.min(cols - 1, Math.max(0, Math.floor((e.clientX - paneRect.left) / (cw + gap))));
+    const ri = Math.min(rows - 1, Math.max(0, Math.floor((e.clientY - paneRect.top) / (ch + gap))));
+    const idx = p.index + ri * cols + ci;
+    const inst = p.series.instances[idx];
+    if (!inst) return null;
+    const rect = new DOMRect(paneRect.left + ci * (cw + gap), paneRect.top + ri * (ch + gap), cw, ch);
+    return { inst, rect, idx };
+  };
+
   const startAnnoDraw = (pid: string, e: React.MouseEvent) => {
     const p = panes[pid];
-    const inst = p.series?.instances[p.index];
+    // 커서가 속한 칸의 이미지·사각형 — 1×1 이면 페인 전체와 동일
+    const hit = tileAt(pid, e);
+    const inst = hit?.inst;
     if (!tool || !p.series || !inst) return;
     const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = hit!.rect;
     const start = screenToImage(e.clientX, e.clientY, rect, p, aspect);
     if (!start) return;
     annoDragRef.current = { type: "draw", pid, tool, sop: inst.sop_uid, series: p.series.series_uid,
@@ -2229,10 +2260,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   /* 마퀴 시작(Select 모드 빈 공간 드래그) — 시작 이미지좌표 기록, 이후 move/up 에서 영역 내 주석 일괄 선택 */
   const startMarquee = (pid: string, e: React.MouseEvent) => {
     const p = panes[pid];
-    const inst = p.series?.instances[p.index];
+    // 커서가 속한 칸의 이미지·사각형 — 1×1 이면 페인 전체와 동일
+    const hit = tileAt(pid, e);
+    const inst = hit?.inst;
     if (!p.series || !inst) return;
     const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = hit!.rect;
     const start = screenToImage(e.clientX, e.clientY, rect, p, aspect);
     if (!start) return;
     setSelAnno(null); setSelAnnos(null);
@@ -2256,10 +2289,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
      반환 true 면 편집 드래그 시작(호출부가 pan/zoom/wl 진입을 건너뛴다) */
   const startAnnoEdit = (pid: string, e: React.MouseEvent): boolean => {
     const p = panes[pid];
-    const inst = p.series?.instances[p.index];
+    // 커서가 속한 칸의 이미지·사각형 — 1×1 이면 페인 전체와 동일
+    const tileHit = tileAt(pid, e);
+    const inst = tileHit?.inst;
     if (!p.series || !inst) return false;
     const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = tileHit!.rect;
     const cur = screenToImage(e.clientX, e.clientY, rect, p, aspect);
     if (!cur) return false;
     const cols = inst.cols || 1000, rows = inst.rows || 1000;
@@ -2329,11 +2364,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
      open-ended(spineCurve/poly/shutPoly)는 점 수 제한 없이 수집, 더블클릭(finishOpenEnded)으로 종료 */
   const handleAnnoPoint = (pid: string, e: React.MouseEvent) => {
     const p = panes[pid];
-    const inst = p.series?.instances[p.index];
+    // 커서가 속한 칸의 이미지·사각형 — 1×1 이면 페인 전체와 동일
+    const hit = tileAt(pid, e);
+    const inst = hit?.inst;
     if (!tool || !p.series || !inst) return;
     if (OPEN_ENDED.has(tool) && e.detail > 1) return;  // 더블클릭 2번째 mousedown 은 점 추가 안 함
     const aspect = inst.cols && inst.rows ? inst.cols / inst.rows : 1;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const rect = hit.rect;
     const pt = screenToImage(e.clientX, e.clientY, rect, p, aspect);
     if (!pt) return;
     const need = TOOL_PTS[tool] ?? 2;
@@ -3953,7 +3990,14 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                     const roi = [...annos].reverse().find((a) => (a.kind === "rect" || a.kind === "ellipse") && a.sop_uid);
                     if (!roi) { alert("먼저 사각형 또는 타원 ROI를 그리세요"); return; }
                     try {
-                      const s = await api.roiStats(detail.id, { sop_uid: roi.sop_uid, kind: roi.kind, points: roi.points });
+                      // ⚠ 창의 주 검사(detail.id)로 고정하면 안 된다 — Compare/＋Add 로 불러온
+                      //   과거검사 페인의 ROI 는 그 검사에 속하고, 백엔드는 study 범위에서만
+                      //   sop_uid 를 찾아 404 를 낸다. ROI 가 놓인 페인의 검사로 조회한다.
+                      const owner = PANE_IDS.find((k) =>
+                        panes[k]?.series?.instances.some((x) => x.sop_uid === roi.sop_uid));
+                      const ownerUid = owner ? panes[owner].studyUid : detail.study_uid;
+                      const exId = openTabsRef.current.find((t) => t.uid === ownerUid)?.id ?? detail.id;
+                      const s = await api.roiStats(exId, { sop_uid: roi.sop_uid, kind: roi.kind, points: roi.points });
                       if (s.error) { alert(s.error); return; }
                       alert(`HU ROI 통계 (${s.count}px${s.area_mm2 ? `, ${s.area_mm2}mm²` : ""})\n평균 ${s.mean} · 최소 ${s.min} · 최대 ${s.max} · 표준편차 ${s.std} (${s.unit})`);
                     } catch (e) { alert(e instanceof Error ? e.message : "ROI 통계 실패"); }

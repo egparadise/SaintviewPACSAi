@@ -393,6 +393,10 @@ export const api = {
   aiQuality: () => req<AiQuality>("/api/admin/ai-quality"),
   instances: (studyId: number) =>
     req<{ items: InstanceThumb[]; key_images: KeyImage[] }>(`/api/studies/${studyId}/instances`),
+  /** 키이미지 SOP 목록만 — DB 컬럼 조회(Orthanc 왕복 없음).
+   *  전에는 뷰어가 이걸 얻으려고 instances() 를 불러 전 인스턴스 열거 비용을 냈다. */
+  keyImages: (studyId: number) =>
+    req<{ key_images: KeyImage[] }>(`/api/studies/${studyId}/key-images`),
   setKeyImages: (studyId: number, items: KeyImage[]) =>
     req<{ ok: boolean }>(`/api/studies/${studyId}/key-images`, {
       method: "PUT",

@@ -553,6 +553,18 @@ class KeyImagesBody(BaseModel):
     items: list[dict]  # [{"sop_uid","orthanc_id","instance_number"}]
 
 
+@router.get("/studies/{study_id}/key-images")
+def get_key_images(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
+    """키이미지 SOP 목록 — **DB 컬럼만** 읽는다(Orthanc 왕복 없음).
+
+    전에는 뷰어가 이 값을 얻으려고 /studies/{id}/instances 를 불렀는데, 그 엔드포인트는
+    Orthanc `GET /system`(alive) + 전 인스턴스 열거 + 가시성 필터 + 인스턴스별 preview_url
+    생성을 모두 한다. 열린 탭 수만큼 반복되어 탭 추가 시 O(n²) 였다.
+    """
+    study = _require_study(db, study_id, user)
+    return {"key_images": study.key_images or []}
+
+
 @router.put("/studies/{study_id}/key-images")
 def set_key_images(
     study_id: int, body: KeyImagesBody, db: Session = Depends(get_db), user: dict = Depends(current_user)
