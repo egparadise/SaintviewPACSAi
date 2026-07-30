@@ -21,7 +21,9 @@ import { ReportDock } from "../components/ReportDock";
 import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { IN_MOUSE_OPS } from "../lib/infiConfig";
-import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
+// ⚠ lib/cornerstone(=Cornerstone3D+vtk.js 3MB↑) 이 아니라 경량 lib/imageFormat 에서 가져온다.
+//   전에는 이 세 개 때문에 2D 뷰어 청크에 3D 라이브러리 전체가 딸려왔다(2D 는 실행조차 안 함).
+import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/imageFormat";
 import { isWasmPipeline, onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
 import { cancelWarm, prefetchAround, warmSeries } from "../lib/framePrefetch";
 import { rawAt, samplePixels } from "../lib/pixelTools";

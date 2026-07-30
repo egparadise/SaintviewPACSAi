@@ -15,7 +15,9 @@ const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ defaul
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 import { api, openViewer, type Anno, type GspsItem, type InstanceNode, type SeriesNode, type StudyDetail } from "../api";
 import { annoLabel, measureAnno } from "../lib/annotations";
-import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/cornerstone";
+// ⚠ lib/cornerstone(=Cornerstone3D+vtk.js 3MB↑) 이 아니라 경량 lib/imageFormat 에서 가져온다.
+//   전에는 이 세 개 때문에 2D 뷰어 청크에 3D 라이브러리 전체가 딸려왔다(2D 는 실행조차 안 함).
+import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/imageFormat";
 import { isWasmPipeline, onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
 import { cancelWarm, prefetchAround, warmSeries } from "../lib/framePrefetch";
 import { IN_PALETTE, IN_PALETTE_GROUPS, IN_CROSSLINK_MODES, IN_MOUSE_OPS, IN_WL_PRESETS_CT, IN_WL_PRESETS_MR } from "../lib/infiConfig";
