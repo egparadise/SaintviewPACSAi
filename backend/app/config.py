@@ -22,14 +22,14 @@ class Settings:
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = int(os.getenv("SAINTVIEW_JWT_EXPIRE_MINUTES", "480"))
     # Orthanc (D-3)
-    orthanc_url: str = os.getenv("SAINTVIEW_ORTHANC_URL", "http://localhost:8042")
+    orthanc_url: str = os.getenv("SAINTVIEW_ORTHANC_URL", "http://127.0.0.1:8042")
     # 클라이언트(브라우저)가 쓰는 썸네일 프리뷰 베이스 — 기본은 상대경로 '/orthanc'(Vite 프록시→localhost:8042).
     # 같은 출처라 원격(Tailscale) 접속에서도 동작. 직접 노출하려면 SAINTVIEW_ORTHANC_PREVIEW_BASE=http://<IP>:8042 로 override.
     orthanc_preview_base: str = os.getenv("SAINTVIEW_ORTHANC_PREVIEW_BASE", "/orthanc")
     # 메인 서버 페이지 — 통합 상태/관리용 외부 서비스 주소
     ohif_url: str = os.getenv("SAINTVIEW_OHIF_URL", "http://localhost:3000")
     api_url: str = os.getenv("SAINTVIEW_API_URL", "http://localhost:8000")
-    pg_host: str = os.getenv("SAINTVIEW_PG_HOST", "localhost")
+    pg_host: str = os.getenv("SAINTVIEW_PG_HOST", "127.0.0.1")
     pg_port: int = int(os.getenv("SAINTVIEW_PG_PORT", "5433"))
     orthanc_user: str = os.getenv("SAINTVIEW_ORTHANC_USER", "saintview")
     orthanc_password: str = os.getenv("SAINTVIEW_ORTHANC_PASSWORD", "saintview_dev")

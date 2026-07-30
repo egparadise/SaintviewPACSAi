@@ -213,7 +213,8 @@ def provision_hospital(db: Session, hid: int) -> dict:
     ok = cp.returncode == 0
     entry = {
         "container": hospital_container_name(hid),
-        "url": f"http://localhost:{web_port}",
+        # ⚠ 127.0.0.1 고정 — Windows 에서 localhost 는 ::1 을 먼저 시도해 연결당 ~200ms 를 잃는다
+        "url": f"http://127.0.0.1:{web_port}",
         "dicom_port": dicom_port,
         "web_port": web_port,
         "volume": volume.as_posix(),

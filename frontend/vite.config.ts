@@ -45,10 +45,11 @@ export default defineConfig({
     allowedHosts: true,      // Vite Host 헤더 체크 우회(Tailscale IP·MagicDNS 호스트 허용)
     https: httpsOption(),    // 항상 자체서명 HTTPS(원격 secure context 보장) — http 폴백 없음
     proxy: {
-      '/api': 'http://localhost:8000',        // 백엔드 FastAPI
-      '/dicom-web': 'http://localhost:3000',  // Orthanc DICOMweb (OHIF nginx 경유)
+      '/api': 'http://127.0.0.1:8000',        // 백엔드 FastAPI (⚠ localhost 는 Windows 에서 ::1 먼저
+                                              //    시도해 연결당 ~200ms 를 잃는다 — 실측 214ms→7ms)
+      '/dicom-web': 'http://127.0.0.1:3000',  // Orthanc DICOMweb (OHIF nginx 경유)
       '/orthanc': {                            // 썸네일 프리뷰 — Orthanc 네이티브 /instances/.../preview
-        target: 'http://localhost:8042',
+        target: 'http://127.0.0.1:8042',
         rewrite: (p) => p.replace(/^\/orthanc/, ''),
         // preview 캐시 1시간 — 200 응답에만(오류 캐시 고정 방지), immutable 금지(동일 SOP 재전송 대비)
         configure: (proxy) => {

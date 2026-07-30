@@ -269,6 +269,9 @@ def orthanc_url_for_hospital(db, hospital_id) -> str | None:
         reg = get_setting(db, "infra.containers", default={}) or {}
         entry = reg.get(str(hospital_id)) if isinstance(reg, dict) else None
         url = entry.get("url") if isinstance(entry, dict) else None
+        # 이미 등록된 레지스트리 항목의 localhost 도 여기서 교정한다(재프로비저닝 없이 즉시 반영)
+        if isinstance(url, str):
+            url = url.replace("//localhost:", "//127.0.0.1:")
         return str(url) if url else None
     except Exception:  # noqa: BLE001 — 해석 실패는 공유 폴백(가용성 우선)
         logger.warning("병원별 Orthanc URL 해석 실패(hid=%s) — 공유 컨테이너 폴백", hospital_id)

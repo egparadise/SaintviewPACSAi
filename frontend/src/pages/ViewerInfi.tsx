@@ -138,6 +138,24 @@ function geomOf(inst: InstanceNode): Geom | null {
 /** 소스 평면(src)과 타깃(tgt) 평면의 **정확한 교차선**을 타깃 픽셀좌표로 반환.
  *  타깃 이미지 경계를 약간(5%) 넘는 범위로 클리핑 — 상하/좌우 전체를 관통하는 풀 레인지 라인.
  *  평행 평면이면 null. (기존 모서리 투영 근사는 대각선 오류가 있어 폐기) */
+/** 마스터 이미지와 해부학적으로 같은 높이의 타깃 슬라이스 — Spatial 동기(T-View nearestSliceIndex 이식).
+ *  두 위치를 **타깃의 슬라이스 법선**에 투영해 가장 가까운 장을 고른다.
+ *  기하가 없으면 null → 호출부가 Index(1:1) 로 폴백한다. */
+function nearestSliceIdx(masterInst: InstanceNode, target: { instances: InstanceNode[] }): number | null {
+  const gm = geomOf(masterInst);
+  if (!gm) return null;
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < target.instances.length; i++) {
+    const gt = geomOf(target.instances[i]);
+    if (!gt) continue;
+    const nn = Math.hypot(gt.n[0], gt.n[1], gt.n[2]) || 1;
+    const loc = (q: number[]) => (q[0] * gt.n[0] + q[1] * gt.n[1] + q[2] * gt.n[2]) / nn;
+    const d = Math.abs(loc(gm.pos) - loc(gt.pos));
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best >= 0 ? best : null;
+}
+
 function scoutSegment(src: Geom, tgt: Geom): { x1: number; y1: number; x2: number; y2: number } | null {
   const nsLen = Math.hypot(...src.n), ntLen = Math.hypot(...tgt.n);
   if (nsLen < 1e-9 || ntLen < 1e-9) return null;
@@ -384,6 +402,8 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   // §3.3 Crosslink 5기능 — 전부 동작: crosslink=마스터, auto_sync=같은 검사, sync_other=다른 검사(과거),
   // scout=활성 페인 현재 이미지 절단선, all_lines=활성 시리즈 전체 절단선
   const [xlink, setXlink] = useState<Record<string, boolean>>({ crosslink: true, auto_sync: true, scout: true });
+  // Stack 동기 방식(G) — Spatial: DICOM 좌표로 해부학적 정합 / Index: 1:1 인덱스 (T-View 동일)
+  const [spatialSync, setSpatialSync] = useState(true);
   const [toast, setToast] = useState("");
   // §3.1 툴바 상단(원본): Report 도크(ReportDock — TY 와 동일 기능) + Prev/Next 워크리스트 내비게이션
   // 열림 상태는 viewer.prefs.infi_report_dock 로 계정 로밍
@@ -963,10 +983,24 @@ void applyHpSources(rule);
       if (!(k === i || (linked && p.series)) || !p.series) return p;
       // 무한 순환 — 끝 다음은 처음, 처음 이전은 끝(스크롤·화살표 공통). 양방향 wrap.
       const len = p.series.instances.length;
-      return { ...p, index: len > 0 ? (((p.index + delta) % len) + len) % len : 0 };
+      const idxWrap = len > 0 ? (((p.index + delta) % len) + len) % len : 0;
+      // 마스터가 아닌 링크 페인은 Spatial 이면 해부학적 최근접 슬라이스로 — 두께·장수가 달라도 맞는다.
+      // 같은 시리즈면 계산 없이 마스터와 동일 위치(정확·경량), 좌표가 없으면 Index(1:1) 폴백.
+      if (k !== i && spatialSync) {
+        const mp2 = ps[i];
+        const mLen = mp2?.series?.instances.length ?? 0;
+        const mIdx2 = mLen > 0 ? (((mp2.index + delta) % mLen) + mLen) % mLen : 0;
+        const mInst2 = mp2?.series?.instances[mIdx2];
+        if (mInst2) {
+          const ti = p.series.series_uid === mp2.series?.series_uid
+            ? mIdx2 : nearestSliceIdx(mInst2, p.series);
+          if (ti != null) return { ...p, index: ti };
+        }
+      }
+      return { ...p, index: idxWrap };
       });
     });
-  }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other]);
+  }, [xlink.crosslink, xlink.auto_sync, xlink.sync_other, spatialSync]);
 
   // ── 인접 슬라이스 프리페치 — 인덱스/시리즈가 바뀔 때만 진행 방향 앞 8·뒤 3장 선제 로드.
   //    (W/L·zoom 등 다른 페인 상태 변경에는 발동하지 않음 — 드래그 중 요청 폭주 방지) ──
@@ -2664,6 +2698,10 @@ void applyHpSources(rule);
         case "r": updMany(targetsOf(active), (q) => ({ rot: (q.rot + 90) % 360 })); schedHist(); return;
         case "f": updMany(targetsOf(active), () => ({ zoom: 1, tx: 0, ty: 0 })); schedHist(); return;
         case "l": setXlink((x) => ({ ...x, crosslink: !x.crosslink })); return;
+        // G — Stack 동기 방식 전환(T-View 와 같은 키)
+        case "g":
+          setSpatialSync((v) => { say(!v ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !v; });
+          return;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -3357,6 +3395,14 @@ void applyHpSources(rule);
               {m.label}
             </label>
           ))}
+          {/* Stack 동기 방식 (G) — T-View·SaintView 와 같은 토글 */}
+          <button title="Stack 동기 방식 (G 키) — Spatial: DICOM 좌표로 해부학적 정합(두께·각도·장수 달라도) / Index: 1:1 인덱스(좌표 없는 데이터·강제 정합)"
+                  onClick={() => { setSpatialSync((v) => { say(!v ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !v; }); }}
+                  style={{ fontSize: 10.5, padding: "1px 7px", marginLeft: 4,
+                           background: spatialSync ? "var(--accent)" : undefined,
+                           color: spatialSync ? "#fff" : undefined }}>
+            {spatialSync ? "◈ Spatial" : "▤ Index"}
+          </button>
         </span>
       </div>
 

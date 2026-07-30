@@ -52,7 +52,7 @@ curl -s -o NUL -m 2 http://localhost:8000/api/health >nul 2>&1
 if not errorlevel 1 (
   echo    이미 실행 중 - 건너뜁니다.
 ) else (
-  set "SAINTVIEW_DATABASE_URL=postgresql+psycopg2://saintview:saintview_dev@localhost:5433/saintview"
+  set "SAINTVIEW_DATABASE_URL=postgresql+psycopg2://saintview:saintview_dev@127.0.0.1:5433/saintview"
   start "Saintview Backend" /min cmd /c "cd /d %~dp0backend && py -3.11 -m uvicorn app.main:app --port 8000 --log-level warning"
 )
 
