@@ -521,6 +521,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   //    (안 그러면 Exam 전환 후 HP 적용이 '창을 처음 열 때의 검사' 기준으로 과거검사를 고른다)
   const curDetailRef = useRef<StudyDetail>(detail);
   useEffect(() => { curDetailRef.current = dockDetail; }, [dockDetail]);
+  // 검사가 바뀌면 HP 적용 여부를 초기화 — 새 검사에서는 2D 행잉이 다시 기본이 된다
+  useEffect(() => { hpAppliedRef.current = false; hpIlRef.current = null; }, [detail.id]);
   // 시리즈 페이지 — Series 분할보다 시리즈가 많을 때 Shift+스크롤로 다음 묶음을 본다
   const [seriesPage, setSeriesPage] = useState(0);
   const [layout, setLayout] = useState<keyof typeof LAYOUTS>("1x1");
@@ -587,6 +589,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   // 직접설정 — 켜면 화면을 자유롭게 구성한 뒤 [현재 화면을 프로토콜로 저장] 으로 규칙을 만든다
   const [hpDirect, setHpDirect] = useState(false);
   const [hpSaveCap, setHpSaveCap] = useState<HpCapture | null>(null);
+  // HP 가 정한 Image 분할 — 시리즈 로드(페인 재생성)가 이 값을 우선 적용해야 규칙이 살아남는다
+  const hpIlRef = useRef<{ r: number; c: number } | null>(null);
+  // HP 규칙이 이미 적용됐는가 — viewer.prefs(2D 행잉)와 viewer.hp 는 병렬 GET 이라 도착 순서가 매번 다르다.
+  // 'HP 가 2D 행잉보다 우선' 을 순서에 의존하지 않고 이 플래그로 보장한다.
+  const hpAppliedRef = useRef(false);
   const [wlAll, setWlAll] = useState(false);  // W/L 프리셋을 전체 페인에 적용 (UBPACS All)
   const [menu, setMenu] = useState<null | "opened" | "related" | "series" | "hp">(null);
   const [mprOn, setMprOn] = useState(false);  // 내장 MPR/MIP (CT/MR — 뷰포트 영역 전환)
@@ -1044,13 +1051,28 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     // MG 는 전용 행잉(2D-MG 분할)이 우선 — HP 규칙이 1×1 등으로 덮으면 맞붙임이 죽는다
     if (cur.modality !== "MG") {
       if (LAYOUTS[key]) setLayout(key);
+      setMaximized(null);          // 최대화 중이면 분할이 화면에 나타나지 않는다 — 먼저 해제
       const il = { r: Math.min(rule.i.r, 10), c: Math.min(rule.i.c, 10) };
       setImgLay(il);
+      hpIlRef.current = il;        // 시리즈 로드가 페인을 다시 만들 때도 이 분할을 쓴다
+      hpAppliedRef.current = true;   // 2D 행잉이 뒤늦게 도착해도 HP 를 덮지 않게(응답 순서 무관)
       // ⚠ imgLay 는 콤보 표시용 — 실제 적용은 페인별 il 이다. 이걸 빼면 저장→재적용 왕복이 깨진다.
-      setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pv]) => [k, {
-        ...pv, il, tz: undefined,
-        index: alignTileIndex(pv.index, il.r * il.c, pv.series?.instances.length ?? 0),
-      }])));
+      //   분할을 키웠으면 아직 비어 있는 페인에 현재 검사의 미표시 시리즈를 순서대로 채운다
+      //   (안 채우면 규칙이 분할만 키우고 빈 칸이 남는다 — In-View 는 채운다)
+      const vis = PANE_IDS.slice(0, LAYOUTS[key]?.count ?? 1);
+      setPanes((prev) => {
+        const shown = new Set(vis.map((k) => prev[k]?.series?.series_uid).filter(Boolean) as string[]);
+        const spare = seriesRef.current.filter((x) => !shown.has(x.series_uid));
+        let si = 0;
+        return Object.fromEntries(Object.entries(prev).map(([k, pv]) => {
+          const fill = vis.includes(k) && !pv.series ? spare[si++] : undefined;
+          const base = fill
+            ? { ...initPane(cur.study_uid), series: fill, index: Math.floor(fill.instances.length / 2) }
+            : pv;
+          return [k, { ...base, il, tz: undefined,
+                       index: alignTileIndex(base.index, il.r * il.c, base.series?.instances.length ?? 0) }];
+        }));
+      });
     }
     if (rule.wl !== undefined) {
       setPanes((prev) => Object.fromEntries(
@@ -1117,10 +1139,11 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const hv = detail.modality === "MG" ? undefined : pickHang(detail.modality);
       const sKey = typeof hv === "string" ? hv : hv?.s;
       const iKey = typeof hv === "string" ? undefined : hv?.i;
-      if (sKey && LAYOUTS[sKey]) setLayout(sKey as keyof typeof LAYOUTS);
+      // HP 가 이미 분할을 정했으면 2D 행잉이 덮지 않는다(두 설정 GET 의 도착 순서와 무관)
+      if (sKey && LAYOUTS[sKey] && !hpAppliedRef.current) setLayout(sKey as keyof typeof LAYOUTS);
       const ig = iKey && LAYOUTS[iKey] ? { r: LAYOUTS[iKey].rows, c: LAYOUTS[iKey].cols } : null;
       hang2dImgRef.current = ig && (ig.r > 1 || ig.c > 1) ? ig : null;   // 페인 생성(시리즈 로드)에서 사용
-      if (ig) {
+      if (ig && !hpAppliedRef.current) {
         setImgLay(ig);
         // 이미 생성된 페인에도 즉시 적용(prefs 로드가 시리즈 로드보다 늦은 경우)
         setPanes((prev) => Object.fromEntries(Object.entries(prev).map(([k, pp]) => [k, {
@@ -1240,13 +1263,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                   // 타일 분할이 있으면 시작을 페이지 경계로 — 중앙에서 시작하면 마지막 칸만 채워진다
                   index: alignTileIndex(Math.floor(s.instances.length / 2),
                                         mammo ? 1
-                                          : ((userIlRef.current ?? hang2dImgRef.current)?.r ?? 1)
-                                            * ((userIlRef.current ?? hang2dImgRef.current)?.c ?? 1),
+                                          : ((userIlRef.current ?? hpIlRef.current ?? hang2dImgRef.current)?.r ?? 1)
+                                            * ((userIlRef.current ?? hpIlRef.current ?? hang2dImgRef.current)?.c ?? 1),
                                         s.instances.length),
                   wl: ai?.q ?? "",
                   // 사용자가 직접 바꾼 Image 분할 우선, 없으면 모달리티 기본.
                   // ⚠ Mammo 는 페인당 1장 고정 — 타일로 나누면 2D-MG 맞붙임이 성립하지 않는다
-                  il: mammo ? undefined : (userIlRef.current ?? hang2dImgRef.current ?? undefined) })
+                  il: mammo ? undefined : (userIlRef.current ?? hpIlRef.current ?? hang2dImgRef.current ?? undefined) })
               : initPane(detail.study_uid);
           });
           return next;
@@ -1667,7 +1690,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         const a0 = f(cur.study_date), b0 = f(ex.study_date);
         return a0 && b0 ? Math.round((a0.getTime() - b0.getTime()) / 86400000) : null;
       })();
-      if (d == null || d < 0) return "prior";
+      if (d == null) return "prior";
+      if (d < 0) return "current";   // 기준보다 이후 검사 — 과거로 기록하면 현재/과거가 뒤집힌다
       return d <= 7 ? "w1" : d <= 30 ? "m1" : d <= 365 ? "y1" : "prior";
     });
     const ap = panes[activePane];

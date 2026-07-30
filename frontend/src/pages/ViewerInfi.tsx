@@ -634,7 +634,9 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       // Series Description 을 부위 검색 대상으로 고른 규칙을 위해 시리즈 설명도 함께 넘긴다
       const sdescs = list.flatMap((e) => e.series.map((x) => x.series_desc || ""));
       const hpMatch = hpPickRule(rules, detail as unknown as Record<string, unknown>, sdescs);
-      hpPendingRef.current = hpMatch;   // 페인 생성 후 칸별 영상 시점을 적용(아래 effect)
+      // ⚠ 단독 검사일 때만 예약 — 여러 검사가 열린 창은 HP 레이아웃 자체를 건너뛰므로,
+      //    칸별 과거검사 배치만 실행되면 다른 검사 페인을 덮어써 환자가 섞인다.
+      hpPendingRef.current = list.length === 1 ? hpMatch : null;
 
       // ⑤ Key Image View: 주 검사의 시리즈를 키이미지 SOP 만 남긴 [KEY] 시리즈로 필터
       if (keySops?.length) {
@@ -875,12 +877,15 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const f = (v: string) => (/^\d{8}$/.test(v) ? new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)) : null);
       const a0 = f(base.study_date), b0 = f(ex.study_date);
       const d = a0 && b0 ? Math.round((a0.getTime() - b0.getTime()) / 86400000) : null;
-      if (d == null || d < 0) return "prior";
+      if (d == null) return "prior";
+      if (d < 0) return "current";   // 기준보다 이후 검사 — 과거로 기록하면 현재/과거가 뒤집힌다
       return d <= 7 ? "w1" : d <= 30 ? "m1" : d <= 365 ? "y1" : "prior";
     });
+    // 파고들기 중이면 화면은 1×1 이지만 사용자가 정한 분할은 tz 에 남아 있다 — 그쪽을 기록
+    const apIl = panes[active]?.tz?.il ?? panes[active]?.il ?? { r: 1, c: 1 };
     return {
       s: { r: sLayout.r, c: sLayout.c },
-      i: { r: panes[active]?.il?.r ?? 1, c: panes[active]?.il?.c ?? 1 },
+      i: { r: apIl.r, c: apIl.c },
       wl: panes[active]?.wl ?? "",
       xlink: { ...xlink },
       sources,
@@ -929,6 +934,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   }, [panes.length, detail.id]);
 
   const applyHpIn = (rule: HpRule) => {
+    setMaximized(null);   // 최대화 중이면 분할이 화면에 나타나지 않는다
     const vg = rule.displays?.find((d) => d.role === "viewer")?.grid ?? rule.s;
     applySLayout({ r: Math.min(vg.r, 10), c: Math.min(vg.c, 10) });
     setPanes((ps) => ps.map((p) => {

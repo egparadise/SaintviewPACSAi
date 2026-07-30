@@ -9,8 +9,8 @@
  * 표시 위치: 설정 창 상단 버전 칩 + 설정 > 정보(Information).
  */
 export const APP_NAME = "Saintview PACS AI";
-export const APP_VERSION = "0.52.0";
-export const APP_RELEASE_DATE = "2026-07-27";
+export const APP_VERSION = "0.57.0";
+export const APP_RELEASE_DATE = "2026-07-30";
 export const APP_VENDOR = "Inviz corporation";
 
 /** 화면 표기용 — "v0.52.0" */
