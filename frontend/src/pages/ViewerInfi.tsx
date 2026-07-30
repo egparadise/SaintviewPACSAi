@@ -891,7 +891,13 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       wl: panes[active]?.wl ?? "",
       xlink: { ...xlink },
       sources,
-      cells: Array.from({ length: n }, () => null),
+      // 칸별 시리즈 순번(1-base) — 현재 검사 페인만. 과거검사 페인은 null(시점으로 표현)
+      cells: Array.from({ length: n }, (_, k) => {
+        const p = panes[k];
+        if (!p?.series || p.studyUid !== base.study_uid) return null;
+        const i = series.findIndex((x) => x.series_uid === p.series?.series_uid);
+        return i >= 0 ? i + 1 : null;
+      }),
     };
   };
 

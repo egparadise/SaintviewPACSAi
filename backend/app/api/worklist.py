@@ -487,6 +487,7 @@ async def import_dicom(
 
     # 즉시 등록 — StableStudy 대기 없이 업로드된 검사들을 로컬 DB(studies)에 직접 upsert
     registered = 0
+    from app.dicom.orthanc import _flat_code   # ProcedureCodeSequence 평탄화(동기화 경로와 동일)
     for sid in parent_studies:
         try:
             meta = client.study_metadata(sid)
@@ -509,6 +510,7 @@ async def import_dicom(
                 referring_physician=str(tags.get("ReferringPhysicianName", "")),
                 department=tags.get("InstitutionalDepartmentName", ""),
                 protocol_name=tags.get("ProtocolName", ""),
+                procedure_code=_flat_code(tags.get("ProcedureCodeSequence")),
                 procedure_desc=tags.get("RequestedProcedureDescription", ""),
                 step_desc=tags.get("PerformedProcedureStepDescription", ""),
                 source_aet="IMPORT",

@@ -1062,12 +1062,23 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       //   분할을 키웠으면 아직 비어 있는 페인에 현재 검사의 미표시 시리즈를 순서대로 채운다
       //   (안 채우면 규칙이 분할만 키우고 빈 칸이 남는다 — In-View 는 채운다)
       const vis = PANE_IDS.slice(0, LAYOUTS[key]?.count ?? 1);
+      // 칸별 시리즈 순번(cells, 1-base) — 규칙이 지정한 칸은 그 순번의 시리즈를 강제 배정한다.
+      // (지정 없으면 null=자동 → 아래에서 미표시 시리즈를 순서대로 채운다)
+      const cells = vd?.cells ?? [];
       setPanes((prev) => {
-        const shown = new Set(vis.map((k) => prev[k]?.series?.series_uid).filter(Boolean) as string[]);
-        const spare = seriesRef.current.filter((x) => !shown.has(x.series_uid));
+        const byCell: Record<string, SeriesNode | undefined> = {};
+        vis.forEach((k, ci) => {
+          const n = cells[ci];
+          if (typeof n === "number" && n >= 1) byCell[k] = seriesRef.current[n - 1];
+        });
+        const forced = new Set(Object.values(byCell).filter(Boolean).map((x) => (x as SeriesNode).series_uid));
+        const shown = new Set([...vis.map((k) => byCell[k]?.series_uid ?? prev[k]?.series?.series_uid)
+          .filter(Boolean) as string[]]);
+        const spare = seriesRef.current.filter((x) => !shown.has(x.series_uid) && !forced.has(x.series_uid));
         let si = 0;
         return Object.fromEntries(Object.entries(prev).map(([k, pv]) => {
-          const fill = vis.includes(k) && !pv.series ? spare[si++] : undefined;
+          const pin = byCell[k];
+          const fill = vis.includes(k) ? (pin ?? (!pv.series ? spare[si++] : undefined)) : undefined;
           const base = fill
             ? { ...initPane(cur.study_uid), series: fill, index: Math.floor(fill.instances.length / 2) }
             : pv;
@@ -1705,7 +1716,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       wl: ap?.wl ?? "",
       xlink: { ...xlink },
       sources,
-      cells: ids.map(() => null),
+      // 칸별 시리즈 순번 — 현재 검사 시리즈 목록에서의 위치(1-base). 과거검사 페인은 null(시점으로 표현)
+      cells: ids.map((pid) => {
+        const p = panes[pid];
+        if (!p?.series || p.studyUid !== cur.study_uid) return null;
+        const i = seriesRef.current.findIndex((x) => x.series_uid === p.series?.series_uid);
+        return i >= 0 ? i + 1 : null;
+      }),
     };
   };
 
@@ -2966,8 +2983,12 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
 
   /* 주석/Reference line SVG 오버레이 — 이미지 콘텐츠 사각형에 정합(viewBox=픽셀 격자) */
-  const annoSvg = (pid: string, p: PaneState, inst: InstanceNode) => {
-    const size = paneSizes.current[pid];
+  /** 주석·Scout·셔터·3D커서 SVG 레이어.
+   *  cellSize 를 주면 그 크기(=Image 분할 칸) 기준으로 그린다 — 타일 분할에서도
+   *  교차선·주석이 보이게 하려면 칸마다 자기 크기로 호출해야 한다(I-View 동일 구조). */
+  const annoSvg = (pid: string, p: PaneState, inst: InstanceNode,
+                   cellSize?: { w: number; h: number }) => {
+    const size = cellSize ?? paneSizes.current[pid];
     if (!size || size.w < 10 || size.h < 10) return null;
     const cols = inst.cols || 1000, rows = inst.rows || 1000;
     const cr = contentRect(size.w, size.h, cols / rows);
@@ -3422,6 +3443,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                            transform: paneXf, filter: paneFilter(p),
                          }} />
                   )}
+                  {/* 칸별 주석·Scout 교차선·셔터 — 전에는 타일 분할에서 이 레이어가 아예 없어
+                      Image 분할로 바꾸면 교차선·주석·셔터가 모두 사라졌다(I-View 는 칸마다 그린다).
+                      칸의 실제 크기를 넘겨 그 칸에 표시된 이미지 기하로 계산한다. */}
+                  {ti && (() => {
+                    const ps = paneSizes.current[pid];
+                    if (!ps) return null;
+                    const cw = ps.w / pIl.c, chh = ps.h / pIl.r;
+                    return annoSvg(pid, p, ti, { w: cw, h: chh });
+                  })()}
                   {overlayOn && ti && (() => {
                     // 칸(이미지) 범위 오버레이 — 설정의 scope=image 항목만 칸마다 그린다
                     const meta = studyMeta[p.studyUid] ?? detail;
