@@ -1,5 +1,11 @@
 // API 클라이언트 — 백엔드 FastAPI
-const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+//
+// ⚠ 기본값은 **상대경로(빈 문자열)** 여야 한다. frontend/.env 는 gitignore 대상이라
+//   새로 클론한 환경에는 없고, 그때 절대 URL(http://localhost:8000)이 기본이 되면
+//   ① 원격 접속에서 클라이언트 자신을 가리켜 전부 실패 ② CORS ③ Windows 의
+//   localhost→::1 폴백으로 요청마다 ~200ms 손실이 생긴다.
+//   상대경로면 vite(개발)·nginx(배포)의 /api 프록시를 타 로컬·원격 모두 동작한다.
+const BASE = import.meta.env.VITE_API_BASE ?? "";
 const OHIF_BASE = import.meta.env.VITE_OHIF_BASE ?? "http://localhost:3000";
 /** 뷰어 창 베이스 — 별도 포트로 띄우려면 frontend/.env에 VITE_VIEWER_BASE=https://localhost:5176
  *  설정 후 `npm run dev:viewer`(5176)를 함께 실행(HTTPS 전용 — vite가 https로 고정). 빈값=같은 출처(포트) 사용.

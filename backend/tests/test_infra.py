@@ -103,7 +103,8 @@ def test_provision_renders_template_and_records_registry(infra_client, db, tmp_p
 
     # 레지스트리(infra.containers) 기록 — 병원별 URL 해석의 근거
     reg = docker_service.get_registry(db)
-    assert reg[str(hid)]["url"] == f"http://localhost:{entry['web_port']}"
+    # 127.0.0.1 고정 — Windows 의 localhost→::1 폴백이 연결당 ~200ms 를 먹는다(perf)
+    assert reg[str(hid)]["url"] == f"http://127.0.0.1:{entry['web_port']}"
     assert reg[str(hid)]["container"] == f"saintview-orthanc-h{hid}"
 
 
@@ -185,13 +186,14 @@ def test_orthanc_url_resolution_with_fallback(db):
                   "dicom_port": 5077, "web_port": 8877, "volume": "/v", "aet": "SAINTVIEW_H777"}
     docker_service.save_registry(db, reg)
 
-    assert orthanc_url_for_hospital(db, 777) == "http://localhost:8877"
+    # 레지스트리에 localhost 로 남아 있던 항목도 읽을 때 127.0.0.1 로 교정된다
+    assert orthanc_url_for_hospital(db, 777) == "http://127.0.0.1:8877"
     assert orthanc_url_for_hospital(db, 424242) is None  # 미등록 → 공유 폴백
     assert orthanc_url_for_hospital(db, None) is None
 
     c = client_for_hospital(db, 777)
     try:
-        assert str(c._client.base_url).rstrip("/") == "http://localhost:8877"
+        assert str(c._client.base_url).rstrip("/") == "http://127.0.0.1:8877"
     finally:
         c.close()
     shared = client_for_hospital(db, 424242)
