@@ -1,5 +1,6 @@
 // 휴대폰 촬영 페이지 (?capture=TOKEN) — 로그인 없이 토큰으로 동작. 촬영→업로드→검사 새 시리즈.
 import { useEffect, useRef, useState } from "react";
+import { t as tr } from "../lib/i18n";
 
 export function MobileCapture({ token }: { token: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,8 +79,8 @@ export function MobileCapture({ token }: { token: string }) {
           )}
           {msg && <div style={{ padding: "6px 12px", fontSize: 12, color: "#f87171" }}>{msg}</div>}
           <div style={{ display: "flex", gap: 10, padding: 12, background: "#111827" }}>
-            <button style={{ ...B, flex: 0.6 }} title="앞/뒤 카메라 전환"
-                    onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}>🔄 카메라</button>
+            <button style={{ ...B, flex: 0.6 }} title={tr("앞/뒤 카메라 전환")}
+                    onClick={() => setFacing((f) => (f === "environment" ? "user" : "environment"))}>{tr("🔄 카메라")}</button>
             <button className="primary" style={B} onClick={shoot}>📸 촬영 ({shots.length})</button>
             <button style={{ ...B, background: "#16a34a", color: "#fff", border: "none" }}
                     disabled={busy || !shots.length} onClick={upload}>{busy ? "업로드 중…" : "⬆ 업로드"}</button>

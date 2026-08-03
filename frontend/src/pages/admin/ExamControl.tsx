@@ -14,6 +14,7 @@ import {
 } from "../../api";
 import { MergeIcon } from "../../components/readState";
 import { clampSz } from "../../lib/Splitter";
+import { t as tr } from "../../lib/i18n";
 
 // HospitalAdmin 과 동일한 다크 테마 카드/입력 스타일 (해당 상수는 미export — 로컬 유지)
 const card: React.CSSProperties = {
@@ -88,7 +89,7 @@ function RSplit({ dir, onDrag, onEnd }: {
   return (
     <div onMouseDown={start} onMouseEnter={() => setHot(true)}
          onMouseLeave={() => { if (!dragging.current) setHot(false); }}
-         title="드래그=블록 크기 조절"
+         title={tr("드래그=블록 크기 조절")}
          style={{ flexShrink: 0, zIndex: 5, borderRadius: 2,
                   background: hot ? "var(--accent,#7dd3fc)" : "var(--border)",
                   opacity: hot ? 0.9 : 0.5, transition: "background .12s, opacity .12s",
@@ -208,11 +209,11 @@ function PatientCard({ title, s, accent, empty }: {
       ) : (
         <table className="grid-table" style={{ fontSize: 12 }}>
           <tbody>
-            <tr><th style={{ width: 62 }}>이름</th><td>{s.patient_name || "—"}</td></tr>
+            <tr><th style={{ width: 62 }}>{tr("이름")}</th><td>{s.patient_name || "—"}</td></tr>
             <tr><th>ID</th><td>{s.patient_key || "—"}</td></tr>
-            <tr><th>성별</th><td>{s.sex || "—"}</td></tr>
-            <tr><th>검사일</th><td>{s.study_date || "—"}</td></tr>
-            <tr><th>검사명</th><td>{s.study_desc || "—"} <span style={{ color: "var(--text-secondary)" }}>({s.modality})</span></td></tr>
+            <tr><th>{tr("성별")}</th><td>{s.sex || "—"}</td></tr>
+            <tr><th>{tr("검사일")}</th><td>{s.study_date || "—"}</td></tr>
+            <tr><th>{tr("검사명")}</th><td>{s.study_desc || "—"} <span style={{ color: "var(--text-secondary)" }}>({s.modality})</span></td></tr>
           </tbody>
         </table>
       )}
@@ -427,7 +428,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
     const picked = [...trashSel].map((i) => trash[i]).filter(Boolean);
     const series_uids = picked.filter((t) => t.kind === "series" && t.series_uid).map((t) => t.series_uid!);
     const sop_uids = picked.filter((t) => t.kind === "image" && t.sop_uid).map((t) => t.sop_uid!);
-    if (!series_uids.length && !sop_uids.length) { say("⚠ 휴지통에서 복구할 항목을 선택하세요", true); return; }
+    if (!series_uids.length && !sop_uids.length) { say(tr("⚠ 휴지통에서 복구할 항목을 선택하세요"), true); return; }
     setBusy(true);
     try {
       const r = await ds.restore({ series_uids, sop_uids });
@@ -458,7 +459,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
       {/* ── 상단: 제목 + 버튼 5종 ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-          🧰 Exam Control <span style={{ color: "var(--text-secondary)", fontWeight: 400, fontSize: 11.5 }}>— 관리자 검사 QC (삭제·복구·재배정)</span>
+          🧰 Exam Control <span style={{ color: "var(--text-secondary)", fontWeight: 400, fontSize: 11.5 }}>{tr("— 관리자 검사 QC (삭제·복구·재배정)")}</span>
         </div>
         {/* 소스 배지 — LOCAL(앰버)/SERVER(기본): 지금 조작 중인 데이터가 어디인지 상시 표시 */}
         <span title={isLocal ? "데이터 소스: 로컬 PACS (local.db) — Worklist Local Server 모드" : "데이터 소스: 서버 DB"}
@@ -495,16 +496,16 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
       {trashOpen && (
         <div style={{ ...card, borderColor: "var(--ai,#a78bfa)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <div style={{ ...secTitle, marginBottom: 0, color: "var(--ai,#a78bfa)" }}>🗑 휴지통 (소프트 삭제 항목)</div>
+            <div style={{ ...secTitle, marginBottom: 0, color: "var(--ai,#a78bfa)" }}>{tr("🗑 휴지통 (소프트 삭제 항목)")}</div>
             <div style={{ flex: 1 }} />
-            <button onClick={loadTrash} disabled={busy}>새로고침</button>
+            <button onClick={loadTrash} disabled={busy}>{tr("새로고침")}</button>
             <button className="primary" onClick={() => void doRestore()} disabled={busy || trashSel.size === 0}>
               선택 복구 ({trashSel.size})
             </button>
           </div>
           <div style={{ maxHeight: 180, overflow: "auto" }}>
             <table className="grid-table" style={{ fontSize: 12 }}>
-              <thead><tr><th></th><th>단위</th><th>환자</th><th>검사</th><th>대상</th><th>삭제 시각</th></tr></thead>
+              <thead><tr><th></th><th>{tr("단위")}</th><th>{tr("환자")}</th><th>{tr("검사")}</th><th>{tr("대상")}</th><th>{tr("삭제 시각")}</th></tr></thead>
               <tbody>
                 {trash.map((t, i) => (
                   <tr key={i} onClick={() => setTrashSel((p) => toggleSet(p, i))} style={{ cursor: "pointer" }}>
@@ -535,22 +536,22 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
           {/* ① 검사 그리드 — 가변(flex), ②③은 고정 높이(스플리터 조절) */}
           <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, flex: 1, minHeight: 80 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ ...secTitle, marginBottom: 0 }}>① 검사 (Exam)</div>
-              <input style={{ ...inp, flex: 1, minWidth: 120 }} placeholder="환자 ID/이름 검색"
+              <div style={{ ...secTitle, marginBottom: 0 }}>{tr("① 검사 (Exam)")}</div>
+              <input style={{ ...inp, flex: 1, minWidth: 120 }} placeholder={tr("환자 ID/이름 검색")}
                      value={q} onChange={(e) => setQ(e.target.value)}
                      onKeyDown={(e) => { if (e.key === "Enter") loadStudies(); }} />
-              <select style={inp} value={mod} onChange={(e) => setMod(e.target.value)} title="Modality 필터">
-                <option value="">Mod 전체</option>
+              <select style={inp} value={mod} onChange={(e) => setMod(e.target.value)} title={tr("Modality 필터")}>
+                <option value="">{tr("Mod 전체")}</option>
                 {modOptions.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
-              <select style={inp} value={period} onChange={(e) => setPeriod(e.target.value)} title="기간 필터">
+              <select style={inp} value={period} onChange={(e) => setPeriod(e.target.value)} title={tr("기간 필터")}>
                 {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
-              <button onClick={() => loadStudies()}>🔍 검색</button>
+              <button onClick={() => loadStudies()}>{tr("🔍 검색")}</button>
             </div>
             <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
               <table className="grid-table" style={{ fontSize: 12 }}>
-                <thead><tr><th>환자</th><th>ID</th><th>성별</th><th>검사일</th><th>Mod</th><th>검사명</th><th>S/I</th></tr></thead>
+                <thead><tr><th>{tr("환자")}</th><th>ID</th><th>{tr("성별")}</th><th>{tr("검사일")}</th><th>Mod</th><th>{tr("검사명")}</th><th>S/I</th></tr></thead>
                 <tbody>
                   {shown.map((s) => (
                     <tr key={s.id} onClick={() => pickStudy(s)}
@@ -582,7 +583,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             </div>
             <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
               <table className="grid-table" style={{ fontSize: 12 }}>
-                <thead><tr><th></th><th>#</th><th>Mod</th><th>설명</th><th>Image</th><th>상태</th></tr></thead>
+                <thead><tr><th></th><th>#</th><th>Mod</th><th>{tr("설명")}</th><th>Image</th><th>{tr("상태")}</th></tr></thead>
                 <tbody>
                   {(tree ?? []).map((s) => (
                     <tr key={s.series_uid} onClick={() => { setCurSeriesUid(s.series_uid); setPreview(null); }}
@@ -596,14 +597,14 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
                       <td style={s.deleted ? delRow : undefined}>{s.modality}</td>
                       <td style={s.deleted ? delRow : undefined}>{s.series_desc || "—"}</td>
                       <td style={s.deleted ? delRow : undefined}>{s.instances.length}</td>
-                      <td>{s.deleted ? <span style={{ color: "var(--danger,#f87171)", fontSize: 11 }}>삭제됨</span> : "—"}</td>
+                      <td>{s.deleted ? <span style={{ color: "var(--danger,#f87171)", fontSize: 11 }}>{tr("삭제됨")}</span> : "—"}</td>
                     </tr>
                   ))}
-                  {sel && tree === null && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>불러오는 중…</td></tr>}
+                  {sel && tree === null && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("불러오는 중…")}</td></tr>}
                   {sel && tree !== null && tree.length === 0 && (
                     <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{treeErr || "Series가 없습니다."}</td></tr>
                   )}
-                  {!sel && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>위 검사 그리드에서 검사를 선택하세요.</td></tr>}
+                  {!sel && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("위 검사 그리드에서 검사를 선택하세요.")}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -621,7 +622,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             </div>
             <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
               <table className="grid-table" style={{ fontSize: 12 }}>
-                <thead><tr><th></th><th>번호</th><th>크기</th><th>SOP</th><th>상태</th></tr></thead>
+                <thead><tr><th></th><th>{tr("번호")}</th><th>{tr("크기")}</th><th>SOP</th><th>{tr("상태")}</th></tr></thead>
                 <tbody>
                   {(curSeries?.instances ?? []).map((it) => (
                     <tr key={it.sop_uid} onClick={() => setPreview(it)}
@@ -634,12 +635,12 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
                       <td style={it.deleted ? delRow : undefined}>{it.instance_number}</td>
                       <td style={it.deleted ? delRow : undefined}>{it.rows && it.cols ? `${it.cols}×${it.rows}` : "—"}</td>
                       <td style={{ fontFamily: "monospace", fontSize: 11, ...(it.deleted ? delRow : {}) }}>{sopTail(it.sop_uid)}</td>
-                      <td>{it.deleted ? <span style={{ color: "var(--danger,#f87171)", fontSize: 11 }}>삭제됨</span> : "—"}</td>
+                      <td>{it.deleted ? <span style={{ color: "var(--danger,#f87171)", fontSize: 11 }}>{tr("삭제됨")}</span> : "—"}</td>
                     </tr>
                   ))}
-                  {!curSeries && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>Series 목록에서 행을 클릭하면 Image가 표시됩니다.</td></tr>}
+                  {!curSeries && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>{tr("Series 목록에서 행을 클릭하면 Image가 표시됩니다.")}</td></tr>}
                   {curSeries && curSeries.instances.length === 0 && (
-                    <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>Image가 없습니다.</td></tr>
+                    <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>{tr("Image가 없습니다.")}</td></tr>
                   )}
                 </tbody>
               </table>
@@ -654,16 +655,16 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
         {/* ══ 우열 ══ */}
         <div style={{ width: sz.rightW, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
           {/* ① 선택한 환자 */}
-          <PatientCard title="선택한 환자" s={sel} empty="좌측에서 검사를 선택하세요." />
+          <PatientCard title={tr("선택한 환자")} s={sel} empty="좌측에서 검사를 선택하세요." />
 
           {/* ② 옮겨 갈 환자(대상 검사) */}
           <div style={{ ...card, borderColor: target ? "var(--ai,#a78bfa)" : "var(--border)" }}>
-            <div style={{ ...secTitle, color: "var(--ai,#a78bfa)" }}>옮겨 갈 환자 (Assign 대상 검사)</div>
+            <div style={{ ...secTitle, color: "var(--ai,#a78bfa)" }}>{tr("옮겨 갈 환자 (Assign 대상 검사)")}</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-              <input style={{ ...inp, flex: 1 }} placeholder="대상 검사 검색 (자기 자신 제외)"
+              <input style={{ ...inp, flex: 1 }} placeholder={tr("대상 검사 검색 (자기 자신 제외)")}
                      value={targetQ} onChange={(e) => setTargetQ(e.target.value)}
                      onKeyDown={(e) => { if (e.key === "Enter") searchTarget(); }} />
-              <button onClick={searchTarget}>검색</button>
+              <button onClick={searchTarget}>{tr("검색")}</button>
             </div>
             {targetList.length > 0 && (
               <div style={{ maxHeight: 130, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4, marginBottom: 6 }}>
@@ -683,20 +684,20 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             )}
             {targetErr && <div style={{ fontSize: 11.5, color: "var(--danger,#f87171)", marginBottom: 6 }}>{targetErr}</div>}
             {!target ? (
-              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>대상 미선택 — [Assign] 비활성</div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("대상 미선택 — [Assign] 비활성")}</div>
             ) : (
               <>
                 <PatientCard title="" s={target} empty="" />
-                <button style={{ marginTop: 6, fontSize: 11.5 }} onClick={() => setTarget(null)}>대상 해제</button>
+                <button style={{ marginTop: 6, fontSize: 11.5 }} onClick={() => setTarget(null)}>{tr("대상 해제")}</button>
               </>
             )}
           </div>
 
           {/* ③ Series 썸네일 — 고정 높이(스플리터 조절) + 내부 스크롤 */}
           <div style={{ ...card, height: sz.thumbH, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <div style={secTitle}>Series 썸네일</div>
+            <div style={secTitle}>{tr("Series 썸네일")}</div>
             {!tree || tree.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>표시할 Series가 없습니다.</div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("표시할 Series가 없습니다.")}</div>
             ) : (
               <div style={{ flex: 1, minHeight: 0, overflow: "auto", alignContent: "start",
                             display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
@@ -711,7 +712,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
                                   opacity: s.deleted ? 0.4 : 1, position: "relative" }}>
                       <SrcImg img={first} local={isLocal}
                               imgStyle={{ width: "100%", height: 72, objectFit: "contain", display: "block" }}
-                              fallback={<div style={{ height: 72, display: "grid", placeItems: "center", color: "var(--text-secondary)", fontSize: 11 }}>미리보기 없음</div>} />
+                              fallback={<div style={{ height: 72, display: "grid", placeItems: "center", color: "var(--text-secondary)", fontSize: 11 }}>{tr("미리보기 없음")}</div>} />
                       <div style={{ position: "absolute", left: 2, bottom: 2, fontSize: 10, color: "#fff",
                                     background: "rgba(0,0,0,0.55)", borderRadius: 3, padding: "0 4px" }}>
                         S{s.series_number} · {s.instances.length}
@@ -735,8 +736,8 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
               {preview
                 ? <SrcImg img={preview} local={isLocal}
                           imgStyle={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-                          fallback={<span style={{ color: "var(--text-secondary)", fontSize: 12 }}>미리보기 없음</span>} />
-                : <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>Image 목록에서 행을 클릭하세요</span>}
+                          fallback={<span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{tr("미리보기 없음")}</span>} />
+                : <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{tr("Image 목록에서 행을 클릭하세요")}</span>}
             </div>
           </div>
         </div>
@@ -751,8 +752,7 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
                         background: "var(--bg-elevated)", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" }}
                onClick={(e) => e.stopPropagation()}>
             <div style={{ ...secTitle, fontSize: 13.5, display: "flex", alignItems: "center", gap: 4 }}>
-              <MergeIcon size={15} title="환자 병합" /> 환자 병합 (Merge)
-            </div>
+              <MergeIcon size={15} title={tr("환자 병합")} />{tr("환자 병합 (Merge)")}</div>
             {/* 두 환자 요약 카드 — Master 로 지정된 쪽을 강조 */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
               <PatientCard title={mergeMaster === "A" ? "A — 선택한 환자 (Master)" : "A — 선택한 환자 (Slave)"}
@@ -764,14 +764,10 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
             <div style={{ display: "flex", gap: 18, marginBottom: 8, fontSize: 12.5 }}>
               <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
                 <input type="radio" name="sv-merge-master" checked={mergeMaster === "A"}
-                       onChange={() => setMergeMaster("A")} />
-                Master = A (선택한 환자)
-              </label>
+                       onChange={() => setMergeMaster("A")} />{tr("Master = A (선택한 환자)")}</label>
               <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
                 <input type="radio" name="sv-merge-master" checked={mergeMaster === "B"}
-                       onChange={() => setMergeMaster("B")} />
-                Master = B (대상 환자)
-              </label>
+                       onChange={() => setMergeMaster("B")} />{tr("Master = B (대상 환자)")}</label>
             </div>
             <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
               Slave 환자의 모든 검사가 Master 환자 이름으로 표시됩니다.{" "}
@@ -780,8 +776,8 @@ export function ExamControl({ hid, source = "server" }: { hid?: number; source?:
               [Unmerge]로 원상 복구할 수 있습니다.
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => setMergeOpen(false)} disabled={busy}>취소</button>
-              <button className="primary" onClick={() => void doMerge()} disabled={busy}>병합 실행</button>
+              <button onClick={() => setMergeOpen(false)} disabled={busy}>{tr("취소")}</button>
+              <button className="primary" onClick={() => void doMerge()} disabled={busy}>{tr("병합 실행")}</button>
             </div>
           </div>
         </div>

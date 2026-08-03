@@ -6,6 +6,7 @@ import {
   api, type HospitalRow, type MaintBackupItem, type MaintBackupPolicy, type MaintRepeat,
   type MaintRestoreResult, type MaintStorage, type PortalStatus, type ServerNetwork,
 } from "../../api";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공통 소형 UI (기존 관리 콘솔 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -103,28 +104,28 @@ export function ServerConfigPanel() {
         ? { c: "var(--danger,#f87171)", t: `바인드 실패 — ${portal.error}` }
         : { c: "var(--text-secondary)", t: "중지됨" };
 
-  if (!web) return <div style={card}>불러오는 중…</div>;
+  if (!web) return <div style={card}>{tr("불러오는 중…")}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>🖥️ 서버 설정 — IP / Port / AE Title / Name</div>
+        <div style={{ fontWeight: 700 }}>{tr("🖥️ 서버 설정 — IP / Port / AE Title / Name")}</div>
         <div style={{ flex: 1 }} />
         <span title={dot.t} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)" }}>
           <span style={{ width: 9, height: 9, borderRadius: "50%", background: dot.c, flexShrink: 0 }} />
           {dot.t}
         </span>
-        <button onClick={loadStatus}>새로고침</button>
+        <button onClick={loadStatus}>{tr("새로고침")}</button>
       </div>
-      <Row label="서버 IP"><input style={{ ...inp, flex: 1 }} value={web.ip} onChange={(e) => setWeb({ ...web, ip: e.target.value })} placeholder="예: 192.168.0.10 (빈값=0.0.0.0)" /></Row>
-      <Row label="서버 Port"><input style={{ ...inp, width: 110 }} value={web.port} onChange={(e) => setWeb({ ...web, port: e.target.value })} placeholder="예: 9000" /></Row>
+      <Row label="서버 IP"><input style={{ ...inp, flex: 1 }} value={web.ip} onChange={(e) => setWeb({ ...web, ip: e.target.value })} placeholder={tr("예: 192.168.0.10 (빈값=0.0.0.0)")} /></Row>
+      <Row label="서버 Port"><input style={{ ...inp, width: 110 }} value={web.port} onChange={(e) => setWeb({ ...web, port: e.target.value })} placeholder={tr("예: 9000")} /></Row>
       <Row label="AE Title"><input style={{ ...inp, flex: 1 }} value={web.ae_title} onChange={(e) => setWeb({ ...web, ae_title: e.target.value })} /></Row>
       <Row label="서버 Name"><input style={{ ...inp, flex: 1 }} value={web.name} onChange={(e) => setWeb({ ...web, name: e.target.value })} /></Row>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button className="primary" disabled={busy} onClick={saveApply}>저장·적용</button>
-        <button disabled={busy} onClick={save}>저장</button>
-        <button disabled={busy || !portal?.running} onClick={stop}>중지</button>
-        <button onClick={openPortal} title="지정 주소를 새 탭으로 엽니다">열기 ↗</button>
-        <button disabled={busy} onClick={load}>다시 불러오기</button>
+        <button className="primary" disabled={busy} onClick={saveApply}>{tr("저장·적용")}</button>
+        <button disabled={busy} onClick={save}>{tr("저장")}</button>
+        <button disabled={busy || !portal?.running} onClick={stop}>{tr("중지")}</button>
+        <button onClick={openPortal} title={tr("지정 주소를 새 탭으로 엽니다")}>{tr("열기 ↗")}</button>
+        <button disabled={busy} onClick={load}>{tr("다시 불러오기")}</button>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         이 IP:Port 로 접속하면 로그인 포털로 연결됩니다(리다이렉트). [저장·적용]을 눌러야 그 주소에 리스너가 떠 실제 응답합니다
@@ -157,18 +158,18 @@ export function MaintStoragePanel() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>💾 저장 공간 — DB · Image Storage · Backup</div>
+        <div style={{ fontWeight: 700 }}>{tr("💾 저장 공간 — DB · Image Storage · Backup")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       {!st ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
         /* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>구분</th><th>사용량</th><th>상세</th></tr></thead>
+          <thead><tr><th>{tr("구분")}</th><th>{tr("사용량")}</th><th>{tr("상세")}</th></tr></thead>
           <tbody>
             <tr>
-              <td>DB 저장 공간</td>
+              <td>{tr("DB 저장 공간")}</td>
               <td>{fmtMb(st.db.size_mb)}</td>
               <td style={{ color: "var(--text-secondary)" }}>{st.db.detail || "—"}</td>
             </tr>
@@ -180,10 +181,9 @@ export function MaintStoragePanel() {
               </td>
             </tr>
             <tr>
-              <td>Backup 공간</td>
+              <td>{tr("Backup 공간")}</td>
               <td>{fmtMb(st.backup.size_mb)}</td>
-              <td style={{ color: "var(--text-secondary)" }}>
-                경로 <code>{st.backup.path || "—"}</code> · 상한 {st.backup.quota_gb ? `${st.backup.quota_gb} GB` : "무제한"}
+              <td style={{ color: "var(--text-secondary)" }}>{tr("경로")}<code>{st.backup.path || "—"}</code> · 상한 {st.backup.quota_gb ? `${st.backup.quota_gb} GB` : "무제한"}
               </td>
             </tr>
           </tbody>
@@ -194,22 +194,20 @@ export function MaintStoragePanel() {
 
       {/* 백업 경로·용량 상한 편집 — 백업 정책의 path/quota_gb */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 12.5 }}>백업 공간 설정</div>
+        <div style={{ fontWeight: 600, fontSize: 12.5 }}>{tr("백업 공간 설정")}</div>
         {policy ? (
           <>
-            <Row label="백업 경로"><input style={{ ...inp, flex: 1 }} value={policy.path} onChange={(e) => setPolicy({ ...policy, path: e.target.value })} placeholder="예: D:\\pacs-backup" /></Row>
+            <Row label="백업 경로"><input style={{ ...inp, flex: 1 }} value={policy.path} onChange={(e) => setPolicy({ ...policy, path: e.target.value })} placeholder={tr("예: D:\\\\pacs-backup")} /></Row>
             <Row label="용량 상한(GB)">
               <input style={{ ...inp, width: 100 }} type="number" min={0} value={policy.quota_gb ?? 0} onChange={(e) => setPolicy({ ...policy, quota_gb: Number(e.target.value) })} />
-              <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>0=무제한 — 초과 시 백업이 경고와 함께 중단됩니다</span>
+              <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("0=무제한 — 초과 시 백업이 경고와 함께 중단됩니다")}</span>
             </Row>
-            <div><button className="primary" onClick={savePolicy}>저장</button></div>
+            <div><button className="primary" onClick={savePolicy}>{tr("저장")}</button></div>
           </>
         ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{pMsg || "정책 확인 중…"}</div>}
         <Msg text={pMsg} />
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        스케줄·반복·미러링·DB백업 등 나머지 백업 설정은 [백업·미러링] 탭에서 관리합니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("스케줄·반복·미러링·DB백업 등 나머지 백업 설정은 [백업·미러링] 탭에서 관리합니다.")}</div>
     </div>
   );
 }
@@ -262,15 +260,15 @@ export function BackupMirrorPanel() {
     finally { setBusy(false); }
   };
 
-  if (!policy) return <div style={card}><div style={{ fontWeight: 700, marginBottom: 8 }}>🗓️ 백업 · 미러링</div><div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div><Msg text={msg} /></div>;
+  if (!policy) return <div style={card}><div style={{ fontWeight: 700, marginBottom: 8 }}>{tr("🗓️ 백업 · 미러링")}</div><div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div><Msg text={msg} /></div>;
   const rep = policy.repeat;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 640 }}>
-      <div style={{ fontWeight: 700 }}>🗓️ 백업 · 미러링 (스케줄·반복·용량·DB)</div>
+      <div style={{ fontWeight: 700 }}>{tr("🗓️ 백업 · 미러링 (스케줄·반복·용량·DB)")}</div>
 
       <Row label="자동 백업">
         <input type="checkbox" checked={policy.enabled} onChange={(e) => setPolicy({ ...policy, enabled: e.target.checked })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>예정 시각·반복 주기에 따라 스케줄 백업</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("예정 시각·반복 주기에 따라 스케줄 백업")}</span>
       </Row>
       <Row label="시각 (시:분:초)">
         <input style={{ ...inp, width: 120 }} type="time" step={1}
@@ -289,13 +287,13 @@ export function BackupMirrorPanel() {
         {(rep === "monthly" || rep === "quarterly" || rep === "yearly") && (
           <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
             <input style={{ ...inp, width: 60 }} type="number" min={1} max={31} value={policy.day ?? 1} onChange={(e) => setPolicy({ ...policy, day: Number(e.target.value) })} />
-            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>일</span>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("일")}</span>
           </span>
         )}
       </Row>
       <Row label="보존 기간(일)">
         <input style={{ ...inp, width: 90 }} type="number" min={0} value={policy.retention_days} onChange={(e) => setPolicy({ ...policy, retention_days: Number(e.target.value) })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>0=무제한</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("0=무제한")}</span>
       </Row>
       <Row label="압축 포맷">
         {comps.length > 0 ? (
@@ -304,33 +302,31 @@ export function BackupMirrorPanel() {
             {!comps.some((c) => c.key === policy.format) && policy.format && <option value={policy.format}>{policy.format}</option>}
           </select>
         ) : (
-          <input style={{ ...inp, flex: 1 }} value={policy.format} onChange={(e) => setPolicy({ ...policy, format: e.target.value })} placeholder="예: jpeg2000-lossless" />
+          <input style={{ ...inp, flex: 1 }} value={policy.format} onChange={(e) => setPolicy({ ...policy, format: e.target.value })} placeholder={tr("예: jpeg2000-lossless")} />
         )}
       </Row>
-      <Row label="백업 경로"><input style={{ ...inp, flex: 1 }} value={policy.path} onChange={(e) => setPolicy({ ...policy, path: e.target.value })} placeholder="예: D:\\pacs-backup" /></Row>
+      <Row label="백업 경로"><input style={{ ...inp, flex: 1 }} value={policy.path} onChange={(e) => setPolicy({ ...policy, path: e.target.value })} placeholder={tr("예: D:\\\\pacs-backup")} /></Row>
       <Row label="용량 상한(GB)">
         <input style={{ ...inp, width: 90 }} type="number" min={0} value={policy.quota_gb ?? 0} onChange={(e) => setPolicy({ ...policy, quota_gb: Number(e.target.value) })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>0=무제한</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("0=무제한")}</span>
       </Row>
-      <Row label="미러 경로"><input style={{ ...inp, flex: 1 }} value={policy.mirror_path ?? ""} onChange={(e) => setPolicy({ ...policy, mirror_path: e.target.value })} placeholder="시스템 미러링 대상 (예: \\\\nas\\pacs-mirror)" /></Row>
+      <Row label="미러 경로"><input style={{ ...inp, flex: 1 }} value={policy.mirror_path ?? ""} onChange={(e) => setPolicy({ ...policy, mirror_path: e.target.value })} placeholder={tr("시스템 미러링 대상 (예: \\\\\\\\nas\\\\pacs-mirror)")} /></Row>
       <Row label="DB 백업 포함">
         <input type="checkbox" checked={policy.db_backup} onChange={(e) => setPolicy({ ...policy, db_backup: e.target.checked })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>스케줄 백업 시 DB 덤프도 함께 생성</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("스케줄 백업 시 DB 덤프도 함께 생성")}</span>
       </Row>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-        <button className="primary" onClick={save}>정책 저장</button>
+        <button className="primary" onClick={save}>{tr("정책 저장")}</button>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>지금 백업:</span>
+        <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("지금 백업:")}</span>
         <button disabled={busy} onClick={() => run("dicom")}>DICOM</button>
         <button disabled={busy} onClick={() => run("db")}>DB</button>
-        <button disabled={busy} onClick={() => run("both")}>둘 다</button>
+        <button disabled={busy} onClick={() => run("both")}>{tr("둘 다")}</button>
         <button disabled={busy || !(policy.mirror_path ?? "").trim()} onClick={mirror}
-                title={(policy.mirror_path ?? "").trim() ? "미러 경로로 즉시 동기화" : "먼저 미러 경로를 설정·저장하세요"}>미러 실행</button>
+                title={(policy.mirror_path ?? "").trim() ? "미러 경로로 즉시 동기화" : "먼저 미러 경로를 설정·저장하세요"}>{tr("미러 실행")}</button>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        DICOM 압축은 기존 포맷 정책을 유지합니다(코덱 미지원 시 원본 폴백). 백업 이력·복원은 [복원] 탭에서 확인합니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("DICOM 압축은 기존 포맷 정책을 유지합니다(코덱 미지원 시 원본 폴백). 백업 이력·복원은 [복원] 탭에서 확인합니다.")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -385,14 +381,14 @@ export function RestorePanel({ hospitals, fixedHid }: { hospitals: HospitalRow[]
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>⏪ 시스템 복원 (백업 시점)</div>
+        <div style={{ fontWeight: 700 }}>{tr("⏪ 시스템 복원 (백업 시점)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
 
       <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th></th><th>#</th><th>종류</th><th>시각</th><th>크기</th><th>경로</th><th>상태</th></tr></thead>
+          <thead><tr><th></th><th>#</th><th>{tr("종류")}</th><th>{tr("시각")}</th><th>{tr("크기")}</th><th>{tr("경로")}</th><th>{tr("상태")}</th></tr></thead>
           <tbody>
             {items.map((b) => (
               <tr key={String(b.id)} onClick={() => { setSelId(b.id); setDry(null); }}
@@ -402,47 +398,45 @@ export function RestorePanel({ hospitals, fixedHid }: { hospitals: HospitalRow[]
                 <td>{fmtMb(b.size_mb)}</td><td><code style={{ fontSize: 11 }}>{b.path}</code></td><td>{b.status}</td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>백업 이력이 없습니다 — [백업·미러링]에서 먼저 백업하세요.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>{tr("백업 이력이 없습니다 — [백업·미러링]에서 먼저 백업하세요.")}</td></tr>}
           </tbody>
         </table>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>범위:</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("범위:")}</span>
         {fixedHid ? (
           <span style={{ fontSize: 12.5 }}>이 병원 ({hospitals.find((h) => h.id === fixedHid)?.name ?? fixedHid})</span>
         ) : (
           <>
             <select style={inp} value={scope} onChange={(e) => { setScope(e.target.value as "system" | "hospital"); setDry(null); }}>
-              <option value="system">시스템 전체</option>
-              <option value="hospital">특정 병원만</option>
+              <option value="system">{tr("시스템 전체")}</option>
+              <option value="hospital">{tr("특정 병원만")}</option>
             </select>
             {scope === "hospital" && (
               <select style={inp} value={hid} onChange={(e) => { setHid(e.target.value); setDry(null); }}>
-                <option value="">— 병원 선택 —</option>
+                <option value="">{tr("— 병원 선택 —")}</option>
                 {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name || h.code}</option>)}
               </select>
             )}
           </>
         )}
         <div style={{ flex: 1 }} />
-        <button disabled={!sel || !scopeOk || busy} onClick={preview}>미리보기 (dry)</button>
+        <button disabled={!sel || !scopeOk || busy} onClick={preview}>{tr("미리보기 (dry)")}</button>
         <button disabled={!sel || !scopeOk || busy || !dry} onClick={restore} style={{ color: "var(--danger,#f87171)" }}
-                title={dry ? "미리보기 확인 후 복원" : "먼저 [미리보기]로 복원 요약을 확인하세요"}>복원…</button>
+                title={dry ? "미리보기 확인 후 복원" : "먼저 [미리보기]로 복원 요약을 확인하세요"}>{tr("복원…")}</button>
       </div>
 
       {dry && (
         <div style={{ border: "1px solid var(--border)", borderRadius: 4, padding: "8px 10px", fontSize: 12.5 }}>
-          <b>복원 미리보기</b> — 백업 #{sel?.id}
+          <b>{tr("복원 미리보기")}</b> — 백업 #{sel?.id}
           <div style={{ marginTop: 4, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
             {dry.summary || dry.detail || "요약 없음"}
             {dry.guidance ? `\n${dry.guidance}` : ""}
           </div>
         </div>
       )}
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        복원은 [미리보기(dry)] → 요약 확인 → [복원](2단계 확인) 순서로만 실행됩니다. 모든 복원은 서버 감사 로그에 기록됩니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("복원은 [미리보기(dry)] → 요약 확인 → [복원](2단계 확인) 순서로만 실행됩니다. 모든 복원은 서버 감사 로그에 기록됩니다.")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -476,30 +470,26 @@ export function DataWipePanel({ hospitals, fixedHid }: { hospitals: HospitalRow[
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontWeight: 700 }}>🧹 데이터 관리 — 지우고 복원</div>
+      <div style={{ fontWeight: 700 }}>{tr("🧹 데이터 관리 — 지우고 복원")}</div>
       <div style={{ fontSize: 12, color: "var(--danger,#f87171)", border: "1px solid var(--danger,#f87171)", borderRadius: 4, padding: "6px 10px" }}>
         ⚠ 파괴적 작업 — 대상 범위의 검사·판독·영상 데이터를 삭제합니다. 실행 전 반드시 백업하세요.
         모든 실행은 서버 감사 로그에 기록됩니다.
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>대상:</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("대상:")}</span>
         {fixedHid ? (
           <span style={{ fontSize: 12.5 }}>이 병원 ({hospitals.find((h) => h.id === fixedHid)?.name ?? fixedHid})</span>
         ) : (
           <select style={inp} value={hid} onChange={(e) => setHid(e.target.value)}>
-            <option value="">— 시스템 전체 —</option>
+            <option value="">{tr("— 시스템 전체 —")}</option>
             {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name || h.code}</option>)}
           </select>
         )}
-        <input style={{ ...inp, width: 130 }} placeholder="확인: WIPE 입력" value={confirmText}
+        <input style={{ ...inp, width: 130 }} placeholder={tr("확인: WIPE 입력")} value={confirmText}
                onChange={(e) => setConfirmText(e.target.value)} />
-        <button disabled={busy || confirmText !== "WIPE"} onClick={wipe} style={{ color: "var(--danger,#f87171)" }}>
-          데이터 지우기…
-        </button>
+        <button disabled={busy || confirmText !== "WIPE"} onClick={wipe} style={{ color: "var(--danger,#f87171)" }}>{tr("데이터 지우기…")}</button>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        'WIPE' 타이핑 확인 + 2단계 확인을 모두 거쳐야 실행됩니다. 지운 뒤에는 아래(또는 [복원] 탭)의 백업 시점 복원으로 되살릴 수 있습니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("'WIPE' 타이핑 확인 + 2단계 확인을 모두 거쳐야 실행됩니다. 지운 뒤에는 아래(또는 [복원] 탭)의 백업 시점 복원으로 되살릴 수 있습니다.")}</div>
       <Msg text={msg} />
     </div>
   );

@@ -4,6 +4,7 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { api, ensureToken, type StudyDetail } from "../api";
 import { DEFAULT_CLIENT_VIEWER } from "../lib/viewerConfig";
 import { folderToFilters, loadTabs } from "./WorklistTree";
+import { t as tr } from "../lib/i18n";
 
 const Viewer2D = lazy(() => import("./Viewer2D").then((m) => ({ default: m.Viewer2D })));
 const ViewerInfi = lazy(() => import("./ViewerInfi").then((m) => ({ default: m.ViewerInfi })));
@@ -79,15 +80,13 @@ export function ViewerWindow() {
   if (err) {
     return (
       <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--stat-emergency)" }}>
-        {err} — 워크리스트 창에서 다시 열어주세요. <button onClick={() => window.close()}>닫기</button>
+        {err} — 워크리스트 창에서 다시 열어주세요. <button onClick={() => window.close()}>{tr("닫기")}</button>
       </div>
     );
   }
   if (!detail) {
     return (
-      <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>
-        뷰어 로딩…
-      </div>
+      <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>{tr("뷰어 로딩…")}</div>
     );
   }
   const common = {
@@ -101,9 +100,7 @@ export function ViewerWindow() {
   };
   return (
     <Suspense fallback={
-      <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>
-        뷰어 로딩…
-      </div>
+      <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--text-secondary)" }}>{tr("뷰어 로딩…")}</div>
     }>
       {viewerId === "infi"
         ? <ViewerInfi {...common} />

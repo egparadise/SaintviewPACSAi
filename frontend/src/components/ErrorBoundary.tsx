@@ -9,6 +9,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { APP_RELEASE_DATE, VERSION_LABEL } from "../lib/version";
 import { describeReason } from "../lib/crashReason";
+import { t as tr } from "../lib/i18n";
 
 interface Props { children: ReactNode; label?: string }
 interface State { err: Error | null; stack: string }
@@ -143,18 +144,18 @@ export class ErrorBoundary extends Component<Props, State> {
       <div style={{ position: "fixed", inset: 0, overflow: "auto", padding: 24, zIndex: 99999,
                     background: "var(--bg-canvas, #0b1220)", color: "var(--text-primary, #e2e8f0)",
                     fontSize: 13, lineHeight: 1.7 }}>
-        <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>화면을 그리는 중 오류가 발생했습니다</h2>
+        <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>{tr("화면을 그리는 중 오류가 발생했습니다")}</h2>
         <div style={{ color: "var(--text-secondary, #94a3b8)", marginBottom: 14 }}>
           {this.props.label ? `${this.props.label} — ` : ""}아래 [다시 시도]를 누르면 이 화면만 다시 그립니다.
           계속 반복되면 [새로고침]을 눌러 주세요. 아래 내용을 그대로 개발자에게 전달하면 원인을 바로 찾을 수 있습니다.
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button onClick={() => this.setState({ err: null, stack: "" })}>다시 시도</button>
-          <button onClick={() => location.reload()}>새로고침</button>
+          <button onClick={() => this.setState({ err: null, stack: "" })}>{tr("다시 시도")}</button>
+          <button onClick={() => location.reload()}>{tr("새로고침")}</button>
           <button onClick={() => {
             const t = `${err.message}\n\n${err.stack ?? ""}\n\n${stack}`;
             void navigator.clipboard?.writeText(t).catch(() => {});
-          }}>오류 내용 복사</button>
+          }}>{tr("오류 내용 복사")}</button>
         </div>
         <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", background: "rgba(0,0,0,.35)",
                       border: "1px solid var(--border, #334155)", borderRadius: 6, padding: 12, margin: 0 }}>

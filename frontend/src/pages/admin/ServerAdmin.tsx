@@ -14,6 +14,7 @@ import {
   type ServerStatusAll,
   type StorageOverview,
 } from "../../api";
+import { t as tr } from "../../lib/i18n";
 
 const KIND_ICON: Record<string, string> = {
   api: "🖥️", orthanc: "🩻", ohif: "👁️", db: "🗄️", appdb: "🗃️", mpps: "📡",
@@ -46,17 +47,17 @@ export function ServerPanel() {
   );
 
   return (
-    <Group title="메인 서버 — 통합 상태 / 관리"
+    <Group title={tr("메인 서버 — 통합 상태 / 관리")}
            right={<>
              {st && <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
                {st.healthy}/{st.total} 정상 · {at}</span>}
-             <button onClick={load}>새로고침</button>
+             <button onClick={load}>{tr("새로고침")}</button>
            </>}>
       {!st ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
         /* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>서비스</th><th>주소</th><th>상태</th><th>관리</th></tr></thead>
+          <thead><tr><th>{tr("서비스")}</th><th>{tr("주소")}</th><th>{tr("상태")}</th><th>{tr("관리")}</th></tr></thead>
           <tbody>
             {st.services.map((sv) => (
               <tr key={sv.name}>
@@ -74,7 +75,7 @@ export function ServerPanel() {
                   </span>
                 </td>
                 <td style={{ whiteSpace: "nowrap", display: "flex", gap: 4, alignItems: "center" }}>
-                  {sv.manage && <button onClick={() => window.open(sv.manage, "_blank")}>열기 ↗</button>}
+                  {sv.manage && <button onClick={() => window.open(sv.manage, "_blank")}>{tr("열기 ↗")}</button>}
                   {/* 강제 On/Off — docker 컨테이너 서비스 */}
                   {sv.container && <>
                     {ctlBtn("▶ 시작", `${sv.name} 컨테이너 시작`, () =>
@@ -121,13 +122,13 @@ export function OverviewPanel() {
   const load = () => api.adminOverview().then(setOv).catch((e) => setMsg("⚠ " + e.message));
   useEffect(() => { load(); }, []);
   return (
-    <Group title="운영 현황 (관리자 감독)" right={<button onClick={load}>새로고침</button>}>
+    <Group title={tr("운영 현황 (관리자 감독)")} right={<button onClick={load}>{tr("새로고침")}</button>}>
       {!ov ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
         <>
           <div style={{ display: "flex", gap: 16, fontSize: 12.5, flexWrap: "wrap" }}>
             <span>API <Dot ok={ov.server.api} /></span>
             <span>DICOM(Orthanc) <Dot ok={ov.server.orthanc} /></span>
-            <span>MPPS 수신 <Dot ok={ov.server.mpps.enabled} /> :{ov.server.mpps.port}</span>
+            <span>{tr("MPPS 수신")}<Dot ok={ov.server.mpps.enabled} /> :{ov.server.mpps.port}</span>
             <span style={{ color: "var(--text-secondary)" }}>AI: {ov.server.ai_mode}</span>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
@@ -135,7 +136,7 @@ export function OverviewPanel() {
           </div>
           <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12 }}>
-            <thead><tr><th>병원</th><th>코드</th><th>진료과</th><th>계정(활성/전체)</th><th>Client</th><th>Modality</th><th>검사</th><th>결재</th><th>상태</th></tr></thead>
+            <thead><tr><th>{tr("병원")}</th><th>{tr("코드")}</th><th>{tr("진료과")}</th><th>{tr("계정(활성/전체)")}</th><th>Client</th><th>Modality</th><th>{tr("검사")}</th><th>{tr("결재")}</th><th>{tr("상태")}</th></tr></thead>
             <tbody>
               {ov.hospitals.map((h) => (
                 <tr key={h.id}>
@@ -148,7 +149,7 @@ export function OverviewPanel() {
                   <td>{h.enabled ? "✅" : "🚫"}</td>
                 </tr>
               ))}
-              {ov.hospitals.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>가입된 병원이 없습니다.</td></tr>}
+              {ov.hospitals.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>{tr("가입된 병원이 없습니다.")}</td></tr>}
             </tbody>
           </table>
           </div>
@@ -223,10 +224,10 @@ export function HospitalsPanel() {
   };
 
   return (
-    <Group title="가입자 병원 (다기관)" right={<button onClick={() => { setForm({ ...EMPTY_HOSP }); setEditId(null); }}>＋ 추가</button>}>
+    <Group title={tr("가입자 병원 (다기관)")} right={<button onClick={() => { setForm({ ...EMPTY_HOSP }); setEditId(null); }}>{tr("＋ 추가")}</button>}>
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12 }}>
-        <thead><tr><th>코드</th><th>병원명</th><th>AET</th><th>계정</th><th>격리</th><th>사용</th><th></th></tr></thead>
+        <thead><tr><th>{tr("코드")}</th><th>{tr("병원명")}</th><th>AET</th><th>{tr("계정")}</th><th>{tr("격리")}</th><th>{tr("사용")}</th><th></th></tr></thead>
         <tbody>
           {items.map((h) => (
             <tr key={h.id}>
@@ -235,12 +236,12 @@ export function HospitalsPanel() {
               <td>{h.enforce_isolation ? "✅" : "—"}</td>
               <td>{h.enabled ? "✅" : "🚫"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
-                <button onClick={() => { setForm({ ...h }); setEditId(h.id); }}>수정</button>{" "}
-                <button onClick={() => del(h)}>삭제</button>
+                <button onClick={() => { setForm({ ...h }); setEditId(h.id); }}>{tr("수정")}</button>{" "}
+                <button onClick={() => del(h)}>{tr("삭제")}</button>
               </td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>등록된 병원이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>{tr("등록된 병원이 없습니다.")}</td></tr>}
         </tbody>
       </table>
       </div>
@@ -254,12 +255,12 @@ export function HospitalsPanel() {
           <Field label="전화"><input style={inp} value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
           <Field label="담당자"><input style={inp} value={form.contact ?? ""} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></Field>
           <Field label="주소"><input style={inp} value={form.address ?? ""} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
-          <Field label="계정 한도"><input style={{ ...inp, flex: "none", width: 80 }} type="number" min={0} value={form.max_accounts ?? 0} onChange={(e) => setForm({ ...form, max_accounts: Number(e.target.value) })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>0=무제한</span></Field>
-          <Field label="데이터 격리"><input type="checkbox" checked={!!form.enforce_isolation} onChange={(e) => setForm({ ...form, enforce_isolation: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>소속 계정은 자기 병원 검사만 조회</span></Field>
+          <Field label="계정 한도"><input style={{ ...inp, flex: "none", width: 80 }} type="number" min={0} value={form.max_accounts ?? 0} onChange={(e) => setForm({ ...form, max_accounts: Number(e.target.value) })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("0=무제한")}</span></Field>
+          <Field label="데이터 격리"><input type="checkbox" checked={!!form.enforce_isolation} onChange={(e) => setForm({ ...form, enforce_isolation: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("소속 계정은 자기 병원 검사만 조회")}</span></Field>
           <Field label="사용"><input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /></Field>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={save}>{editId ? "수정 저장" : "추가"}</button>
-            <button onClick={() => { setForm(null); setEditId(null); }}>취소</button>
+            <button onClick={() => { setForm(null); setEditId(null); }}>{tr("취소")}</button>
           </div>
         </div>
       )}
@@ -306,10 +307,10 @@ export function UsersPanel() {
   };
 
   return (
-    <Group title="계정 / 역할 관리" right={<button onClick={openNew}>＋ 계정 추가</button>}>
+    <Group title={tr("계정 / 역할 관리")} right={<button onClick={openNew}>{tr("＋ 계정 추가")}</button>}>
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12 }}>
-        <thead><tr><th>아이디</th><th>이름</th><th>역할</th><th>병원</th><th>면허</th><th>사용</th><th></th></tr></thead>
+        <thead><tr><th>{tr("아이디")}</th><th>{tr("이름")}</th><th>{tr("역할")}</th><th>{tr("병원")}</th><th>{tr("면허")}</th><th>{tr("사용")}</th><th></th></tr></thead>
         <tbody>
           {items.map((a) => (
             <tr key={a.id}>
@@ -317,8 +318,8 @@ export function UsersPanel() {
               <td>{a.hospital_name || "—"}</td><td>{a.license_no || "—"}</td>
               <td>{a.enabled ? "✅" : "🚫"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
-                <button onClick={() => openEdit(a)}>수정</button>{" "}
-                <button onClick={() => del(a)}>삭제</button>
+                <button onClick={() => openEdit(a)}>{tr("수정")}</button>{" "}
+                <button onClick={() => del(a)}>{tr("삭제")}</button>
               </td>
             </tr>
           ))}
@@ -338,7 +339,7 @@ export function UsersPanel() {
           </Field>
           <Field label="소속 병원">
             <select style={inp} value={String(form.hospital_id ?? "")} onChange={(e) => setForm({ ...form, hospital_id: e.target.value })}>
-              <option value="">— 전역(공용) —</option>
+              <option value="">{tr("— 전역(공용) —")}</option>
               {hosps.map((h) => <option key={h.id} value={h.id}>{h.name || h.code}</option>)}
             </select>
           </Field>
@@ -353,7 +354,7 @@ export function UsersPanel() {
           )}
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={save}>{editId ? "수정 저장" : "추가"}</button>
-            <button onClick={() => { setForm(null); setEditId(null); }}>취소</button>
+            <button onClick={() => { setForm(null); setEditId(null); }}>{tr("취소")}</button>
           </div>
         </div>
       )}
@@ -406,25 +407,25 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Group title="등록 장비 (SCU / SCP)" right={<>
-        <button onClick={() => { setForm({ ...EMPTY_MOD, hospital_id: hospitalId ?? null }); setEditId(null); }}>＋ 추가</button>
-        <button onClick={apply}>Orthanc 반영</button>
+      <Group title={tr("등록 장비 (SCU / SCP)")} right={<>
+        <button onClick={() => { setForm({ ...EMPTY_MOD, hospital_id: hospitalId ?? null }); setEditId(null); }}>{tr("＋ 추가")}</button>
+        <button onClick={apply}>{tr("Orthanc 반영")}</button>
       </>}>
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th>이름</th><th>종류</th><th>AET</th><th>IP</th><th>Port</th><th>역할</th><th>수신</th><th>병원</th><th></th></tr></thead>
+          <thead><tr><th>{tr("이름")}</th><th>{tr("종류")}</th><th>AET</th><th>IP</th><th>Port</th><th>{tr("역할")}</th><th>{tr("수신")}</th><th>{tr("병원")}</th><th></th></tr></thead>
           <tbody>
             {items.map((m) => (
               <tr key={m.id} style={{ opacity: m.enabled ? 1 : 0.5 }}>
                 <td>{m.name}</td><td>{m.modality_type}</td><td>{m.ae_title}</td><td>{m.host}</td><td>{m.port}</td>
                 <td>{m.role.toUpperCase()}</td><td>{m.allow_receive ? "✅" : "🚫"}</td><td>{m.hospital_name || "—"}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button onClick={() => { setForm({ ...m }); setEditId(m.id); }}>수정</button>{" "}
-                  <button onClick={() => del(m)}>삭제</button>
+                  <button onClick={() => { setForm({ ...m }); setEditId(m.id); }}>{tr("수정")}</button>{" "}
+                  <button onClick={() => del(m)}>{tr("삭제")}</button>
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>등록된 장비가 없습니다.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>{tr("등록된 장비가 없습니다.")}</td></tr>}
           </tbody>
         </table>
         </div>
@@ -443,35 +444,35 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
             <Field label="Port*"><input style={{ ...inp, flex: "none", width: 90 }} type="number" value={form.port ?? 104} onChange={(e) => setForm({ ...form, port: Number(e.target.value) })} /></Field>
             <Field label="역할">
               <select style={inp} value={form.role ?? "scu"} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                <option value="scu">SCU (질의/전송)</option>
-                <option value="scp">SCP (수신)</option>
+                <option value="scu">{tr("SCU (질의/전송)")}</option>
+                <option value="scp">{tr("SCP (수신)")}</option>
                 <option value="both">BOTH</option>
               </select>
             </Field>
             <Field label="제조사"><input style={inp} value={form.manufacturer ?? ""} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} /></Field>
             <Field label="소속 병원">
               <select style={inp} value={form.hospital_id ?? ""} onChange={(e) => setForm({ ...form, hospital_id: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">— 전역 —</option>
+                <option value="">{tr("— 전역 —")}</option>
                 {hosps.map((h) => <option key={h.id} value={h.id}>{h.name || h.code}</option>)}
               </select>
             </Field>
-            <Field label="수신 허용"><input type="checkbox" checked={form.allow_receive !== false} onChange={(e) => setForm({ ...form, allow_receive: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>이 장비로부터 C-STORE 수신 허용</span></Field>
+            <Field label="수신 허용"><input type="checkbox" checked={form.allow_receive !== false} onChange={(e) => setForm({ ...form, allow_receive: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("이 장비로부터 C-STORE 수신 허용")}</span></Field>
             <Field label="사용"><input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /></Field>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={save}>{editId ? "수정 저장" : "추가"}</button>
-              <button onClick={() => { setForm(null); setEditId(null); }}>취소</button>
+              <button onClick={() => { setForm(null); setEditId(null); }}>{tr("취소")}</button>
             </div>
           </div>
         )}
       </Group>
 
-      <Group title="SCP 수신 제어 (DICOM Receive)" right={<button onClick={loadScp}>새로고침</button>}>
+      <Group title={tr("SCP 수신 제어 (DICOM Receive)")} right={<button onClick={loadScp}>{tr("새로고침")}</button>}>
         {scp ? (
           <>
             <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
               <div>Orthanc 수신: {scp.orthanc?.alive
                 ? <b style={{ color: "var(--accent, #7dd3fc)" }}>가동 · AET {scp.orthanc.aet} · Port {scp.orthanc.dicom_port}</b>
-                : <b style={{ color: "var(--danger, #f87171)" }}>연결 안 됨</b>}</div>
+                : <b style={{ color: "var(--danger, #f87171)" }}>{tr("연결 안 됨")}</b>}</div>
               <div style={{ color: "var(--text-secondary)" }}>등록 장비 {scp.modalities_total}대 · 수신 활성 {scp.modalities_active}대 · Orthanc 반영 {scp.orthanc?.registered_modalities?.length ?? 0}대</div>
               {scp.mpps && (
                 <div style={{ color: "var(--text-secondary)" }}>
@@ -482,24 +483,16 @@ export function ModalityPanel({ hospitalId }: { hospitalId?: number } = {}) {
               )}
             </div>
             <label style={{ display: "flex", gap: 8, fontSize: 12.5, alignItems: "center" }}>
-              <input type="checkbox" checked={scp.config.receive_enabled} onChange={(e) => applyScp({ ...scp.config, receive_enabled: e.target.checked })} />
-              SCP 수신 포트 열기 (해제 시 DICOM 리스너 닫음)
-            </label>
+              <input type="checkbox" checked={scp.config.receive_enabled} onChange={(e) => applyScp({ ...scp.config, receive_enabled: e.target.checked })} />{tr("SCP 수신 포트 열기 (해제 시 DICOM 리스너 닫음)")}</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12.5, alignItems: "center" }}>
-              <input type="checkbox" checked={scp.config.registered_only} onChange={(e) => applyScp({ ...scp.config, registered_only: e.target.checked })} />
-              등록 장비만 통신 허용 (미등록 호스트/AET의 C-STORE 거부)
-            </label>
+              <input type="checkbox" checked={scp.config.registered_only} onChange={(e) => applyScp({ ...scp.config, registered_only: e.target.checked })} />{tr("등록 장비만 통신 허용 (미등록 호스트/AET의 C-STORE 거부)")}</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12.5, alignItems: "center" }}>
-              <input type="checkbox" checked={scp.config.check_called_aet} onChange={(e) => applyScp({ ...scp.config, check_called_aet: e.target.checked })} />
-              Called AE Title 검증
-            </label>
+              <input type="checkbox" checked={scp.config.check_called_aet} onChange={(e) => applyScp({ ...scp.config, check_called_aet: e.target.checked })} />{tr("Called AE Title 검증")}</label>
             <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
               장비 목록은 즉시 Orthanc에 반영됩니다(재기동 불필요). 수신 정책(등록장비 전용·포트 개폐·Called AE)은
-              생성된 <code>deploy/scp-policy.env</code>를 <code>deploy/.env</code>에 반영 후
-              <code>docker compose up -d orthanc</code>로 적용됩니다(데이터는 볼륨 보존).
-            </div>
+              생성된 <code>deploy/scp-policy.env</code>{tr("를")}<code>deploy/.env</code>{tr("에 반영 후")}<code>docker compose up -d orthanc</code>{tr("로 적용됩니다(데이터는 볼륨 보존).")}</div>
           </>
-        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>상태 확인 중…</div>}
+        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("상태 확인 중…")}</div>}
       </Group>
     </div>
   );
@@ -556,41 +549,41 @@ export function StoragePanel() {
   const d = ov?.disk;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Group title="저장공간 현황" right={<button onClick={loadOv}>새로고침</button>}>
+      <Group title={tr("저장공간 현황")} right={<button onClick={loadOv}>{tr("새로고침")}</button>}>
         {ov ? (
           <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12 }}>
             <tbody>
-              <tr><td>DICOM 저장소(Orthanc)</td><td>{o?.alive
+              <tr><td>{tr("DICOM 저장소(Orthanc)")}</td><td>{o?.alive
                 ? `검사 ${o.studies ?? 0} · 시리즈 ${o.series ?? 0} · 인스턴스 ${o.instances ?? 0}`
-                : <span style={{ color: "var(--danger, #f87171)" }}>연결 안 됨</span>}</td></tr>
-              <tr><td>디스크 사용(압축/원본)</td><td>{o?.alive ? `${fmtBytes(o.disk_size)} / ${fmtBytes(o.uncompressed_size)}` : "—"}</td></tr>
-              <tr><td>DB 검사 수</td><td>{ov.db.studies}</td></tr>
-              <tr><td>백업 대상 디스크</td><td>{d?.error ? <span style={{ color: "var(--danger, #f87171)" }}>{d.error}</span>
+                : <span style={{ color: "var(--danger, #f87171)" }}>{tr("연결 안 됨")}</span>}</td></tr>
+              <tr><td>{tr("디스크 사용(압축/원본)")}</td><td>{o?.alive ? `${fmtBytes(o.disk_size)} / ${fmtBytes(o.uncompressed_size)}` : "—"}</td></tr>
+              <tr><td>{tr("DB 검사 수")}</td><td>{ov.db.studies}</td></tr>
+              <tr><td>{tr("백업 대상 디스크")}</td><td>{d?.error ? <span style={{ color: "var(--danger, #f87171)" }}>{d.error}</span>
                 : `${d?.path} — 여유 ${fmtBytes(d?.free)} / 전체 ${fmtBytes(d?.total)}`}</td></tr>
-              <tr><td>보존 정책 후보</td><td>{ov.retention.retention_days > 0
+              <tr><td>{tr("보존 정책 후보")}</td><td>{ov.retention.retention_days > 0
                 ? `${ov.retention.candidate_studies}건 (${ov.retention.cutoff_date} 이전, ${ov.retention.retention_days}일)`
                 : "미적용 (보존 기간 0)"}</td></tr>
             </tbody>
           </table>
           </div>
-        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>확인 중…</div>}
+        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("확인 중…")}</div>}
         <Msg text={msg} />
       </Group>
 
-      <Group title="백업 정책 (스케줄·보존·압축)">
+      <Group title={tr("백업 정책 (스케줄·보존·압축)")}>
         {policy && (
           <>
-            <Field label="자동 백업"><input type="checkbox" checked={policy.enabled} onChange={(e) => setPolicy({ ...policy, enabled: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>매일 예정 시각에 스케줄 백업</span></Field>
+            <Field label="자동 백업"><input type="checkbox" checked={policy.enabled} onChange={(e) => setPolicy({ ...policy, enabled: e.target.checked })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("매일 예정 시각에 스케줄 백업")}</span></Field>
             <Field label="예정 시각"><input style={{ ...inp, flex: "none", width: 90 }} type="time" value={policy.schedule_time} onChange={(e) => setPolicy({ ...policy, schedule_time: e.target.value })} /></Field>
-            <Field label="보존 기간"><input style={{ ...inp, flex: "none", width: 80 }} type="number" min={0} value={policy.retention_days} onChange={(e) => setPolicy({ ...policy, retention_days: Number(e.target.value) })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>일 (0=무제한, 초과분은 수동 삭제 대상)</span></Field>
+            <Field label="보존 기간"><input style={{ ...inp, flex: "none", width: 80 }} type="number" min={0} value={policy.retention_days} onChange={(e) => setPolicy({ ...policy, retention_days: Number(e.target.value) })} /><span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("일 (0=무제한, 초과분은 수동 삭제 대상)")}</span></Field>
             <Field label="압축 포맷">
               <select style={inp} value={policy.compression} onChange={(e) => setPolicy({ ...policy, compression: e.target.value })}>
                 {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
             </Field>
-            <Field label="백업 경로"><input style={inp} placeholder="비우면 backend/backup" value={policy.target_dir} onChange={(e) => setPolicy({ ...policy, target_dir: e.target.value })} /></Field>
-            <div><button onClick={savePolicy}>정책 저장</button></div>
+            <Field label="백업 경로"><input style={inp} placeholder={tr("비우면 backend/backup")} value={policy.target_dir} onChange={(e) => setPolicy({ ...policy, target_dir: e.target.value })} /></Field>
+            <div><button onClick={savePolicy}>{tr("정책 저장")}</button></div>
             <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
               들어오는 DICOM은 원본 그대로 보관하고, 백업 시 선택한 포맷(JPEG/JPEG2000/무손실)으로 변환합니다.
               Orthanc에 압축 코덱 플러그인이 없으면 원본으로 폴백 저장하고 작업 기록에 표시합니다.
@@ -599,7 +592,7 @@ export function StoragePanel() {
         )}
       </Group>
 
-      <Group title="수동 백업 실행" right={<button onClick={run}>백업 시작</button>}>
+      <Group title={tr("수동 백업 실행")} right={<button onClick={run}>{tr("백업 시작")}</button>}>
         <Field label="압축">
           <select style={inp} value={runComp} onChange={(e) => setRunComp(e.target.value)}>
             {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -609,14 +602,14 @@ export function StoragePanel() {
           <input style={{ ...inp, flex: "none", width: 110 }} placeholder="YYYYMMDD" value={runFrom} onChange={(e) => setRunFrom(e.target.value)} />
           <span>~</span>
           <input style={{ ...inp, flex: "none", width: 110 }} placeholder="YYYYMMDD" value={runTo} onChange={(e) => setRunTo(e.target.value)} />
-          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>비우면 전체</span>
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("비우면 전체")}</span>
         </Field>
       </Group>
 
-      <Group title="백업 이력" right={<button onClick={loadJobs}>새로고침</button>}>
+      <Group title={tr("백업 이력")} right={<button onClick={loadJobs}>{tr("새로고침")}</button>}>
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 11.5 }}>
-          <thead><tr><th>#</th><th>유형</th><th>상태</th><th>압축</th><th>검사</th><th>인스턴스</th><th>용량</th><th>완료</th></tr></thead>
+          <thead><tr><th>#</th><th>{tr("유형")}</th><th>{tr("상태")}</th><th>{tr("압축")}</th><th>{tr("검사")}</th><th>{tr("인스턴스")}</th><th>{tr("용량")}</th><th>{tr("완료")}</th></tr></thead>
           <tbody>
             {jobs.map((j) => (
               <tr key={j.id} title={j.error}>
@@ -627,13 +620,13 @@ export function StoragePanel() {
                 <td>{j.finished_at ? j.finished_at.replace("T", " ").slice(0, 19) : "—"}</td>
               </tr>
             ))}
-            {jobs.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>백업 이력이 없습니다.</td></tr>}
+            {jobs.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>{tr("백업 이력이 없습니다.")}</td></tr>}
           </tbody>
         </table>
         </div>
       </Group>
 
-      <Group title="보존 정책 — 기간 초과 검사 삭제 (파괴적)">
+      <Group title={tr("보존 정책 — 기간 초과 검사 삭제 (파괴적)")}>
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           백업 정책의 보존 기간({policy?.retention_days ?? 0}일)을 초과한 검사를 Orthanc·DB에서 영구 삭제합니다.
           미리보기 후 확인 절차를 거치며, 자동 삭제는 하지 않습니다.
@@ -644,8 +637,8 @@ export function StoragePanel() {
             if (rd <= 0) { setMsg("⚠ 보존 기간을 1 이상으로 설정하세요"); return; }
             try { const p = await api.purgePreview(rd); setMsg(`삭제 후보 ${p.count}건 (${rd}일 초과)`); }
             catch (e) { setMsg("⚠ " + (e as Error).message); }
-          }}>미리보기</button>
-          <button onClick={purge} style={{ color: "var(--danger, #f87171)" }}>초과분 삭제…</button>
+          }}>{tr("미리보기")}</button>
+          <button onClick={purge} style={{ color: "var(--danger, #f87171)" }}>{tr("초과분 삭제…")}</button>
         </div>
       </Group>
     </div>

@@ -61,6 +61,7 @@ import { showToast } from "../lib/toast";
 import { onStudySync, postStudySync, postViewerAddTab } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { useLocale } from "../lib/useLocale";
+import { t as tr } from "../lib/i18n";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
@@ -177,13 +178,13 @@ export const COLUMN_DEFS: Record<string, { label: string; render: (r: StudyRow) 
     label: "AI",
     render: (r) =>
       r.critical ? <span className="badge critical">CRITICAL</span>
-        : r.report_status === "draft" ? <span className="badge ai">초안</span> : null,
+        : r.report_status === "draft" ? <span className="badge ai">{tr("초안")}</span> : null,
   },
   patient_key: { label: "ID", render: (r) => r.patient_key },
   patient_name: {
     label: "이름",
     // 병합(Merge)된 환자는 이름 앞에 병합 아이콘 표시 (Exam Control 에서 Unmerge 가능)
-    render: (r) => <>{r.merged && <MergeIcon />}{r.has_key && <span title="키이미지 등록 검사">🔑 </span>}{r.patient_name}</>,
+    render: (r) => <>{r.merged && <MergeIcon />}{r.has_key && <span title={tr("키이미지 등록 검사")}>🔑 </span>}{r.patient_name}</>,
   },
   sex: { label: "성별", render: (r) => r.sex },
   birth_date: { label: "생년월일", render: (r) => r.birth_date },
@@ -274,7 +275,7 @@ function ReopenBar({ label, onExpand }: { label: string; onExpand: () => void })
                   background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 4,
                   userSelect: "none" }}>
       <span style={{ fontWeight: 700 }}>▸</span>{label}
-      <span style={{ marginLeft: "auto", opacity: 0.7 }}>펼치기</span>
+      <span style={{ marginLeft: "auto", opacity: 0.7 }}>{tr("펼치기")}</span>
     </div>
   );
 }
@@ -341,23 +342,23 @@ function ActionToolbar({
       display: "flex", gap: 5, padding: "6px 8px", alignItems: "center",
       background: "var(--bg-panel)", borderBottom: "1px solid var(--border)",
     }}>
-      <Btn a="viewdraft" label="View&Draft" primary title="뷰어 + 초안 패널 동시 오픈 (더블클릭과 동일)" />
-      <Btn a="3d" label="3D" title="내장 Cornerstone3D MPR/MIP" />
+      <Btn a="viewdraft" label="View&Draft" primary title={tr("뷰어 + 초안 패널 동시 오픈 (더블클릭과 동일)")} />
+      <Btn a="3d" label="3D" title={tr("내장 Cornerstone3D MPR/MIP")} />
       <span style={{ width: 1, alignSelf: "stretch", background: "var(--border)", margin: "0 3px" }} />
       {/* UBPACS-Z Study Open 5종 */}
-      <Btn a="ub_view" label="🖵 View" title="① View — 기존 영상을 닫고 선택 검사를 그 자리에 표시 (UBPACS-Z)" />
-      <Btn a="ub_add" label="🖵+ Add" title="② Add View — 기존 영상은 닫지 않고 선택 검사를 분할 추가" />
-      <Btn a="ub_stack" label="⧉ Stack" title="③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩" />
-      {ohifOn && <Btn a="ub_adv" label="⌂ Adv" title="④ Advance View — 고급 뷰어(OHIF)로 열기" />}
-      <Btn a="ub_key" label="🔑 Key" title="⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)" />
-      <Btn a="compareOpen" label="⇄ Compare" title="Compare — 뷰어에서 같은 환자의 과거검사를 골라 나란히 비교(모달, In Viewer 동일)" />
+      <Btn a="ub_view" label="🖵 View" title={tr("① View — 기존 영상을 닫고 선택 검사를 그 자리에 표시 (UBPACS-Z)")} />
+      <Btn a="ub_add" label="🖵+ Add" title={tr("② Add View — 기존 영상은 닫지 않고 선택 검사를 분할 추가")} />
+      <Btn a="ub_stack" label="⧉ Stack" title={tr("③ Stack View — 기존 영상 유지 + 선택 검사를 같은 페인에 중첩")} />
+      {ohifOn && <Btn a="ub_adv" label="⌂ Adv" title={tr("④ Advance View — 고급 뷰어(OHIF)로 열기")} />}
+      <Btn a="ub_key" label="🔑 Key" title={tr("⑤ Key Image View — 선택 검사의 키 이미지만 표시 (F-16)")} />
+      <Btn a="compareOpen" label="⇄ Compare" title={tr("Compare — 뷰어에서 같은 환자의 과거검사를 골라 나란히 비교(모달, In Viewer 동일)")} />
       {/* Study With Open (p.13): 더블클릭 시 Related Study를 함께 오픈 */}
-      <label title="Study With Open — 더블클릭으로 열 때 Related Study List의 검사를 한번에 같이 오픈"
+      <label title={tr("Study With Open — 더블클릭으로 열 때 Related Study List의 검사를 한번에 같이 오픈")}
              style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11.5, marginLeft: 3 }}>
         <input type="checkbox" checked={withOpen} onChange={(e) => setWithOpen(e.target.checked)} />
         With Open
       </label>
-      <select value={withOpenMode} disabled={!withOpen} title="함께 오픈 모드"
+      <select value={withOpenMode} disabled={!withOpen} title={tr("함께 오픈 모드")}
               onChange={(e) => setWithOpenMode(e.target.value as "add" | "stack")}
               style={{ fontSize: 10.5 }}>
         <option value="add">ADD VIEW</option>
@@ -366,30 +367,30 @@ function ActionToolbar({
       {/* Reading/Import/Export/Print/PDF/Emergency/AI/일괄검토/새로고침은 상단 탭 바(Local Server 왼쪽)로 이동(요청) */}
       <div style={{ flex: 1 }} />
       {/* 07 A.2 SearchShortcut: 검색 바로가기 저장/적용 */}
-      <select title="검색 바로가기" defaultValue="" onChange={(e) => {
+      <select title={tr("검색 바로가기")} defaultValue="" onChange={(e) => {
         const sc = JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]")
           .find((s: { label: string }) => s.label === e.target.value);
         if (sc) window.dispatchEvent(new CustomEvent("sv-apply-shortcut", { detail: sc }));
         e.target.value = "";
       }}>
-        <option value="">바로가기…</option>
+        <option value="">{tr("바로가기…")}</option>
         {JSON.parse(localStorage.getItem("sv_shortcuts") ?? "[]").map((s: { label: string }) => (
           <option key={s.label} value={s.label}>{s.label}</option>
         ))}
       </select>
-      <button title="현재 검색조건을 바로가기로 저장" onClick={() => {
+      <button title={tr("현재 검색조건을 바로가기로 저장")} onClick={() => {
         window.dispatchEvent(new CustomEvent("sv-save-shortcut"));
-      }}>★저장</button>
+      }}>{tr("★저장")}</button>
       {/* S1 자연어 검색 (nl_to_query) — AI 기능이므로 보라 포인트 */}
       <input
-        placeholder="AI 검색 — 예: 지난주 흉부 CT 미판독" value={nlText}
+        placeholder={tr("AI 검색 — 예: 지난주 흉부 CT 미판독")} value={nlText}
         onChange={(e) => setNlText(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && nlText.trim()) { onNlSearch(nlText); } }}
-        title="자연어로 검색 조건을 입력하면 AI가 필터로 변환합니다 (적용 전 미리보기)"
+        title={tr("자연어로 검색 조건을 입력하면 AI가 필터로 변환합니다 (적용 전 미리보기)")}
         style={{ width: 200, background: "var(--bg-canvas)", borderColor: "var(--ai)" }}
       />
       <input
-        placeholder="SEARCH — 환자 ID/이름 (=정확 / 접두% / !제외)" value={searchText}
+        placeholder={tr("SEARCH — 환자 ID/이름 (=정확 / 접두% / !제외)")} value={searchText}
         onChange={(e) => setSearchText(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && onSearch()}
         style={{ width: 280, background: "var(--bg-canvas)" }}
@@ -418,15 +419,15 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
   const F = (key: string) => {
     switch (key) {
       case "pid":
-        return <input key={key} placeholder="*Any 환자 ID" value={filters.pid ?? ""} style={{ width: 110 }}
+        return <input key={key} placeholder={tr("*Any 환자 ID")} value={filters.pid ?? ""} style={{ width: 110 }}
                       onChange={(e) => set("pid", e.target.value)} onKeyDown={enter} />;
       case "pname":
-        return <input key={key} placeholder="*Any 이름" value={filters.pname ?? ""} style={{ width: 110 }}
+        return <input key={key} placeholder={tr("*Any 이름")} value={filters.pname ?? ""} style={{ width: 110 }}
                       onChange={(e) => set("pname", e.target.value)} onKeyDown={enter} />;
       case "sex":
         return (
           <select key={key} value={filters.sex ?? ""} onChange={(e) => set("sex", e.target.value)}>
-            <option value="">*Any 성별</option><option value="M">M</option>
+            <option value="">{tr("*Any 성별")}</option><option value="M">M</option>
             <option value="F">F</option><option value="O">O</option>
           </select>
         );
@@ -442,30 +443,30 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
       case "date":
         return (
           <span key={key} style={{ display: "flex", gap: 3, alignItems: "center" }}>
-            <input type="date" value={filters.date_from_iso ?? ""} title="검사일 From"
+            <input type="date" value={filters.date_from_iso ?? ""} title={tr("검사일 From")}
                    onChange={(e) => set("date_from_iso", e.target.value)} />
             <span style={{ color: "var(--text-secondary)" }}>~</span>
-            <input type="date" value={filters.date_to_iso ?? ""} title="검사일 To"
+            <input type="date" value={filters.date_to_iso ?? ""} title={tr("검사일 To")}
                    onChange={(e) => set("date_to_iso", e.target.value)} />
           </span>
         );
       case "desc":
-        return <input key={key} placeholder="*Any 검사명" value={filters.desc ?? ""} style={{ width: 140 }}
+        return <input key={key} placeholder={tr("*Any 검사명")} value={filters.desc ?? ""} style={{ width: 140 }}
                       onChange={(e) => set("desc", e.target.value)} onKeyDown={enter} />;
       case "body_part":
-        return <input key={key} placeholder="*Any 부위" value={filters.body_part ?? ""} style={{ width: 90 }}
+        return <input key={key} placeholder={tr("*Any 부위")} value={filters.body_part ?? ""} style={{ width: 90 }}
                       onChange={(e) => set("body_part", e.target.value)} onKeyDown={enter} />;
       case "status":
         return (
           <select key={key} value={filters.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-            <option value="">*Any 상태</option><option value="unread">미판독(확정 전)</option>
-            <option value="received">도착</option>
-            <option value="draft_ready">AI초안</option><option value="reading">판독중</option>
-            <option value="finalized">확정</option>
+            <option value="">{tr("*Any 상태")}</option><option value="unread">{tr("미판독(확정 전)")}</option>
+            <option value="received">{tr("도착")}</option>
+            <option value="draft_ready">{tr("AI초안")}</option><option value="reading">{tr("판독중")}</option>
+            <option value="finalized">{tr("확정")}</option>
           </select>
         );
       case "finding":
-        return <input key={key} placeholder="소견/임프레션 검색 (F-2)" value={filters.finding ?? ""}
+        return <input key={key} placeholder={tr("소견/임프레션 검색 (F-2)")} value={filters.finding ?? ""}
                       style={{ width: 180 }} onChange={(e) => set("finding", e.target.value)} onKeyDown={enter} />;
       case "emergency":
         return (
@@ -477,7 +478,7 @@ function FilterBar({ filters, setFilters, fields, onSearch }: {
         );
       case "key":
         return (
-          <label key={key} title="키이미지가 등록된 검사만 조회 (F-16)"
+          <label key={key} title={tr("키이미지가 등록된 검사만 조회 (F-16)")}
                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
             <input type="checkbox" checked={filters.key === "true"}
                    onChange={(e) => set("key", e.target.checked ? "true" : "")} />
@@ -541,7 +542,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
     const ds = prompt("일수 (0=오늘, 숫자=최근 N일, -1=전체)", String(init?.days ?? 7));
     if (ds === null) return null;
     const days = Number(ds);
-    if (Number.isNaN(days)) { alert("숫자를 입력하세요"); return null; }
+    if (Number.isNaN(days)) { alert(tr("숫자를 입력하세요")); return null; }
     return { label, days };
   };
   const saveDp = (next: { key: string; label: string; days: number }[]) => {
@@ -578,11 +579,9 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
       ...(unifiedScroll ? {} : { overflowY: "auto" as const, maxHeight: "100%" }),
     }}>
       <div style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, padding: "2px 4px",
-                    display: "flex", alignItems: "center" }}>
-        기간
-        <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
+                    display: "flex", alignItems: "center" }}>{tr("기간")}<span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
           <EditToggle k="dp" />
-          <button title="기간 프리셋 추가" style={{ padding: "0 6px", fontSize: 10.5 }}
+          <button title={tr("기간 프리셋 추가")} style={{ padding: "0 6px", fontSize: 10.5 }}
                   onClick={() => {
                     const r = askPreset();
                     if (r) saveDp([...presets, { key: `c${Math.random().toString(36).slice(2, 8)}`, ...r }]);
@@ -602,13 +601,13 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
           </span>
           {editSec.dp && (
             <>
-              <span title="수정" style={{ flexShrink: 0 }}
+              <span title={tr("수정")} style={{ flexShrink: 0 }}
                     onClick={(e) => {
                       e.stopPropagation();
                       const r = askPreset(p);
                       if (r) saveDp(presets.map((x, k) => (k === i ? { ...x, ...r } : x)));
                     }}>✏️</span>
-              <span title="삭제" style={{ flexShrink: 0 }}
+              <span title={tr("삭제")} style={{ flexShrink: 0 }}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (window.confirm(`'${p.label}' 기간을 삭제할까요?`)) {
@@ -628,16 +627,16 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
         Search Filter
         <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
           <EditToggle k="mods" />
-          <button title="모달리티 필터 추가 (예: US, MG)" style={{ padding: "0 6px", fontSize: 10.5 }}
+          <button title={tr("모달리티 필터 추가 (예: US, MG)")} style={{ padding: "0 6px", fontSize: 10.5 }}
                   onClick={() => {
                     const code = prompt("추가할 Modality 코드 (예: US, MG, XA)");
                     if (!code) return;
                     const c = code.trim().toUpperCase();
-                    if (shownMods.includes(c)) { alert("이미 목록에 있습니다"); return; }
+                    if (shownMods.includes(c)) { alert(tr("이미 목록에 있습니다")); return; }
                     saveMods([...shownMods, c]);
                   }}>＋</button>
           {modList && (
-            <button title="자동 목록으로 되돌리기 (데이터 집계)" style={{ padding: "0 6px", fontSize: 10.5 }}
+            <button title={tr("자동 목록으로 되돌리기 (데이터 집계)")} style={{ padding: "0 6px", fontSize: 10.5 }}
                     onClick={() => { setModList(null); persistRail({ mod_filters: null }); }}>↺</button>
           )}
         </span>
@@ -651,7 +650,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
                background: activeMod === "" ? "var(--accent-subtle)" : undefined,
                color: activeMod === "" ? "var(--text-primary)" : "var(--text-secondary)",
              }}>
-          <span>📁 전체</span><span style={{ fontSize: 11 }}>{total}</span>
+          <span>{tr("📁 전체")}</span><span style={{ fontSize: 11 }}>{total}</span>
         </div>
         {shownMods.map((m, i) => (
           <div key={m} onClick={() => onMod(activeMod === m ? "" : m)}
@@ -667,14 +666,14 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
             <span style={{ fontSize: 11, flexShrink: 0 }}>{mods[m] ?? 0}</span>
             {editSec.mods && (
               <>
-                <span title="코드 수정" style={{ flexShrink: 0 }}
+                <span title={tr("코드 수정")} style={{ flexShrink: 0 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         const code = prompt("Modality 코드 수정", m);
                         if (!code || code.trim().toUpperCase() === m) return;
                         saveMods(shownMods.map((x, k) => (k === i ? code.trim().toUpperCase() : x)));
                       }}>✏️</span>
-                <span title="목록에서 제거" style={{ flexShrink: 0 }}
+                <span title={tr("목록에서 제거")} style={{ flexShrink: 0 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (window.confirm(`'${m || "(없음)"}' 필터를 목록에서 제거할까요?`)) {
@@ -695,7 +694,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
         Favorites
         <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
           <EditToggle k="favs" />
-          <button title="현재 검색조건을 바로가기로 추가 (툴바 ★저장과 동일)"
+          <button title={tr("현재 검색조건을 바로가기로 추가 (툴바 ★저장과 동일)")}
                   style={{ padding: "0 6px", fontSize: 10.5 }}
                   onClick={() => {
                     window.dispatchEvent(new CustomEvent("sv-save-shortcut"));
@@ -705,9 +704,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
       </div>
       <div style={unifiedScroll ? { flexShrink: 0 } : { maxHeight: "22vh", overflowY: "auto", flexShrink: 0 }}>
         {favs.length === 0 && (
-          <div style={{ padding: "2px 8px", fontSize: 11, color: "var(--text-secondary)" }}>
-            툴바 ★저장으로 현재 검색조건 등록
-          </div>
+          <div style={{ padding: "2px 8px", fontSize: 11, color: "var(--text-secondary)" }}>{tr("툴바 ★저장으로 현재 검색조건 등록")}</div>
         )}
         {favs.map((s, i) => (
           <div key={`${s.label}-${favTick}`}
@@ -721,14 +718,14 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
             </span>
             {editSec.favs && (
               <>
-                <span title="이름 변경" style={{ flexShrink: 0 }}
+                <span title={tr("이름 변경")} style={{ flexShrink: 0 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         const nn = prompt("바로가기 이름 변경", s.label);
                         if (!nn || nn === s.label) return;
                         saveFavs(favs.map((f, k) => (k === i ? { ...f, label: nn } : f)));
                       }}>✏️</span>
-                <span title="삭제" style={{ flexShrink: 0 }}
+                <span title={tr("삭제")} style={{ flexShrink: 0 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (window.confirm(`'${s.label}' 바로가기를 삭제할까요?`)) {
@@ -743,9 +740,7 @@ function SearchRail({ active, onPick, tree, width, mods, activeMod, onMod, unifi
       <div style={{
         fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700,
         padding: "6px 4px 2px", borderTop: "1px solid var(--border)", marginTop: 4,
-      }}>
-        검색 폴더
-      </div>
+      }}>{tr("검색 폴더")}</div>
       <div style={unifiedScroll
         ? { flexShrink: 0, display: "flex", flexDirection: "column" }
         : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{tree}</div>
@@ -790,14 +785,14 @@ function ServerButtons({ mode, onMode }: {
   return (
     <span style={{ position: "relative", display: "flex", gap: 3, alignSelf: "center" }}>
       <button onClick={() => pick("local")}
-              title="Local Server — 로컬 PACS 모드로 전환(서버 데이터 숨김) + 공유 폴더 보기 (설정>서버 네트워크에서 디렉토리 지정)"
+              title={tr("Local Server — 로컬 PACS 모드로 전환(서버 데이터 숨김) + 공유 폴더 보기 (설정>서버 네트워크에서 디렉토리 지정)")}
               style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
                        background: mode === "local" ? "var(--accent)" : undefined,
                        color: mode === "local" ? "#fff" : undefined }}>
         Local Server
       </button>
       <button onClick={() => pick("web")}
-              title="Web Server — 서버 주소·포트 확인 (설정>서버 네트워크)"
+              title={tr("Web Server — 서버 주소·포트 확인 (설정>서버 네트워크)")}
               style={{ padding: "2px 10px", fontSize: 11, fontWeight: 700,
                        background: mode === "web" ? "var(--accent)" : undefined,
                        color: mode === "web" ? "#fff" : undefined }}>
@@ -811,7 +806,7 @@ function ServerButtons({ mode, onMode }: {
         }} onMouseLeave={() => setOpen(null)}>
           {open === "local" ? (
             <>
-              <b>Local Server — 폴더 공유</b>
+              <b>{tr("Local Server — 폴더 공유")}</b>
               {err ? (
                 <div style={{ color: "var(--stat-emergency)", marginTop: 6 }}>{err}</div>
               ) : (
@@ -821,15 +816,15 @@ function ServerButtons({ mode, onMode }: {
                           title={sub ? `${shareDir}\\${sub.replace(/\//g, "\\")}` : shareDir}>
                       {shareDir}
                     </code>
-                    <MiniBtn onClick={() => navigator.clipboard?.writeText(sub ? `${shareDir}\\${sub.replace(/\//g, "\\")}` : shareDir)}>경로 복사</MiniBtn>
+                    <MiniBtn onClick={() => navigator.clipboard?.writeText(sub ? `${shareDir}\\${sub.replace(/\//g, "\\")}` : shareDir)}>{tr("경로 복사")}</MiniBtn>
                   </div>
                   {/* 브레드크럼 — 루트/하위 폴더 경로 표시, 각 조각 클릭=해당 폴더로 이동, ⬆=상위 */}
                   <div style={{ display: "flex", gap: 3, alignItems: "center", flexWrap: "wrap",
                                 margin: "0 0 5px", fontSize: 11 }}>
                     <MiniBtn onClick={() => openLocal(sub.split("/").slice(0, -1).join("/"))}
-                             disabled={!sub} title="상위 폴더로">⬆ 상위</MiniBtn>
+                             disabled={!sub} title={tr("상위 폴더로")}>{tr("⬆ 상위")}</MiniBtn>
                     <span style={{ cursor: sub ? "pointer" : undefined, fontWeight: sub ? 400 : 700 }}
-                          onClick={() => sub && openLocal("")}>루트</span>
+                          onClick={() => sub && openLocal("")}>{tr("루트")}</span>
                     {sub && sub.split("/").map((seg, i, arr) => (
                       <span key={i} style={{ display: "flex", gap: 3, alignItems: "center" }}>
                         <span style={{ color: "var(--text-secondary)" }}>›</span>
@@ -842,7 +837,7 @@ function ServerButtons({ mode, onMode }: {
                     ))}
                   </div>
                   <table className="grid-table">
-                    <thead><tr><th>이름</th><th style={{ width: 64 }}>크기</th></tr></thead>
+                    <thead><tr><th>{tr("이름")}</th><th style={{ width: 64 }}>{tr("크기")}</th></tr></thead>
                     <tbody>
                       {files.slice(0, 20).map((f) => {
                         const rel = sub ? `${sub}/${f.name}` : f.name;   // 루트 기준 상대경로
@@ -859,7 +854,7 @@ function ServerButtons({ mode, onMode }: {
                           </tr>
                         );
                       })}
-                      {files.length === 0 && <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>비어 있음</td></tr>}
+                      {files.length === 0 && <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>{tr("비어 있음")}</td></tr>}
                     </tbody>
                   </table>
                 </>
@@ -870,15 +865,13 @@ function ServerButtons({ mode, onMode }: {
               <b>Web Server</b>
               <table className="grid-table" style={{ marginTop: 6 }}>
                 <tbody>
-                  <tr><th style={{ width: 80 }}>주소(IP)</th><td>{net.web?.ip || "(미설정)"}</td></tr>
+                  <tr><th style={{ width: 80 }}>{tr("주소(IP)")}</th><td>{net.web?.ip || "(미설정)"}</td></tr>
                   <tr><th>Port</th><td>{net.web?.port || "(미설정)"}</td></tr>
                   <tr><th>Name</th><td>{net.web?.name || "-"}</td></tr>
                   <tr><th>AE Title</th><td>{net.web?.ae_title || "-"}</td></tr>
                 </tbody>
               </table>
-              <div style={{ marginTop: 5, color: "var(--text-secondary)", fontSize: 11 }}>
-                설정 변경·Ping/Echo/DB 테스트는 설정 &gt; 서버 네트워크에서.
-              </div>
+              <div style={{ marginTop: 5, color: "var(--text-secondary)", fontSize: 11 }}>{tr("설정 변경·Ping/Echo/DB 테스트는 설정 &gt; 서버 네트워크에서.")}</div>
             </>
           )}
         </div>
@@ -903,7 +896,7 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, ser
       background: "var(--bg-canvas)", borderBottom: "1px solid var(--border)",
     }}>
       {viewerName && (
-        <b title="선택된 뷰어(설정>환경) — 워크리스트·뷰어 스킨" style={{
+        <b title={tr("선택된 뷰어(설정>환경) — 워크리스트·뷰어 스킨")} style={{
           fontSize: 13, letterSpacing: 0.6, color: "var(--accent)", padding: "4px 12px 6px 2px",
           whiteSpace: "nowrap", alignSelf: "center",
         }}>{viewerName}</b>
@@ -919,13 +912,13 @@ function WorklistTabsBar({ tabs, activeId, onPick, onAdd, onRemove, actions, ser
              }}>
           {t.label.toUpperCase()}
           {t.id !== "default" && (
-            <span title="페이지 삭제" onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
+            <span title={tr("페이지 삭제")} onClick={(e) => { e.stopPropagation(); onRemove(t.id); }}
                   style={{ fontSize: 10, opacity: 0.75 }}>✕</span>
           )}
         </div>
       ))}
       {extraTab}
-      <button onClick={onAdd} title="현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)"
+      <button onClick={onAdd} title={tr("현재 검색조건을 새 페이지로 등록 (최대 10 — UBPACS-Z)")}
               style={{ padding: "1px 9px", fontSize: 13, marginLeft: 4, marginBottom: 3 }}>＋</button>
       {/* 우측 그룹: 액션 버튼(요청 — Local Server 왼쪽) + 서버 버튼 */}
       <span style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center", alignSelf: "center" }}>
@@ -1018,14 +1011,10 @@ function StudyGrid({
               {!treeDisabled && expanded.has(row.id) && (
                 trees[row.id] === null ? (
                   <tr><td /><td colSpan={span - 1}
-                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    시리즈 로딩…
-                  </td></tr>
+                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("시리즈 로딩…")}</td></tr>
                 ) : (trees[row.id] ?? []).length === 0 ? (
                   <tr><td /><td colSpan={span - 1}
-                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    시리즈 없음
-                  </td></tr>
+                          style={{ paddingLeft: 30, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("시리즈 없음")}</td></tr>
                 ) : (trees[row.id] ?? []).map((s, si) => (
                   <Fragment key={s.series_uid}>
                     <tr style={{ background: "rgba(56,108,173,0.10)" }}
@@ -1061,9 +1050,7 @@ function StudyGrid({
           ))}
           {items.length === 0 && (
             <tr><td colSpan={span}
-                    style={{ color: "var(--text-secondary)", textAlign: "center", padding: 24 }}>
-              검사가 없습니다
-            </td></tr>
+                    style={{ color: "var(--text-secondary)", textAlign: "center", padding: 24 }}>{tr("검사가 없습니다")}</td></tr>
           )}
         </tbody>
       </table>
@@ -1106,7 +1093,7 @@ function PriorStudiesGrid({ detail, onAddCompare, onOpen }: {
   return (
     <PanelBox title={`과거검사 ${detail ? `— ${detail.patient_name}` : ""} (＋=Series/Image · 더블클릭=영상 열기 · ⇄=비교세트)`}>
       <table className="grid-table">
-        <thead><tr><th style={{ width: 22 }} /><th>검사일</th><th>MOD</th><th>검사명</th><th>상태</th><th style={{ width: 26 }} /></tr></thead>
+        <thead><tr><th style={{ width: 22 }} /><th>{tr("검사일")}</th><th>MOD</th><th>{tr("검사명")}</th><th>{tr("상태")}</th><th style={{ width: 26 }} /></tr></thead>
         <tbody>
           {rows.map((e) => (
             <Fragment key={e.id}>
@@ -1120,15 +1107,15 @@ function PriorStudiesGrid({ detail, onAddCompare, onOpen }: {
                 <td>{e.study_date}</td><td>{e.modality}</td>
                 <td title={e.study_desc}>{e.study_desc}</td>
                 <td><StatusBadge status={e.status} /></td>
-                <td style={{ ...mark, textAlign: "center" }} title="비교세트에 추가"
+                <td style={{ ...mark, textAlign: "center" }} title={tr("비교세트에 추가")}
                     onClick={(ev) => { ev.stopPropagation(); onAddCompare(e); }}
                     onDoubleClick={(ev) => ev.stopPropagation()}>⇄</td>
               </tr>
               {expanded.has(e.id) && (
                 trees[e.id] === null ? (
-                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>시리즈 로딩…</td></tr>
+                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("시리즈 로딩…")}</td></tr>
                 ) : (trees[e.id] ?? []).length === 0 ? (
-                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>시리즈 없음</td></tr>
+                  <tr><td /><td colSpan={5} style={{ paddingLeft: 22, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("시리즈 없음")}</td></tr>
                 ) : (trees[e.id] ?? []).map((sr, si) => (
                   <Fragment key={sr.series_uid}>
                     <tr style={{ background: "rgba(56,108,173,0.10)" }} onDoubleClick={() => onOpen(e.id)}>
@@ -1179,13 +1166,11 @@ function ComparisonSetGrid({ items, current, onRemove, onOpenCompare, onMerge }:
   onMerge: () => void;
 }) {
   return (
-    <PanelBox title="비교세트 (Complementary set)" right={
+    <PanelBox title={tr("비교세트 (Complementary set)")} right={
       <span style={{ display: "flex", gap: 4 }}>
         <button disabled={!current || items.length === 0} onClick={onMerge}
-                title="묶음판독(report_merge) — 비교세트 검사들을 현재 검사 판독 하나로 병합"
-                style={{ padding: "2px 10px", fontSize: 11.5 }}>
-          묶음판독
-        </button>
+                title={tr("묶음판독(report_merge) — 비교세트 검사들을 현재 검사 판독 하나로 병합")}
+                style={{ padding: "2px 10px", fontSize: 11.5 }}>{tr("묶음판독")}</button>
         <button className="primary" disabled={!current || items.length === 0} onClick={onOpenCompare}
                 style={{ padding: "2px 10px", fontSize: 11.5 }}>
           비교 열기 ({items.length + (current ? 1 : 0)})
@@ -1193,7 +1178,7 @@ function ComparisonSetGrid({ items, current, onRemove, onOpenCompare, onMerge }:
       </span>
     }>
       <table className="grid-table">
-        <thead><tr><th>검사일</th><th>MOD</th><th>검사명</th><th></th></tr></thead>
+        <thead><tr><th>{tr("검사일")}</th><th>MOD</th><th>{tr("검사명")}</th><th></th></tr></thead>
         <tbody>
           {items.map((e) => (
             <tr key={e.study_uid}>
@@ -1203,9 +1188,7 @@ function ComparisonSetGrid({ items, current, onRemove, onOpenCompare, onMerge }:
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>
-              과거검사를 더블클릭해 추가 → 현재 검사와 함께 뷰어에서 비교
-            </td></tr>
+            <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>{tr("과거검사를 더블클릭해 추가 → 현재 검사와 함께 뷰어에서 비교")}</td></tr>
           )}
         </tbody>
       </table>
@@ -1242,21 +1225,21 @@ export function PhraseEditModal({ init, defaults, onSave, onClose }: {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <Row label="장비(MOD)">
             <select value={modality} onChange={(e) => setModality(e.target.value)} style={{ flex: 1 }}>
-              <option value="">공통</option>
+              <option value="">{tr("공통")}</option>
               {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM", "ES", "RF"].map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
           </Row>
           <Row label="부위">
-            <input value={bodyPart} onChange={(e) => setBodyPart(e.target.value)} placeholder="CHEST… (빈칸=공통)"
+            <input value={bodyPart} onChange={(e) => setBodyPart(e.target.value)} placeholder={tr("CHEST… (빈칸=공통)")}
                    style={{ flex: 1, minWidth: 0 }} />
           </Row>
         </div>
         <Row label="단축키">
           <input value={shortcut} maxLength={1} onChange={(e) => setShortcut(e.target.value.toUpperCase())}
-                 placeholder="영문/숫자 1글자" style={{ width: 90 }} />
-          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>리포트에서 Alt+키로 즉시 삽입</span>
+                 placeholder={tr("영문/숫자 1글자")} style={{ width: 90 }} />
+          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("리포트에서 Alt+키로 즉시 삽입")}</span>
         </Row>
         <Row label="본문 *">
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
@@ -1272,8 +1255,8 @@ export function PhraseEditModal({ init, defaults, onSave, onClose }: {
                       await onSave({ name, text, modality, body_part: bodyPart, shortcut });
                       onClose();
                     } catch (e) { setErr(e instanceof Error ? e.message : "저장 실패"); }
-                  }}>저장</button>
-          <button onClick={onClose}>취소</button>
+                  }}>{tr("저장")}</button>
+          <button onClick={onClose}>{tr("취소")}</button>
         </div>
       </div>
     </div>
@@ -1311,12 +1294,11 @@ function PhrasePanel({ onInsert, current, shortcutRef }: {
   };
 
   return (
-    <PanelBox title="상용구 (Std)" right={
+    <PanelBox title={tr("상용구 (Std)")} right={
       <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
         <label style={{ fontSize: 10, display: "flex", gap: 2, alignItems: "center", textTransform: "none" }}>
-          <input type="checkbox" checked={fitOnly} onChange={(e) => setFitOnly(e.target.checked)} />맞춤
-        </label>
-        <MiniBtn onClick={() => sel && onInsert(sel.text)} disabled={!sel}>삽입</MiniBtn>
+          <input type="checkbox" checked={fitOnly} onChange={(e) => setFitOnly(e.target.checked)} />{tr("맞춤")}</label>
+        <MiniBtn onClick={() => sel && onInsert(sel.text)} disabled={!sel}>{tr("삽입")}</MiniBtn>
         <MiniBtn onClick={() => setModal("new")}>New</MiniBtn>
         <MiniBtn onClick={() => setModal("edit")} disabled={!sel}>Edit</MiniBtn>
         <MiniBtn onClick={del} disabled={!sel}>Del</MiniBtn>
@@ -1325,7 +1307,7 @@ function PhrasePanel({ onInsert, current, shortcutRef }: {
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
           <table className="grid-table">
-            <thead><tr><th>분류</th><th>NAME</th><th style={{ width: 34 }}>키</th></tr></thead>
+            <thead><tr><th>{tr("분류")}</th><th>NAME</th><th style={{ width: 34 }}>{tr("키")}</th></tr></thead>
             <tbody>
               {visible.map((p) => (
                 <tr key={p.id} className={sel?.id === p.id ? "selected" : ""}
@@ -1416,7 +1398,7 @@ function KeyImageStrip({ studyId }: { studyId: number }) {
         ))}
       </div>
       <MiniBtn onClick={() => save(false)} disabled={busy || !canRegister}
-               title={canRegister ? undefined : PERM_DENIED_TIP}>저장</MiniBtn>
+               title={canRegister ? undefined : PERM_DENIED_TIP}>{tr("저장")}</MiniBtn>
       <MiniBtn onClick={() => save(true)} disabled={busy || selected.size === 0 || !canRegister}
                title={canRegister ? undefined : PERM_DENIED_TIP}>KOS</MiniBtn>
       {msg && <span style={{ fontSize: 10.5, color: "var(--stat-final)" }}>{msg}</span>}
@@ -1500,7 +1482,7 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
         recRef.current = rec;
         rec.start();
         setStt(true);
-      }).catch(() => alert("마이크 권한이 필요합니다"));
+      }).catch(() => alert(tr("마이크 권한이 필요합니다")));
       return;
     }
     const w = window as unknown as Record<string, unknown>;
@@ -1510,7 +1492,7 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
         onresult: (ev: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
         onend: () => void; onerror: () => void; start: () => void; stop: () => void;
       }) | undefined;
-    if (!SR) { alert("이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장 — 또는 설정>AI 정책에서 Whisper 선택)"); return; }
+    if (!SR) { alert(tr("이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome 권장 — 또는 설정>AI 정책에서 Whisper 선택)")); return; }
     const rec = new SR();
     rec.lang = "ko-KR";
     rec.continuous = true;
@@ -1558,7 +1540,7 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
   }, [insertRef]);
 
   if (!detail) {
-    return <PanelBox title="REPORT"><Empty>검사를 선택하세요</Empty></PanelBox>;
+    return <PanelBox title="REPORT"><Empty>{tr("검사를 선택하세요")}</Empty></PanelBox>;
   }
 
   const finalized = current?.status === "finalized";
@@ -1589,7 +1571,7 @@ function ReportPanel({ detail, onChanged, insertRef, onNav }: {
   const openAiPopup = () => {
     if (!aiDraft) return;
     const w = window.open("", "sv_ai_report", "width=620,height=780");
-    if (!w) { alert("팝업이 차단되었습니다"); return; }
+    if (!w) { alert(tr("팝업이 차단되었습니다")); return; }
     const sr = aiDraft.sr_json;
     const rows = [
       ...(sr.comparison.summary ? [`<div class="sec">COMPARISON</div><div>${escHtml(sr.comparison.summary)}</div>`] : []),
@@ -1610,7 +1592,7 @@ h2{color:#a78bfa;font-size:16px;margin:0 0 4px}.meta{color:#9aa3ad;font-size:12p
 <h2>AI STRUCTURED REPORT</h2>
 <div class="meta">${escHtml(detail.patient_name)} (${escHtml(detail.patient_key)}) · ${detail.modality} · ${detail.study_date} · ${escHtml(detail.study_desc)} · v${aiDraft.version} ${escHtml(aiDraft.ai_model)}</div>
 ${rows}
-<div class="foot">⚠ AI 생성 초안 — 확정 아님. 최종 판독은 의료인이 합니다.</div>
+<div class="foot">{tr("⚠ AI 생성 초안 — 확정 아님. 최종 판독은 의료인이 합니다.")}</div>
 </body></html>`);
     w.document.close();
   };
@@ -1621,11 +1603,11 @@ ${rows}
     <PanelBox title="REPORT" right={
       <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
         {onNav && (<>
-          <MiniBtn title="이전 환자(검사)로 이동" onClick={() => onNav(-1)}>◀</MiniBtn>
-          <MiniBtn title="다음 환자(검사)로 이동" onClick={() => onNav(1)}>▶</MiniBtn>
+          <MiniBtn title={tr("이전 환자(검사)로 이동")} onClick={() => onNav(-1)}>◀</MiniBtn>
+          <MiniBtn title={tr("다음 환자(검사)로 이동")} onClick={() => onNav(1)}>▶</MiniBtn>
         </>)}
         {current && (<>
-          {current.created_by === "ai" && <span className="badge ai">AI 초안 — 검토 필수</span>}
+          {current.created_by === "ai" && <span className="badge ai">{tr("AI 초안 — 검토 필수")}</span>}
           <StatusBadge status={current.status === "draft" ? "draft_ready" : current.status} />
         </>)}
       </span>
@@ -1642,8 +1624,8 @@ ${rows}
             </tr>
             <tr>
               <th>Acc No</th><td>{detail.accession_no}</td>
-              <th>검사명</th><td colSpan={3} title={detail.study_desc}>{detail.study_desc}</td>
-              <th>검사일</th><td>{detail.study_date}</td>
+              <th>{tr("검사명")}</th><td colSpan={3} title={detail.study_desc}>{detail.study_desc}</td>
+              <th>{tr("검사일")}</th><td>{detail.study_date}</td>
             </tr>
             <tr>
               <th>Reporter</th>
@@ -1652,7 +1634,7 @@ ${rows}
                 Reader: {current?.reviewed_by || "-"} · Conf1: {finalized ? current?.reviewed_by : "-"} ·
                 Conf2: {(current?.diff_metrics as { confirm2?: { by: string } })?.confirm2?.by ?? "-"}
               </td>
-              <th>확정일</th>
+              <th>{tr("확정일")}</th>
               <td>{current?.finalized_at ? current.finalized_at.slice(0, 10) : "-"}</td>
             </tr>
           </tbody>
@@ -1661,14 +1643,12 @@ ${rows}
         <KeyImageStrip studyId={detail.id} />
 
         {!current || !draft ? (
-          <Empty>
-            리포트 없음
-            <div style={{ marginTop: 6 }}>
+          <Empty>{tr("리포트 없음")}<div style={{ marginTop: 6 }}>
               <MiniBtn disabled={!canWrite} title={canWrite ? undefined : PERM_DENIED_TIP}
                        onClick={async () => {
                          try { await api.analyze(detail.id); onChanged(); }
                          catch (e) { alert((e as Error).message); }   // AI 판독 보류(409) 등 안내
-                       }}>AI 초안 생성</MiniBtn>
+                       }}>{tr("AI 초안 생성")}</MiniBtn>
             </div>
           </Empty>
         ) : (
@@ -1682,15 +1662,15 @@ ${rows}
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ai)", display: "flex", gap: 6, alignItems: "center" }}>
                   AI STRUCTURED REPORT {aiDraft && `(v${aiDraft.version} · ${aiDraft.ai_model})`}
                   <span style={{ flex: 1 }} />
-                  <button title="별도 창(모니터)으로 AI 리포트 보기" disabled={!aiDraft} onClick={openAiPopup}
+                  <button title={tr("별도 창(모니터)으로 AI 리포트 보기")} disabled={!aiDraft} onClick={openAiPopup}
                           style={{ padding: "1px 7px", fontSize: 11 }}>↗</button>
                   <button className="primary" disabled={!aiDraft || finalized || !canWrite}
                           title={canWrite ? "AI 초안을 우측 Report로 복사 — 검토 후 의료인이 확정(서명)" : PERM_DENIED_TIP}
                           onClick={() => aiDraft && setDraft(structuredClone(aiDraft.sr_json))}
-                          style={{ padding: "1px 10px", fontSize: 11 }}>적용 ▶</button>
+                          style={{ padding: "1px 10px", fontSize: 11 }}>{tr("적용 ▶")}</button>
                 </div>
                 {!aiDraft ? (
-                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>AI 초안 없음 — 초안 재생성으로 생성</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("AI 초안 없음 — 초안 재생성으로 생성")}</div>
                 ) : (
                   <div style={{ fontSize: 11.5 }}>
                     {aiDraft.sr_json.comparison.summary && (
@@ -1718,10 +1698,8 @@ ${rows}
               <div style={{ flex: 1.2, minWidth: 0, display: "flex", flexDirection: "column", gap: 4,
                             border: "1px solid var(--border)", borderRadius: 4, padding: 6, overflow: "auto" }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
-                              display: "flex", gap: 6, alignItems: "center" }}>
-                  REPORT (판독)
-                  <span style={{ flex: 1 }} />
-                  <select title="판독 이력 — 과거 버전 보기" value={histId ?? "cur"}
+                              display: "flex", gap: 6, alignItems: "center" }}>{tr("REPORT (판독)")}<span style={{ flex: 1 }} />
+                  <select title={tr("판독 이력 — 과거 버전 보기")} value={histId ?? "cur"}
                           style={{ fontSize: 10.5 }}
                           onChange={(e) => setHistId(e.target.value === "cur" ? null : Number(e.target.value))}>
                     <option value="cur">현재 (v{current.version})</option>
@@ -1792,7 +1770,7 @@ ${rows}
                        onClick={async () => {
                          try { await api.analyze(detail.id); onChanged(); }
                          catch (e) { alert((e as Error).message); }   // AI 판독 보류(409) 등 안내
-                       }}>초안 재생성</MiniBtn>
+                       }}>{tr("초안 재생성")}</MiniBtn>
               <MiniBtn disabled={!canPrint} title={canPrint ? undefined : PERM_DENIED_TIP}
                        onClick={() => downloadReportPdf(current.id)}>PDF</MiniBtn>
               {!finalized && (
@@ -1817,9 +1795,7 @@ ${rows}
                 }}>2nd Approve</MiniBtn>
               )}
               {finalized && (
-                <MiniBtn onClick={async () => { setBusy(true); try { await api.sendSr(current.id); alert("DICOM SR 전송 완료"); } finally { setBusy(false); } }}>
-                  SR 전송
-                </MiniBtn>
+                <MiniBtn onClick={async () => { setBusy(true); try { await api.sendSr(current.id); alert(tr("DICOM SR 전송 완료")); } finally { setBusy(false); } }}>{tr("SR 전송")}</MiniBtn>
               )}
               <div style={{ flex: 1 }} />
               <MiniBtn onClick={save} disabled={busy || finalized || !canWrite}
@@ -1855,9 +1831,9 @@ function OrderEditModal({ onSaved, onClose }: {
                     width: 1050, maxWidth: "95vw", maxHeight: "92vh", overflow: "auto",
                     padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <b style={{ fontSize: 13 }}>새 오더 등록 — MWL로 장비에 전달됩니다</b>
+          <b style={{ fontSize: 13 }}>{tr("새 오더 등록 — MWL로 장비에 전달됩니다")}</b>
           <div style={{ flex: 1 }} />
-          <button onClick={onClose} title="닫기" style={{ padding: "1px 8px" }}>✕</button>
+          <button onClick={onClose} title={tr("닫기")} style={{ padding: "1px 8px" }}>✕</button>
         </div>
         <OrderEntryRis
           genPid={genPid}
@@ -1921,14 +1897,14 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
   };
 
   return (
-    <PanelBox title="오더/예약 (RIS·MWL)" right={
+    <PanelBox title={tr("오더/예약 (RIS·MWL)")} right={
       <span style={{ display: "flex", gap: 3 }}>
         <MiniBtn onClick={() => setModalOpen(true)}>New</MiniBtn>
-        <MiniBtn onClick={exportMwl} title="scheduled 오더를 MWL(.wl)로 내보내기 — Orthanc worklists">MWL</MiniBtn>
+        <MiniBtn onClick={exportMwl} title={tr("scheduled 오더를 MWL(.wl)로 내보내기 — Orthanc worklists")}>MWL</MiniBtn>
       </span>
     }>
       <table className="grid-table">
-        <thead><tr><th>환자</th><th>오더명</th><th>MOD</th><th>예약일</th><th>상태</th><th>가져감</th><th></th></tr></thead>
+        <thead><tr><th>{tr("환자")}</th><th>{tr("오더명")}</th><th>MOD</th><th>{tr("예약일")}</th><th>{tr("상태")}</th><th>{tr("가져감")}</th><th></th></tr></thead>
         <tbody>
           {items.map((o) => (
             <tr key={o.id}>
@@ -1943,21 +1919,21 @@ function OrdersPanel({ refreshKey }: { refreshKey: number }) {
                 : "—"}</td>
               <td style={{ whiteSpace: "nowrap" }}>
                 {o.status === "scheduled" && (
-                  <MiniBtn title="검사 시작 (MPPS IN PROGRESS)" onClick={() => setSt(o.id, "in_progress")}>시작</MiniBtn>
+                  <MiniBtn title={tr("검사 시작 (MPPS IN PROGRESS)")} onClick={() => setSt(o.id, "in_progress")}>{tr("시작")}</MiniBtn>
                 )}
                 {o.status === "in_progress" && (
-                  <MiniBtn title="검사 완료 (MPPS COMPLETED)" onClick={() => setSt(o.id, "completed")}>완료</MiniBtn>
+                  <MiniBtn title={tr("검사 완료 (MPPS COMPLETED)")} onClick={() => setSt(o.id, "completed")}>{tr("완료")}</MiniBtn>
                 )}
                 {(o.status === "scheduled" || o.status === "in_progress") && (
-                  <MiniBtn title="취소 (MPPS DISCONTINUED)" onClick={() => setSt(o.id, "cancelled")}>✕</MiniBtn>
+                  <MiniBtn title={tr("취소 (MPPS DISCONTINUED)")} onClick={() => setSt(o.id, "cancelled")}>✕</MiniBtn>
                 )}
-                <MiniBtn title="오더 삭제 (DB에서 제거 — 되돌릴 수 없음)" onClick={() => del(o)}
+                <MiniBtn title={tr("오더 삭제 (DB에서 제거 — 되돌릴 수 없음)")} onClick={() => del(o)}
                          style={{ color: "var(--stat-emergency)" }}>✕</MiniBtn>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>오더 없음 — New로 등록, MWL로 장비 전달</td></tr>
+            <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>{tr("오더 없음 — New로 등록, MWL로 장비 전달")}</td></tr>
           )}
         </tbody>
       </table>
@@ -2054,14 +2030,14 @@ function ThumbnailPanel({ detail, onOpen }: { detail: StudyDetail | null; onOpen
   const sel = tree.find((s) => s.series_uid === selSeries) ?? null;
 
   return (
-    <PanelBox title="Thumbnail (더블클릭=뷰어)" right={
+    <PanelBox title={tr("Thumbnail (더블클릭=뷰어)")} right={
       <span style={{ display: "flex", gap: 3 }}>
         <GridPicker label="Srs" value={sLay} onPick={(v) => { setSLay(v); persist(v, iLay); }} />
         <GridPicker label="Img" value={iLay} onPick={(v) => { setILay(v); persist(sLay, v); }} />
       </span>
     }>
-      {!detail ? <Empty>검사를 선택하세요</Empty> : tree.length === 0 ? (
-        <Empty>영상 없음 (Orthanc 미연결?)</Empty>
+      {!detail ? <Empty>{tr("검사를 선택하세요")}</Empty> : tree.length === 0 ? (
+        <Empty>{tr("영상 없음 (Orthanc 미연결?)")}</Empty>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 5, height: "100%", minHeight: 0 }}
              onDoubleClick={onOpen}>
@@ -2117,23 +2093,23 @@ function CommentMemoPanel({ detail, onChanged }: { detail: StudyDetail | null; o
       detail && (
         <MiniBtn onClick={async () => {
           await api.setMemo(detail.id, memo);
-          setSaved("저장됨");
+          setSaved(tr("저장됨"));
           onChanged();
           setTimeout(() => setSaved(""), 2000);
-        }}>저장</MiniBtn>
+        }}>{tr("저장")}</MiniBtn>
       )
     }>
-      {!detail ? <Empty>검사를 선택하세요</Empty> : (
+      {!detail ? <Empty>{tr("검사를 선택하세요")}</Empty> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 6, height: "100%" }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>COMMENT (임상정보)</div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)" }}>{tr("COMMENT (임상정보)")}</div>
           <div style={{ fontSize: 12, color: "var(--text-primary)", maxHeight: 56, overflow: "auto" }}>
-            {detail.clinical_info || <span style={{ color: "var(--text-secondary)" }}>(없음)</span>}
+            {detail.clinical_info || <span style={{ color: "var(--text-secondary)" }}>{tr("(없음)")}</span>}
           </div>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", display: "flex", gap: 6 }}>
             MEMO {saved && <span style={{ color: "var(--stat-final)" }}>{saved}</span>}
           </div>
           <textarea value={memo} onChange={(e) => setMemo(e.target.value)}
-                    placeholder="검사 메모 — 워크리스트 메모 컬럼에 표시됩니다"
+                    placeholder={tr("검사 메모 — 워크리스트 메모 컬럼에 표시됩니다")}
                     style={{ flex: 1, minHeight: 40, background: "var(--bg-canvas)", color: "var(--text-primary)",
                              border: "1px solid var(--border)", borderRadius: 3, padding: 5,
                              fontFamily: "inherit", fontSize: 12, resize: "none" }} />
@@ -2224,14 +2200,14 @@ function DraggablePanel({ zone, k, onDrop, onHide, style, children }: {
       <div style={{ width: 12, flexShrink: 0, display: "flex", flexDirection: "column",
                     background: "var(--bg-elevated)", borderRadius: "4px 0 0 4px",
                     border: "1px solid var(--border)", borderRight: "none" }}>
-        <div draggable title="패널 이동 — 드래그해서 자리 교환"
+        <div draggable title={tr("패널 이동 — 드래그해서 자리 교환")}
              onDragStart={(e) => e.dataTransfer.setData(`text/sv-panel-${zone}`, k)}
              style={{ flex: 1, cursor: "grab", display: "flex", alignItems: "center",
                       justifyContent: "center", color: "var(--text-secondary)", fontSize: 9 }}>
           ⋮
         </div>
         {onHide && (
-          <div title="이 패널 숨기기 (Setting>워크리스트에서 다시 표시)" onClick={onHide}
+          <div title={tr("이 패널 숨기기 (Setting>워크리스트에서 다시 표시)")} onClick={onHide}
                style={{ flexShrink: 0, cursor: "pointer", textAlign: "center", fontSize: 9, lineHeight: "14px",
                         color: "var(--text-secondary)", borderTop: "1px solid var(--border)" }}>
             ✕
@@ -2302,13 +2278,13 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 100 }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, width: 760, maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center" }}>
-          <b>AI 초안 일괄 검토 (F-22)</b>
-          <span style={{ color: "var(--text-secondary)", fontSize: 12, marginLeft: 8 }}>critical 초안은 자동 제외 — 개별 검토 필요</span>
-          <button style={{ marginLeft: "auto" }} onClick={onClose}>닫기</button>
+          <b>{tr("AI 초안 일괄 검토 (F-22)")}</b>
+          <span style={{ color: "var(--text-secondary)", fontSize: 12, marginLeft: 8 }}>{tr("critical 초안은 자동 제외 — 개별 검토 필요")}</span>
+          <button style={{ marginLeft: "auto" }} onClick={onClose}>{tr("닫기")}</button>
         </div>
         <div style={{ overflow: "auto", flex: 1 }}>
           <table className="grid-table">
-            <thead><tr><th></th><th>환자</th><th>검사일</th><th>MOD</th><th>검사명</th><th>AI 임프레션</th><th>신뢰도</th></tr></thead>
+            <thead><tr><th></th><th>{tr("환자")}</th><th>{tr("검사일")}</th><th>MOD</th><th>{tr("검사명")}</th><th>{tr("AI 임프레션")}</th><th>{tr("신뢰도")}</th></tr></thead>
             <tbody>
               {items.map((c) => (
                 <tr key={c.report_id} onClick={() => toggle(c.report_id)}>
@@ -2321,7 +2297,7 @@ function BatchReviewModal({ onClose, onDone }: { onClose: () => void; onDone: ()
                 </tr>
               ))}
               {items.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-secondary)", padding: 20 }}>대상 초안 없음</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--text-secondary)", padding: 20 }}>{tr("대상 초안 없음")}</td></tr>
               )}
             </tbody>
           </table>
@@ -2366,7 +2342,7 @@ function SvStatusBar({ queryParams, refreshKey, items, onStatus, onRefresh }: {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px",
                   background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-      <b style={{ fontSize: 14, marginRight: 6 }}>워크리스트</b>
+      <b style={{ fontSize: 14, marginRight: 6 }}>{tr("워크리스트")}</b>
       {chips.map((ch) => (
         <button key={ch.label} onClick={ch.onClick} title={`${ch.label} 상태로 필터`}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 16,
@@ -2376,9 +2352,9 @@ function SvStatusBar({ queryParams, refreshKey, items, onStatus, onRefresh }: {
         </button>
       ))}
       {!c && (
-        <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>현재 페이지 집계 (서버 집계 대기…)</span>
+        <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>{tr("현재 페이지 집계 (서버 집계 대기…)")}</span>
       )}
-      <button title="새로고침" onClick={onRefresh} style={{ padding: "3px 10px", marginLeft: c ? "auto" : 8 }}>⟳</button>
+      <button title={tr("새로고침")} onClick={onRefresh} style={{ padding: "3px 10px", marginLeft: c ? "auto" : 8 }}>⟳</button>
     </div>
   );
 }
@@ -2415,9 +2391,9 @@ function SvPerfCard({ mods }: { mods: Record<string, number> }) {
   const max = Math.max(1, ...entries.map(([, n]) => n));
   return (
     <div style={{ padding: "10px 14px", background: "var(--bg-panel)", borderBottom: "1px solid var(--border)" }}>
-      <b style={{ fontSize: 13 }}>Performance — 모달리티 분포 (현재 검색 범위)</b>
+      <b style={{ fontSize: 13 }}>{tr("Performance — 모달리티 분포 (현재 검색 범위)")}</b>
       <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8, maxWidth: 560 }}>
-        {entries.length === 0 && <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>데이터 없음</span>}
+        {entries.length === 0 && <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{tr("데이터 없음")}</span>}
         {entries.map(([m, nn]) => (
           <div key={m} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
             <span style={{ width: 44, color: "var(--text-secondary)" }}>{m || "-"}</span>
@@ -3087,7 +3063,7 @@ export function Worklist() {
       }
       case "ub_adv":
         // ④ Advance View: 고급 뷰어(OHIF)로 교체 오픈 — 설정에서 허용 시에만
-        if (!ohifOnRef.current) { alert("OHIF는 설정 > 뷰어 > OHIF에서 활성화할 수 있습니다"); break; }
+        if (!ohifOnRef.current) { alert(tr("OHIF는 설정 > 뷰어 > OHIF에서 활성화할 수 있습니다")); break; }
         if (target) openStudy(target);
         break;
       case "ub_key": {
@@ -3097,7 +3073,7 @@ export function Worklist() {
         selectAndSync(d);
         const inst = await api.instances(target.id);
         if (!inst.key_images.length) {
-          alert("이 검사에 선택된 키 이미지가 없습니다.\nREPORT 패널의 KEY IMG에서 먼저 선택·저장하세요.");
+          alert(tr("이 검사에 선택된 키 이미지가 없습니다.\\nREPORT 패널의 KEY IMG에서 먼저 선택·저장하세요."));
           break;
         }
         openV2({ detail: d, keySops: inst.key_images.map((k) => k.sop_uid) });
@@ -3183,7 +3159,7 @@ export function Worklist() {
         if (raw === null) break;              // 취소
         const hid = raw.trim();
         if (isMove && !hid) break;            // 이동은 대상 필수
-        if (hid && !/^\d+$/.test(hid)) { alert("병원 ID는 숫자여야 합니다"); break; }
+        if (hid && !/^\d+$/.test(hid)) { alert(tr("병원 ID는 숫자여야 합니다")); break; }
         try {
           await api.studyAdminAction(target.id, {
             action: isMove ? "move" : "copy",
@@ -3203,7 +3179,7 @@ export function Worklist() {
         try {
           await api.studyAdminAction(target.id, { action: "match", order_id: oid });
           onChanged();
-          alert("오더 매칭 완료");
+          alert(tr("오더 매칭 완료"));
         } catch (e) { alert(e instanceof Error ? e.message : "매칭 실패"); }
         break;
       }
@@ -3251,7 +3227,7 @@ export function Worklist() {
       await api.mergeReports([selected.id, ...compareSet.map((c) => c.id)]);
       setCompareSet([]);
       onChanged();
-      alert("묶음판독 초안이 생성되었습니다 — REPORT 패널에서 검토하세요.");
+      alert(tr("묶음판독 초안이 생성되었습니다 — REPORT 패널에서 검토하세요."));
     } catch (e) {
       alert(e instanceof Error ? e.message : "묶음판독 실패");
     }
@@ -3294,7 +3270,7 @@ export function Worklist() {
   // 새 페이지 등록 (최대 10) — 새 탭은 빈 검색으로 시작해 독립적으로 조건을 설정한다.
   // (검색 폴더에서 만들면 그 폴더 조건으로 시작)
   const addTab = useCallback(async (treeFilter?: { label: string; filter: WorklistTab["filter"] }) => {
-    if (tabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)"); return; }
+    if (tabs.length >= 10) { alert(tr("워크리스트 페이지는 최대 10개입니다 (UBPACS-Z 규격)")); return; }
     const label = prompt("새 페이지 이름 — 새 검색으로 시작합니다 (예: CR, 응급실)",
                          treeFilter?.label ?? `WORKLIST ${tabs.length + 1}`);
     if (!label) return;
@@ -3461,7 +3437,7 @@ export function Worklist() {
     switch (act) {
       case "import": setImportOpen(true); break;  // Import DICOM — USB/CD .dcm 등록
       case "reading": {   // Report 창 — 판독 작성 (모니터 설정 반영, 선택 연동은 sync)
-        if (!selected) { alert("검사를 먼저 선택하세요"); break; }
+        if (!selected) { alert(tr("검사를 먼저 선택하세요")); break; }
         void (async () => {
           const r = await api.getSetting("viewer.prefs").catch(() => ({ value: {} }));
           const mon = (r.value as { monitor?: { report?: number | null } }).monitor?.report;
@@ -3562,7 +3538,7 @@ export function Worklist() {
                        extraTab={isAdminRole && (
                          /* 관리자 전용 EXAM CONTROL 탭 — 기존 탭과 동일 스타일 + 보라 포인트 */
                          <div onClick={() => setExamCtl(true)}
-                              title="Exam Control — 관리자 검사 QC (삭제·복구·Unassign·Assign)"
+                              title={tr("Exam Control — 관리자 검사 QC (삭제·복구·Unassign·Assign)")}
                               style={{
                                 display: "flex", alignItems: "center", gap: 6, padding: "4px 11px",
                                 borderRadius: "4px 4px 0 0", cursor: "pointer", fontSize: 11.5, fontWeight: 700,
@@ -3604,7 +3580,7 @@ export function Worklist() {
       {/* EXAM CONTROL 본문 (레인 F) — 관리자 검사 QC. 선택 시 워크리스트 본문 전체를 대체.
           source: Local Server 모드(sv_server_mode=local)면 로컬 PACS(/api/local/examctl), 아니면 서버(/api/examctl) */}
       {examCtl ? (
-        <Suspense fallback={<div style={{ padding: 20, color: "var(--text-secondary)" }}>Exam Control 로딩…</div>}>
+        <Suspense fallback={<div style={{ padding: 20, color: "var(--text-secondary)" }}>{tr("Exam Control 로딩…")}</div>}>
           <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 8, display: "flex", flexDirection: "column" }}>
             <ExamControl source={serverMode === "local" ? "local" : "server"} />
           </div>
@@ -3615,12 +3591,10 @@ export function Worklist() {
       {localMode && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 10px",
                       background: "rgba(245,158,11,0.12)", borderBottom: "1px solid #f59e0b", fontSize: 12 }}>
-          <b style={{ color: "#f59e0b" }}>LOCAL 모드</b>
-          <span>서버 데이터 숨김 · 데이터: <code style={{ fontSize: 11 }}>
+          <b style={{ color: "#f59e0b" }}>{tr("LOCAL 모드")}</b>
+          <span>{tr("서버 데이터 숨김 · 데이터:")}<code style={{ fontSize: 11 }}>
             {localRoot || (localErr ? `⚠ 준비 중 (${localErr})` : "확인 중…")}</code></span>
-          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>
-            Import·새로고침·로컬 뷰어(더블클릭)만 사용 가능 — 해제: Web Server
-          </span>
+          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>{tr("Import·새로고침·로컬 뷰어(더블클릭)만 사용 가능 — 해제: Web Server")}</span>
         </div>
       )}
       {/* ── In 모드 ① 아이콘 툴바 (원본 우측 상단 13종) ── */}
@@ -3677,11 +3651,9 @@ export function Worklist() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 12px",
                       background: "var(--accent-subtle, rgba(96,165,250,0.12))", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
           <b>{selectedIds.size}개 Exam 선택됨</b>
-          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(items.map((r) => r.id))); selAnchorRef.current = items[0]?.id ?? null; }}>모두 선택</button>
-          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(selected ? [selected.id] : [])); selAnchorRef.current = selected?.id ?? null; }}>선택 해제</button>
-          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>
-            Shift+클릭 = 범위 · Ctrl/Cmd+클릭 = 개별 토글
-          </span>
+          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(items.map((r) => r.id))); selAnchorRef.current = items[0]?.id ?? null; }}>{tr("모두 선택")}</button>
+          <button style={{ padding: "2px 10px" }} onClick={() => { setSelectedIds(new Set(selected ? [selected.id] : [])); selAnchorRef.current = selected?.id ?? null; }}>{tr("선택 해제")}</button>
+          <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 11 }}>{tr("Shift+클릭 = 범위 · Ctrl/Cmd+클릭 = 개별 토글")}</span>
         </div>
       )}
 
@@ -3691,19 +3663,19 @@ export function Worklist() {
           display: "flex", gap: 8, alignItems: "center", padding: "5px 10px",
           background: "var(--bg-panel)", borderBottom: "1px solid var(--ai)", fontSize: 12.5,
         }}>
-          <span className="badge ai">AI 검색</span>
+          <span className="badge ai">{tr("AI 검색")}</span>
           {nlBusy ? (
-            <span style={{ color: "var(--text-secondary)" }}>변환 중…</span>
+            <span style={{ color: "var(--text-secondary)" }}>{tr("변환 중…")}</span>
           ) : nlPreview && (
             <>
-              <span>해석: <b>{nlPreview.explanation}</b></span>
+              <span>{tr("해석:")}<b>{nlPreview.explanation}</b></span>
               {nlPreview.source !== "live" && (
                 <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
                   ({nlPreview.source === "mock" ? "규칙 기반" : "AI 실패 — 규칙 기반 폴백"})
                 </span>
               )}
-              <button className="primary" style={{ padding: "1px 12px", fontSize: 12 }} onClick={applyNlPreview}>적용</button>
-              <button style={{ padding: "1px 10px", fontSize: 12 }} onClick={() => setNlPreview(null)}>취소</button>
+              <button className="primary" style={{ padding: "1px 12px", fontSize: 12 }} onClick={applyNlPreview}>{tr("적용")}</button>
+              <button style={{ padding: "1px 10px", fontSize: 12 }} onClick={() => setNlPreview(null)}>{tr("취소")}</button>
             </>
           )}
         </div>
@@ -3911,9 +3883,7 @@ export function Worklist() {
       {/* 자체 뷰어(Viewer2D)는 새 창(?viewer=2d)으로 열린다 — openV2 참조 */}
       {viewer3dUid && (
         <Suspense fallback={
-          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
-            3D 뷰어 로딩…
-          </div>
+          <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200, display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>{tr("3D 뷰어 로딩…")}</div>
         }>
           <Viewer3D studyUid={viewer3dUid} onClose={() => setViewer3dUid(null)} />
         </Suspense>
@@ -3925,9 +3895,7 @@ export function Worklist() {
                       boxShadow: "0 6px 20px rgba(0,0,0,0.5)", fontSize: 12.5, padding: 4 }}
              onMouseLeave={() => setCtx(null)}>
           <div className="sv-fav-row" style={{ padding: "5px 10px", borderRadius: 4, cursor: "pointer" }}
-               onClick={() => { setLocalViewerRow(ctx.row); setCtx(null); }}>
-            🗔 로컬 뷰어 열기
-          </div>
+               onClick={() => { setLocalViewerRow(ctx.row); setCtx(null); }}>{tr("🗔 로컬 뷰어 열기")}</div>
           <div className="sv-fav-row" style={{ padding: "5px 10px", borderRadius: 4, cursor: "pointer",
                                                color: "var(--stat-emergency)" }}
                onClick={() => {
@@ -3939,9 +3907,7 @@ export function Worklist() {
                  api.localDelete(r.id)
                    .then(() => setRefreshKey((k) => k + 1))
                    .catch((e) => alert(e instanceof Error ? e.message : "삭제 실패 — ⚠ 준비 중"));
-               }}>
-            🗑 검사 삭제 (로컬)
-          </div>
+               }}>{tr("🗑 검사 삭제 (로컬)")}</div>
         </div>
       ) : ctx && (
         <ContextMenu x={ctx.x} y={ctx.y} row={ctx.row} ohifOn={ohifOn} allowed={allowedAction}

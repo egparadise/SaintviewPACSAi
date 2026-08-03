@@ -10,6 +10,7 @@ import {
 import { LogsPanel, StatsPanel } from "./ServerInsights";
 import { DataWipePanel, RestorePanel } from "./ServerMaintenance";
 import { ExamControl } from "./ExamControl";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공통 상수/소형 UI (기존 AdminConsole 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -94,21 +95,21 @@ export function AccountsTab({ hid }: { hid: number }) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>👤 계정 관리 (발급 계정·등급)</div>
+        <div style={{ fontWeight: 700 }}>{tr("👤 계정 관리 (발급 계정·등급)")}</div>
         <div style={{ flex: 1 }} />
-        <input style={inp} placeholder="계정(좌석) 이름" value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={inp} placeholder="위치" value={loc} onChange={(e) => setLoc(e.target.value)} />
+        <input style={inp} placeholder={tr("계정(좌석) 이름")} value={name} onChange={(e) => setName(e.target.value)} />
+        <input style={inp} placeholder={tr("위치")} value={loc} onChange={(e) => setLoc(e.target.value)} />
         <select style={inp} value={role} onChange={(e) => setRole(e.target.value)}>
           {CLIENT_ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
-        <input style={{ ...inp, width: 110 }} placeholder="초기 비번(1111)" value={pw} onChange={(e) => setPw(e.target.value)} title="발급 시 초기 비밀번호 — 최초 로그인 시 1회 변경 강제" />
-        <button onClick={add} disabled={!name.trim()}>＋ 발급</button>
-        <button onClick={resetAll} style={{ color: "var(--stat-emergency,#f87171)" }} title="이 병원 모든 발급 계정 비번을 1111 로 일괄 리셋">↺ 모든 비번 리셋</button>
+        <input style={{ ...inp, width: 110 }} placeholder={tr("초기 비번(1111)")} value={pw} onChange={(e) => setPw(e.target.value)} title={tr("발급 시 초기 비밀번호 — 최초 로그인 시 1회 변경 강제")} />
+        <button onClick={add} disabled={!name.trim()}>{tr("＋ 발급")}</button>
+        <button onClick={resetAll} style={{ color: "var(--stat-emergency,#f87171)" }} title={tr("이 병원 모든 발급 계정 비번을 1111 로 일괄 리셋")}>{tr("↺ 모든 비번 리셋")}</button>
       </div>
       {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th>이름</th><th>코드(로그인 ID)</th><th>등급</th><th>비밀번호</th><th>위치</th><th>접속</th><th>마지막</th><th>사용</th><th></th></tr></thead>
+        <thead><tr><th>{tr("이름")}</th><th>{tr("코드(로그인 ID)")}</th><th>{tr("등급")}</th><th>{tr("비밀번호")}</th><th>{tr("위치")}</th><th>{tr("접속")}</th><th>{tr("마지막")}</th><th>{tr("사용")}</th><th></th></tr></thead>
         <tbody>
           {items.map((c) => (
             <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.5 }}>
@@ -122,10 +123,10 @@ export function AccountsTab({ hid }: { hid: number }) {
                 {c.has_login ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
                     <code style={{ fontSize: 12 }}>{reveal.has(c.id) ? (c.password || "—") : "••••"}</code>
-                    <span onClick={() => toggleReveal(c.id)} style={{ cursor: "pointer" }} title="비번 표시/숨김">👁</span>
-                    <span onClick={() => editPw(c)} style={{ cursor: "pointer" }} title="비번 수정(지정)">✏️</span>
-                    <span onClick={() => resetPw(c)} style={{ cursor: "pointer" }} title="1111 로 리셋">↺</span>
-                    {c.must_change && <span title="최초 로그인 시 변경 필요" style={{ color: "var(--stat-emergency,#f87171)", fontSize: 10 }}>변경필요</span>}
+                    <span onClick={() => toggleReveal(c.id)} style={{ cursor: "pointer" }} title={tr("비번 표시/숨김")}>👁</span>
+                    <span onClick={() => editPw(c)} style={{ cursor: "pointer" }} title={tr("비번 수정(지정)")}>✏️</span>
+                    <span onClick={() => resetPw(c)} style={{ cursor: "pointer" }} title={tr("1111 로 리셋")}>↺</span>
+                    {c.must_change && <span title={tr("최초 로그인 시 변경 필요")} style={{ color: "var(--stat-emergency,#f87171)", fontSize: 10 }}>{tr("변경필요")}</span>}
                   </span>
                 ) : <span style={{ color: "var(--text-secondary)" }}>—</span>}
               </td>
@@ -136,10 +137,10 @@ export function AccountsTab({ hid }: { hid: number }) {
               </td>
               <td>{fmtTime(c.last_seen)}</td>
               <td><input type="checkbox" checked={c.enabled} onChange={(e) => patch(c, { enabled: e.target.checked })} /></td>
-              <td><button onClick={async () => { if (confirm(`계정 '${c.name}' 삭제?`)) { try { await api.deleteClient(hid, c.id); load(); } catch (e) { setMsg(errMsg(e)); } } }}>삭제</button></td>
+              <td><button onClick={async () => { if (confirm(`계정 '${c.name}' 삭제?`)) { try { await api.deleteClient(hid, c.id); load(); } catch (e) { setMsg(errMsg(e)); } } }}>{tr("삭제")}</button></td>
             </tr>
           ))}
-          {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>발급된 계정이 없습니다.</td></tr>}
+          {items.length === 0 && <tr><td colSpan={9} style={{ color: "var(--text-secondary)" }}>{tr("발급된 계정이 없습니다.")}</td></tr>}
         </tbody>
       </table>
       </div>
@@ -229,16 +230,16 @@ export function PermMatrixTab({ hid }: { hid: number }) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>🛡️ 등급별 권한 매트릭스 (병원별)</div>
+        <div style={{ fontWeight: 700 }}>{tr("🛡️ 등급별 권한 매트릭스 (병원별)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={restore}>기본값 복원</button>
-        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+        <button onClick={restore}>{tr("기본값 복원")}</button>
+        <button className="primary" onClick={save} disabled={!dirty}>{tr("저장")}</button>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
           <thead>
             <tr>
-              <th style={{ whiteSpace: "nowrap" }}>등급 ＼ 권한</th>
+              <th style={{ whiteSpace: "nowrap" }}>{tr("등급 ＼ 권한")}</th>
               {perms.map((p) => (
                 <th key={p.key} title={p.key} style={{ whiteSpace: "nowrap" }}>{p.label}</th>
               ))}
@@ -249,7 +250,7 @@ export function PermMatrixTab({ hid }: { hid: number }) {
               <tr key={r.key}>
                 <td style={{ whiteSpace: "nowrap", fontWeight: r.key === "staff" ? 400 : 600 }}>
                   {r.label}
-                  {r.key === "staff" && <span title="조회 전용 원칙 — 조회 외 권한은 경고 후 부여 가능" style={{ marginLeft: 4 }}>🔒</span>}
+                  {r.key === "staff" && <span title={tr("조회 전용 원칙 — 조회 외 권한은 경고 후 부여 가능")} style={{ marginLeft: 4 }}>🔒</span>}
                 </td>
                 {perms.map((p) => (
                   <td key={p.key} style={{ textAlign: "center" }}>
@@ -313,14 +314,14 @@ export function HospitalModalityTab({ hid }: { hid: number }) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>📡 Modality 등록 (SCP — AE/IP/Port)</div>
+        <div style={{ fontWeight: 700 }}>{tr("📡 Modality 등록 (SCP — AE/IP/Port)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={add}>＋ 추가</button>
-        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+        <button onClick={add}>{tr("＋ 추가")}</button>
+        <button className="primary" onClick={save} disabled={!dirty}>{tr("저장")}</button>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>이름</th><th>AE Title</th><th>IP</th><th>Port</th><th>구분</th><th>연결 확인</th><th>상태</th><th></th></tr></thead>
+          <thead><tr><th>{tr("이름")}</th><th>AE Title</th><th>IP</th><th>Port</th><th>{tr("구분")}</th><th>{tr("연결 확인")}</th><th>{tr("상태")}</th><th></th></tr></thead>
           <tbody>
             {items.map((m, i) => {
               const t = tests[i];
@@ -344,16 +345,15 @@ export function HospitalModalityTab({ hid }: { hid: number }) {
                     <Dot state={t?.state ?? "unknown"} title={t ? `${t.detail} (${t.at})` : "미확인"} />{" "}
                     <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{t ? `${t.at}` : "미확인"}</span>
                   </td>
-                  <td><button onClick={() => del(i)}>삭제</button></td>
+                  <td><button onClick={() => del(i)}>{tr("삭제")}</button></td>
                 </tr>
               );
             })}
-            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>등록된 Modality가 없습니다. [＋ 추가] 후 저장하세요.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>{tr("등록된 Modality가 없습니다. [＋ 추가] 후 저장하세요.")}</td></tr>}
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        상태등: <Dot state="ok" /> 성공 · <Dot state="fail" /> 실패 · <Dot state="unknown" /> 미확인 (마우스 오버=상세·마지막 확인 시각).
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("상태등:")}<Dot state="ok" />{tr("성공 ·")}<Dot state="fail" />{tr("실패 ·")}<Dot state="unknown" /> 미확인 (마우스 오버=상세·마지막 확인 시각).
         편집한 뒤 반드시 [저장]을 눌러 병원 설정(modality.nodes)에 반영하세요.
       </div>
       <Msg text={msg} />
@@ -380,14 +380,14 @@ export function ScuTab({ hid }: { hid: number }) {
   if (!scu) return <div style={card}>{msg ? <Msg text={msg} /> : "불러오는 중…"}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
-      <div style={{ fontWeight: 700 }}>🏥 병원 설정 — SCU / 식별 정보</div>
+      <div style={{ fontWeight: 700 }}>{tr("🏥 병원 설정 — SCU / 식별 정보")}</div>
       {row("병원명", <input style={{ ...inp, flex: 1 }} value={scu.name} onChange={(e) => setScu({ ...scu, name: e.target.value })} />)}
       {row("SCU AE Title", <input style={{ ...inp, flex: 1 }} value={scu.ae_title} onChange={(e) => setScu({ ...scu, ae_title: e.target.value })} />)}
-      {row("IP", <input style={{ ...inp, flex: 1 }} value={scu.ip} onChange={(e) => setScu({ ...scu, ip: e.target.value })} placeholder="예: 10.0.0.12" />)}
+      {row("IP", <input style={{ ...inp, flex: 1 }} value={scu.ip} onChange={(e) => setScu({ ...scu, ip: e.target.value })} placeholder={tr("예: 10.0.0.12")} />)}
       {row("Port", <input style={{ ...inp, width: 100 }} type="number" value={scu.port} onChange={(e) => setScu({ ...scu, port: Number(e.target.value) })} />)}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button className="primary" onClick={save}>저장</button>
-        <button onClick={load}>다시 불러오기</button>
+        <button className="primary" onClick={save}>{tr("저장")}</button>
+        <button onClick={load}>{tr("다시 불러오기")}</button>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         이 탭은 병원 SCU/식별 정보 전용입니다(병원 주소·수신 포트 등 나머지는 [병원 정보] 탭).
@@ -413,24 +413,22 @@ export function UsageTab({ hid }: { hid: number }) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>📊 병원별 사용량 (DB · Storage)</div>
+        <div style={{ fontWeight: 700 }}>{tr("📊 병원별 사용량 (DB · Storage)")}</div>
         <div style={{ flex: 1 }} />
         {at && <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{at} 기준</span>}
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       {!u ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
         <>
           {!u.storage.orthanc_ok && (
-            <div style={{ fontSize: 12, color: "var(--danger,#f87171)", border: "1px solid var(--danger,#f87171)", borderRadius: 4, padding: "6px 10px" }}>
-              ⚠ DICOM 저장소(Orthanc) 연결 안 됨 — Storage 수치가 부정확할 수 있습니다
-            </div>
+            <div style={{ fontSize: 12, color: "var(--danger,#f87171)", border: "1px solid var(--danger,#f87171)", borderRadius: 4, padding: "6px 10px" }}>{tr("⚠ DICOM 저장소(Orthanc) 연결 안 됨 — Storage 수치가 부정확할 수 있습니다")}</div>
           )}
           <div style={{ fontWeight: 600, fontSize: 12.5 }}>Database</div>
           <table className="grid-table" style={{ fontSize: 12.5, maxWidth: 480 }}><tbody>
-            <tr><td>검사(studies)</td><td>{u.db.studies}</td></tr>
-            <tr><td>판독(reports)</td><td>{u.db.reports}</td></tr>
-            <tr><td>주석(annotations)</td><td>{u.db.annotations}</td></tr>
-            <tr><td>합계 행</td><td>{u.db.studies + u.db.reports + u.db.annotations}</td></tr>
+            <tr><td>{tr("검사(studies)")}</td><td>{u.db.studies}</td></tr>
+            <tr><td>{tr("판독(reports)")}</td><td>{u.db.reports}</td></tr>
+            <tr><td>{tr("주석(annotations)")}</td><td>{u.db.annotations}</td></tr>
+            <tr><td>{tr("합계 행")}</td><td>{u.db.studies + u.db.reports + u.db.annotations}</td></tr>
           </tbody></table>
           <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>Storage</div>
           <div style={{ maxWidth: 480 }}>
@@ -498,21 +496,21 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 700 }}>🔌 연결 대시보드</div>
+          <div style={{ fontWeight: 700 }}>{tr("🔌 연결 대시보드")}</div>
           <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
             Client {onlineCnt}/{clients.length} 접속 · Modality {okCnt}/{mods.length} 확인 {at && `· ${at}`}
           </span>
           <div style={{ flex: 1 }} />
-          <button onClick={load}>새로고침</button>
+          <button onClick={load}>{tr("새로고침")}</button>
           <button className="primary" onClick={testAll} disabled={testing || mods.length === 0}>
             {testing ? "테스트 중…" : "전체 테스트 (순차 Echo)"}
           </button>
         </div>
 
-        <div style={{ fontWeight: 600, fontSize: 12.5 }}>Client (하트비트)</div>
+        <div style={{ fontWeight: 600, fontSize: 12.5 }}>{tr("Client (하트비트)")}</div>
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>상태</th><th>이름</th><th>등급</th><th>위치</th><th>마지막 하트비트</th></tr></thead>
+          <thead><tr><th>{tr("상태")}</th><th>{tr("이름")}</th><th>{tr("등급")}</th><th>{tr("위치")}</th><th>{tr("마지막 하트비트")}</th></tr></thead>
           <tbody>
             {clients.map((c) => (
               <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.5 }}>
@@ -523,15 +521,15 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
                 <td>{c.name}</td><td>{roleLabel(c.role)}</td><td>{c.location || "—"}</td><td>{fmtTime(c.last_seen)}</td>
               </tr>
             ))}
-            {clients.length === 0 && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>발급된 Client가 없습니다.</td></tr>}
+            {clients.length === 0 && <tr><td colSpan={5} style={{ color: "var(--text-secondary)" }}>{tr("발급된 Client가 없습니다.")}</td></tr>}
           </tbody>
         </table>
         </div>
 
-        <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>Modality (마지막 Echo)</div>
+        <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>{tr("Modality (마지막 Echo)")}</div>
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>상태</th><th>이름</th><th>AE Title</th><th>IP:Port</th><th>마지막 확인</th><th>결과</th></tr></thead>
+          <thead><tr><th>{tr("상태")}</th><th>{tr("이름")}</th><th>AE Title</th><th>IP:Port</th><th>{tr("마지막 확인")}</th><th>{tr("결과")}</th></tr></thead>
           <tbody>
             {mods.map((m, i) => {
               const t = tests[i];
@@ -544,13 +542,11 @@ export function ConnDashboardTab({ hid }: { hid: number }) {
                 </tr>
               );
             })}
-            {mods.length === 0 && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>등록된 Modality가 없습니다 — [③ Modality(SCP)]에서 등록하세요.</td></tr>}
+            {mods.length === 0 && <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("등록된 Modality가 없습니다 — [③ Modality(SCP)]에서 등록하세요.")}</td></tr>}
           </tbody>
         </table>
         </div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          Client 접속 상태는 30초 자동 갱신됩니다. Modality 상태등은 [전체 테스트](순차 C-ECHO) 결과 기준입니다.
-        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("Client 접속 상태는 30초 자동 갱신됩니다. Modality 상태등은 [전체 테스트](순차 C-ECHO) 결과 기준입니다.")}</div>
         <Msg text={msg} />
       </div>
     </div>
@@ -606,13 +602,13 @@ export function StudyAdminTab({ hid, hospitals }: { hid: number; hospitals: Hosp
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>🗄️ DB·영상 관리 (검사 삭제·이동·매칭·복제)</div>
+        <div style={{ fontWeight: 700 }}>{tr("🗄️ DB·영상 관리 (검사 삭제·이동·매칭·복제)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th></th><th>환자</th><th>ID</th><th>검사일</th><th>Mod</th><th>설명</th><th>시리즈/장수</th><th>판독</th></tr></thead>
+          <thead><tr><th></th><th>{tr("환자")}</th><th>ID</th><th>{tr("검사일")}</th><th>Mod</th><th>{tr("설명")}</th><th>{tr("시리즈/장수")}</th><th>{tr("판독")}</th></tr></thead>
           <tbody>
             {items.map((s) => (
               <tr key={s.id} onClick={() => setSelId(s.id)}
@@ -623,7 +619,7 @@ export function StudyAdminTab({ hid, hospitals }: { hid: number; hospitals: Hosp
                 <td>{s.series_count}/{s.instance_count}</td><td>{s.report_status ?? "—"}</td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>이 병원에 검사가 없습니다.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>{tr("이 병원에 검사가 없습니다.")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -633,17 +629,17 @@ export function StudyAdminTab({ hid, hospitals }: { hid: number; hospitals: Hosp
           선택: {sel ? `${sel.patient_name || sel.patient_key} (${sel.modality} ${sel.study_date})` : "없음"}
         </span>
         <div style={{ flex: 1 }} />
-        <button disabled={!sel || busy} onClick={() => run("delete")} style={{ color: "var(--danger,#f87171)" }}>삭제…</button>
+        <button disabled={!sel || busy} onClick={() => run("delete")} style={{ color: "var(--danger,#f87171)" }}>{tr("삭제…")}</button>
         <select style={inp} value={targetHid} onChange={(e) => setTargetHid(e.target.value)}>
-          <option value="">— 대상 병원 —</option>
+          <option value="">{tr("— 대상 병원 —")}</option>
           {others.map((h) => <option key={h.id} value={h.id}>{h.name || h.code}</option>)}
         </select>
-        <button disabled={!sel || busy || !targetHid} onClick={() => run("move")}>이동…</button>
+        <button disabled={!sel || busy || !targetHid} onClick={() => run("move")}>{tr("이동…")}</button>
         <button disabled={!sel || busy} onClick={() => run("copy")}
-                title="대상 병원 미선택 시 같은 병원에 사본 등록">복제</button>
-        <input style={{ ...inp, width: 110 }} placeholder="오더 ID" value={orderId} onChange={(e) => setOrderId(e.target.value)} />
-        <button disabled={!sel || busy || !orderId.trim()} onClick={() => run("match")}>매칭</button>
-        <button disabled={!sel || busy} onClick={() => run("unmatch")}>언매칭</button>
+                title={tr("대상 병원 미선택 시 같은 병원에 사본 등록")}>{tr("복제")}</button>
+        <input style={{ ...inp, width: 110 }} placeholder={tr("오더 ID")} value={orderId} onChange={(e) => setOrderId(e.target.value)} />
+        <button disabled={!sel || busy || !orderId.trim()} onClick={() => run("match")}>{tr("매칭")}</button>
+        <button disabled={!sel || busy} onClick={() => run("unmatch")}>{tr("언매칭")}</button>
       </div>
       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
         삭제·이동은 2단계 확인을 거칩니다. 작업은 서버에서 유효 권한을 강제하며(403), 권한이 없으면 안내가 표시됩니다.
@@ -732,17 +728,15 @@ export function BackupTab({ hid, hospitalName }: { hid: number; hospitalName: st
 
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontWeight: 700 }}>💾 백업 (설정 내보내기 · 복원)</div>
+      <div style={{ fontWeight: 700 }}>{tr("💾 백업 (설정 내보내기 · 복원)")}</div>
       <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
         병원별·계정별 모든 설정을 항목 선택으로 JSON 백업하고, 업로드해 복원(부활)합니다.
-        파일명은 <code>병원이름_날짜_시간.json</code>.
+        파일명은 <code>{tr("병원이름_날짜_시간.json")}</code>.
       </div>
 
       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, fontWeight: 600 }}>
         <input type="checkbox" checked={allOn}
-               onChange={() => setSel(allOn ? new Set() : new Set(BACKUP_CATS.map((c) => c.key)))} />
-        전체 선택
-      </label>
+               onChange={() => setSel(allOn ? new Set() : new Set(BACKUP_CATS.map((c) => c.key)))} />{tr("전체 선택")}</label>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
         {BACKUP_CATS.map((c) => (
           <label key={c.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5,
@@ -758,14 +752,12 @@ export function BackupTab({ hid, hospitalName }: { hid: number; hospitalName: st
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <button className="primary" onClick={doExport} disabled={busy}>⬇ 백업 (JSON 다운로드)</button>
-        <button onClick={() => fileRef.current?.click()} disabled={busy}>⬆ 복원 (JSON 업로드)</button>
+        <button className="primary" onClick={doExport} disabled={busy}>{tr("⬇ 백업 (JSON 다운로드)")}</button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy}>{tr("⬆ 복원 (JSON 업로드)")}</button>
         <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: "none" }}
                onChange={(e) => { const f = e.target.files?.[0]; if (f) void doImport(f); }} />
       </div>
-      <div style={{ fontSize: 11, color: "var(--stat-emergency,#f87171)" }}>
-        ⚠ '계정·좌석' 항목은 로그인 자격증명(비번 해시·복원 평문)을 포함합니다. 백업 파일은 안전한 곳에 보관하세요.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--stat-emergency,#f87171)" }}>{tr("⚠ '계정·좌석' 항목은 로그인 자격증명(비번 해시·복원 평문)을 포함합니다. 백업 파일은 안전한 곳에 보관하세요.")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -812,8 +804,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
   return (
     <div style={{ maxWidth: 860 }}>
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>저장공간 현황
-          <button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>새로고침</button>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("저장공간 현황")}<button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>{tr("새로고침")}</button>
         </legend>
         {sum ? (
           <>
@@ -827,18 +818,16 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
                 : "미적용 (보존 기간 0)"}
             </SRow>
           </>
-        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>로딩…</div>}
+        ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("로딩…")}</div>}
       </fieldset>
 
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>클라이언트 영상 전송 형식 (뷰어 화질)</legend>
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 8 }}>
-          이 병원의 뷰어가 영상을 불러올 때의 표시 형식입니다(원본 DICOM 은 영향 없음). 원격·저대역 환경은 품질을 낮춰 전송 속도를 높이고(50≈품질90 대비 40% 용량), 진단실은 100으로 최고 화질을 쓸 수 있습니다.
-        </div>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("클라이언트 영상 전송 형식 (뷰어 화질)")}</legend>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 8 }}>{tr("이 병원의 뷰어가 영상을 불러올 때의 표시 형식입니다(원본 DICOM 은 영향 없음). 원격·저대역 환경은 품질을 낮춰 전송 속도를 높이고(50≈품질90 대비 40% 용량), 진단실은 100으로 최고 화질을 쓸 수 있습니다.")}</div>
         <SRow label="형식">
           <select value={fmt.format} onChange={(e) => setFmt((p2) => ({ ...p2, format: e.target.value }))}>
-            <option value="default">기본 (JPEG 품질 90)</option>
-            <option value="jpeg">JPEG 품질 지정 (50~100)</option>
+            <option value="default">{tr("기본 (JPEG 품질 90)")}</option>
+            <option value="jpeg">{tr("JPEG 품질 지정 (50~100)")}</option>
           </select>
         </SRow>
         {fmt.format === "jpeg" && (
@@ -846,7 +835,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
             <input type="range" min={50} max={100} step={5} value={fmt.quality}
                    onChange={(e) => setFmt((p2) => ({ ...p2, quality: Number(e.target.value) }))} />
             <b style={{ width: 40 }}>{fmt.quality}</b>
-            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>50=고압축(빠름) ~ 100=최고화질</span>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("50=고압축(빠름) ~ 100=최고화질")}</span>
           </SRow>
         )}
         <SRow label="원본 픽셀 전송구문">
@@ -867,17 +856,15 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
                 onClick={async () => {
                   try { await api.hospImageFormatPut(hid, fmt); showToast("저장 되었습니다."); setMsg("전송 형식 저장됨 — 뷰어 재접속/새로고침 시 적용"); }
                   catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
-                }}>형식 저장</button>
+                }}>{tr("형식 저장")}</button>
       </fieldset>
 
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>백업 정책 (병원별 — 스케줄·보존·압축)</legend>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("백업 정책 (병원별 — 스케줄·보존·압축)")}</legend>
         <SRow label="자동 백업">
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
             <input type="checkbox" checked={pol.enabled}
-                   onChange={(e) => setPol((p) => ({ ...p, enabled: e.target.checked }))} />
-            매일 예정 시각에 스케줄 백업
-          </label>
+                   onChange={(e) => setPol((p) => ({ ...p, enabled: e.target.checked }))} />{tr("매일 예정 시각에 스케줄 백업")}</label>
         </SRow>
         <SRow label="예정 시각">
           <input type="time" value={pol.schedule_time}
@@ -886,7 +873,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
         <SRow label="보존 기간">
           <input type="number" min={0} value={pol.retention_days} style={{ width: 90 }}
                  onChange={(e) => setPol((p) => ({ ...p, retention_days: Number(e.target.value) || 0 }))} />
-          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>일 (0=무제한, 초과분은 수동 삭제 대상)</span>
+          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("일 (0=무제한, 초과분은 수동 삭제 대상)")}</span>
         </SRow>
         <SRow label="압축 포맷">
           <select value={pol.compression} onChange={(e) => setPol((p) => ({ ...p, compression: e.target.value }))}>
@@ -894,21 +881,21 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
           </select>
         </SRow>
         <SRow label="백업 경로">
-          <input value={pol.target_dir} placeholder="비우면 backend/backup" style={{ flex: 1 }}
+          <input value={pol.target_dir} placeholder={tr("비우면 backend/backup")} style={{ flex: 1 }}
                  onChange={(e) => setPol((p) => ({ ...p, target_dir: e.target.value }))} />
         </SRow>
         <button className="primary" style={{ fontSize: 12 }}
                 onClick={async () => {
                   try { await api.hospStoragePolicyPut(hid, pol); showToast("저장 되었습니다."); setMsg("정책 저장됨"); reload(); }
                   catch (e) { setMsg(e instanceof Error ? e.message : "저장 실패"); }
-                }}>정책 저장</button>
+                }}>{tr("정책 저장")}</button>
       </fieldset>
 
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>수동 백업 실행 (이 병원 검사만)</legend>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("수동 백업 실행 (이 병원 검사만)")}</legend>
         <SRow label="압축">
           <select value={runComp} onChange={(e) => setRunComp(e.target.value)}>
-            <option value="">(정책값)</option>
+            <option value="">{tr("(정책값)")}</option>
             {comps.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
         </SRow>
@@ -916,7 +903,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
           <input placeholder="YYYYMMDD" value={from} style={{ width: 110 }} onChange={(e) => setFrom(e.target.value)} />
           <span>~</span>
           <input placeholder="YYYYMMDD" value={to} style={{ width: 110 }} onChange={(e) => setTo(e.target.value)} />
-          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>비우면 전체</span>
+          <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("비우면 전체")}</span>
         </SRow>
         <button className="primary" style={{ fontSize: 12 }}
                 onClick={async () => {
@@ -925,21 +912,20 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
                     setMsg("백업 시작됨 — 이력에서 진행 상태 확인");
                     window.setTimeout(reload, 1500);
                   } catch (e) { setMsg(e instanceof Error ? e.message : "백업 실패"); }
-                }}>백업 시작</button>
+                }}>{tr("백업 시작")}</button>
       </fieldset>
 
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>백업 이력
-          <button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>새로고침</button>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("백업 이력")}<button style={{ marginLeft: 8, fontSize: 11 }} onClick={reload}>{tr("새로고침")}</button>
         </legend>
         <table style={{ width: "100%", fontSize: 11.5, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ color: "var(--text-secondary)", textAlign: "left" }}>
-              <th style={{ padding: 4 }}>#</th><th>상태</th><th>압축</th><th>검사</th><th>인스턴스</th><th>용량</th><th>완료</th>
+              <th style={{ padding: 4 }}>#</th><th>{tr("상태")}</th><th>{tr("압축")}</th><th>{tr("검사")}</th><th>{tr("인스턴스")}</th><th>{tr("용량")}</th><th>{tr("완료")}</th>
             </tr>
           </thead>
           <tbody>
-            {jobs.length === 0 && <tr><td colSpan={7} style={{ padding: 8, color: "var(--text-secondary)" }}>백업 이력이 없습니다.</td></tr>}
+            {jobs.length === 0 && <tr><td colSpan={7} style={{ padding: 8, color: "var(--text-secondary)" }}>{tr("백업 이력이 없습니다.")}</td></tr>}
             {jobs.map((j) => (
               <tr key={j.id} style={{ borderTop: "1px solid var(--border)" }}>
                 <td style={{ padding: 4 }}>{j.id}</td>
@@ -957,7 +943,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
       </fieldset>
 
       <fieldset style={F}>
-        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>보존 정책 — 기간 초과 검사 삭제 (파괴적 · 이 병원만)</legend>
+        <legend style={{ fontSize: 12.5, padding: "0 6px" }}>{tr("보존 정책 — 기간 초과 검사 삭제 (파괴적 · 이 병원만)")}</legend>
         <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 8 }}>
           보존 기간({pol.retention_days}일)을 초과한 이 병원 검사를 Orthanc·DB에서 영구 삭제합니다. 미리보기 후 확인 절차를 거치며, 자동 삭제는 하지 않습니다.
         </div>
@@ -968,7 +954,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
                       const r = await api.hospStoragePurgePreview(hid, pol.retention_days);
                       setMsg("초과 " + r.count + "건 — " + r.items.slice(0, 5).map((x) => x.study_date + " " + x.modality).join(", ") + (r.count > 5 ? " …" : ""));
                     } catch (e) { setMsg(e instanceof Error ? e.message : "미리보기 실패"); }
-                  }}>미리보기</button>
+                  }}>{tr("미리보기")}</button>
           <button style={{ fontSize: 12, color: "var(--stat-emergency)" }}
                   onClick={async () => {
                     if (!window.confirm("보존 " + pol.retention_days + "일 초과 검사를 영구 삭제할까요? (되돌릴 수 없음 — 백업 먼저 권장)")) return;
@@ -977,7 +963,7 @@ export function HospitalStorageTab({ hid }: { hid: number }) {
                       setMsg("삭제 완료 — DB " + r.deleted + "건 · Orthanc " + r.orthanc_removed + "건");
                       reload();
                     } catch (e) { setMsg(e instanceof Error ? e.message : "삭제 실패"); }
-                  }}>초과분 삭제…</button>
+                  }}>{tr("초과분 삭제…")}</button>
         </div>
       </fieldset>
       {msg && <div style={{ fontSize: 12, color: "var(--ai)", marginTop: 4 }}>{msg}</div>}

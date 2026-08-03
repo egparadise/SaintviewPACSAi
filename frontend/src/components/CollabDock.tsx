@@ -7,6 +7,7 @@ import { api, type CollabFriends, type CollabMessage, type CollabUser } from "..
 import { collab, type CollabEvent } from "../lib/collab";
 import { dmRoom } from "../lib/collabState";
 import { showToast } from "../lib/toast";
+import { t as tr } from "../lib/i18n";
 
 type Tab = "friends" | "find" | "chat";
 
@@ -178,12 +179,12 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
                   background: "var(--bg-panel)", borderLeft: "1px solid var(--border)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px",
                     borderBottom: "1px solid var(--border)" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700 }}>협진</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{tr("협진")}</span>
         <span title={wsOpen ? "실시간 연결됨" : "연결 끊김 — 자동 재연결 중"}
               style={{ width: 7, height: 7, borderRadius: "50%",
                        background: wsOpen ? "var(--stat-final)" : "var(--stat-reading)" }} />
         <div style={{ flex: 1 }} />
-        <button onClick={onClose} title="닫기"
+        <button onClick={onClose} title={tr("닫기")}
                 style={{ background: "none", border: "none", color: "var(--text-secondary)",
                          cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
       </div>
@@ -200,14 +201,14 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
           {incomingCount > 0 && (
             <>
               <div style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
-                            background: "var(--bg-canvas)" }}>받은 요청</div>
+                            background: "var(--bg-canvas)" }}>{tr("받은 요청")}</div>
               {data.incoming.map((u) => (
                 <UserRow key={u.id} user={u} online={online.has(u.id)} right={
                   <span style={{ display: "flex", gap: 3 }}>
                     <button style={{ fontSize: 11, padding: "2px 6px" }}
-                            onClick={() => act(api.collabRespondFriend(u.id, true), "수락했습니다")}>수락</button>
+                            onClick={() => act(api.collabRespondFriend(u.id, true), "수락했습니다")}>{tr("수락")}</button>
                     <button style={{ fontSize: 11, padding: "2px 6px" }}
-                            onClick={() => act(api.collabRespondFriend(u.id, false), "거절했습니다")}>거절</button>
+                            onClick={() => act(api.collabRespondFriend(u.id, false), "거절했습니다")}>{tr("거절")}</button>
                   </span>
                 } />
               ))}
@@ -216,8 +217,7 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
           <div style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
                         background: "var(--bg-canvas)" }}>친구 {data.friends.length}</div>
           {data.friends.length === 0 && (
-            <div style={{ padding: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-              아직 친구가 없습니다.<br />[찾기] 탭에서 같은 병원 또는 다른 병원 사용자를 검색해
+            <div style={{ padding: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{tr("아직 친구가 없습니다.")}<br />[찾기] 탭에서 같은 병원 또는 다른 병원 사용자를 검색해
               친구 요청을 보내세요.
             </div>
           )}
@@ -229,12 +229,12 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
                   {!!unread && <span style={{ fontSize: 10, background: "var(--stat-emergency)",
                                               color: "#fff", borderRadius: 8, padding: "1px 5px" }}>{unread}</span>}
                   <button style={{ fontSize: 11, padding: "2px 6px" }}
-                          onClick={() => openChat(u)} title="1:1 대화">💬</button>
+                          onClick={() => openChat(u)} title={tr("1:1 대화")}>💬</button>
                   {onInvite && (
                     <button className="primary" style={{ fontSize: 11, padding: "2px 6px" }}
                             disabled={!online.has(u.id)}
                             title={online.has(u.id) ? (inviteLabel ?? "협진 초대") : "오프라인 — 초대할 수 없습니다"}
-                            onClick={() => onInvite(u)}>초대</button>
+                            onClick={() => onInvite(u)}>{tr("초대")}</button>
                   )}
                 </span>
               } />
@@ -243,11 +243,11 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
           {data.outgoing.length > 0 && (
             <>
               <div style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
-                            background: "var(--bg-canvas)" }}>보낸 요청 (대기 중)</div>
+                            background: "var(--bg-canvas)" }}>{tr("보낸 요청 (대기 중)")}</div>
               {data.outgoing.map((u) => (
                 <UserRow key={u.id} user={u} online={online.has(u.id)} right={
                   <button style={{ fontSize: 11, padding: "2px 6px" }}
-                          onClick={() => act(api.collabRemoveFriend(u.id), "요청을 취소했습니다")}>취소</button>
+                          onClick={() => act(api.collabRemoveFriend(u.id), "요청을 취소했습니다")}>{tr("취소")}</button>
                 } />
               ))}
             </>
@@ -259,28 +259,24 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: 8 }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} name="collab_find"
-                   autoComplete="off" placeholder="이름 · 아이디 · 직책으로 검색"
+                   autoComplete="off" placeholder={tr("이름 · 아이디 · 직책으로 검색")}
                    style={{ width: "100%", fontSize: 12 }} />
-            <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 4 }}>
-              같은 병원 · 다른 병원 사용자가 모두 검색됩니다.
-            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 4 }}>{tr("같은 병원 · 다른 병원 사용자가 모두 검색됩니다.")}</div>
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {searching && <div style={{ padding: 10, fontSize: 11.5, color: "var(--text-secondary)" }}>검색 중…</div>}
+            {searching && <div style={{ padding: 10, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("검색 중…")}</div>}
             {!searching && found.length === 0 && (
-              <div style={{ padding: 10, fontSize: 11.5, color: "var(--text-secondary)" }}>결과가 없습니다.</div>
+              <div style={{ padding: 10, fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("결과가 없습니다.")}</div>
             )}
             {found.map((u) => (
               <UserRow key={u.id} user={u} online={u.online} right={
-                u.relation === "accepted" ? <span style={{ fontSize: 11, color: "var(--stat-final)" }}>친구</span>
+                u.relation === "accepted" ? <span style={{ fontSize: 11, color: "var(--stat-final)" }}>{tr("친구")}</span>
                   : u.relation === "pending" ? <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                       {u.relation_mine ? "대기 중" : "요청 받음"}</span>
-                    : u.relation === "blocked" ? <span style={{ fontSize: 11, color: "var(--text-disabled)" }}>차단</span>
+                    : u.relation === "blocked" ? <span style={{ fontSize: 11, color: "var(--text-disabled)" }}>{tr("차단")}</span>
                       : <button className="primary" style={{ fontSize: 11, padding: "2px 6px" }}
                                 onClick={() => act(api.collabRequestFriend(u.id), "친구 요청을 보냈습니다")
-                                  .then(() => api.collabDirectory(query).then((r) => setFound(r.items)).catch(() => {}))}>
-                          친구 요청
-                        </button>
+                                  .then(() => api.collabDirectory(query).then((r) => setFound(r.items)).catch(() => {}))}>{tr("친구 요청")}</button>
               } />
             ))}
           </div>
@@ -290,9 +286,7 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
       {tab === "chat" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {!peer && (
-            <div style={{ padding: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-              [친구] 탭에서 💬 를 눌러 대화를 시작하세요.
-            </div>
+            <div style={{ padding: 12, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{tr("[친구] 탭에서 💬 를 눌러 대화를 시작하세요.")}</div>
           )}
           {peer && (
             <>
@@ -325,10 +319,10 @@ export function CollabDock({ open, onClose, onInvite, inviteLabel }: {
               </div>
               <div style={{ display: "flex", gap: 4, padding: 6, borderTop: "1px solid var(--border)" }}>
                 <input value={draft} onChange={(e) => setDraft(e.target.value)} name="collab_msg"
-                       autoComplete="off" placeholder="내용을 입력하세요."
+                       autoComplete="off" placeholder={tr("내용을 입력하세요.")}
                        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                        style={{ flex: 1, fontSize: 12 }} />
-                <button className="primary" onClick={send} style={{ fontSize: 12 }}>전송</button>
+                <button className="primary" onClick={send} style={{ fontSize: 12 }}>{tr("전송")}</button>
               </div>
             </>
           )}

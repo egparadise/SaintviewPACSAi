@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공용 헬퍼 위임 — 오류 문구는 기존 형식(`상태 · 상세` / `상태 상태문구`) 유지(= panelFetch 기본값) ──
 const ifetch = <T,>(path: string, init?: RequestInit) => panelFetch<T>(path, init);
@@ -74,22 +75,22 @@ export function OhifSection() {
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Dot state={c?.state ?? ""} />
-        <div style={{ fontWeight: 700 }}>OHIF 뷰어 (saintview-ohif)</div>
+        <div style={{ fontWeight: 700 }}>{tr("OHIF 뷰어 (saintview-ohif)")}</div>
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{c ? `${c.image} · ${c.status}` : "컨테이너 상태 미확인"}</span>
         <div style={{ flex: 1 }} />
-        <button onClick={() => act("start")}>시작</button>
-        <button onClick={() => act("stop")}>중지</button>
-        <button className="primary" onClick={() => act("restart")}>재시작</button>
-        <button onClick={load}>새로고침</button>
+        <button onClick={() => act("start")}>{tr("시작")}</button>
+        <button onClick={() => act("stop")}>{tr("중지")}</button>
+        <button className="primary" onClick={() => act("restart")}>{tr("재시작")}</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
         <tbody>
-          <tr><td style={{ width: 160 }}>뷰어 주소</td><td>{cfg ? <a href={cfg.ohif_url} target="_blank" rel="noreferrer">{cfg.ohif_url}</a> : "—"}</td></tr>
-          <tr><td>데이터소스</td><td>{ds.friendlyName || "—"} · QIDO/WADO Root: <code>{ds.wadoRoot || "—"}</code> · 렌더링: {ds.imageRendering || "—"}</td></tr>
-          <tr><td>프록시(같은 오리진)</td><td><code>/dicom-web → {cfg?.proxy_pass || "—"}</code></td></tr>
-          <tr><td>설정 파일</td><td style={{ color: "var(--text-secondary)" }}>{cfg?.config_path || "—"} (호스트 파일 수정 → 재시작으로 반영)</td></tr>
+          <tr><td style={{ width: 160 }}>{tr("뷰어 주소")}</td><td>{cfg ? <a href={cfg.ohif_url} target="_blank" rel="noreferrer">{cfg.ohif_url}</a> : "—"}</td></tr>
+          <tr><td>{tr("데이터소스")}</td><td>{ds.friendlyName || "—"} · QIDO/WADO Root: <code>{ds.wadoRoot || "—"}</code> · 렌더링: {ds.imageRendering || "—"}</td></tr>
+          <tr><td>{tr("프록시(같은 오리진)")}</td><td><code>/dicom-web → {cfg?.proxy_pass || "—"}</code></td></tr>
+          <tr><td>{tr("설정 파일")}</td><td style={{ color: "var(--text-secondary)" }}>{cfg?.config_path || "—"} (호스트 파일 수정 → 재시작으로 반영)</td></tr>
         </tbody>
       </table>
       </div>
@@ -138,13 +139,13 @@ export function ContainersSection() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>컨테이너 현황 — saintview-*</div>
+        <div style={{ fontWeight: 700 }}>{tr("컨테이너 현황 — saintview-*")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th style={{ width: 24 }}></th><th>이름</th><th>이미지</th><th>상태</th><th>포트</th><th style={{ width: 190 }}>제어</th></tr></thead>
+        <thead><tr><th style={{ width: 24 }}></th><th>{tr("이름")}</th><th>{tr("이미지")}</th><th>{tr("상태")}</th><th>{tr("포트")}</th><th style={{ width: 190 }}>{tr("제어")}</th></tr></thead>
         <tbody>
           {(res?.items ?? []).map((c) => (
             <tr key={c.name}>
@@ -155,15 +156,15 @@ export function ContainersSection() {
               <td style={{ color: "var(--text-secondary)" }}>{c.ports}</td>
               <td>
                 <div style={{ display: "flex", gap: 4 }}>
-                  <button onClick={() => act(c.name, "start")}>시작</button>
-                  <button onClick={() => act(c.name, "stop")}>중지</button>
-                  <button onClick={() => act(c.name, "restart")}>재시작</button>
+                  <button onClick={() => act(c.name, "start")}>{tr("시작")}</button>
+                  <button onClick={() => act(c.name, "stop")}>{tr("중지")}</button>
+                  <button onClick={() => act(c.name, "restart")}>{tr("재시작")}</button>
                 </div>
               </td>
             </tr>
           ))}
           {res && res.items.length === 0 && (
-            <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>saintview-* 컨테이너가 없습니다</td></tr>
+            <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("saintview-* 컨테이너가 없습니다")}</td></tr>
           )}
         </tbody>
       </table>
@@ -208,20 +209,20 @@ export function HospitalContainersSection({ hid }: { hid?: number } = {}) {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>병원별 Orthanc 컨테이너 (영상 저장 물리 분리)</div>
+        <div style={{ fontWeight: 700 }}>{tr("병원별 Orthanc 컨테이너 (영상 저장 물리 분리)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       {res?.db_note && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{res.db_note}</div>}
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th style={{ width: 24 }}></th><th>병원</th><th>컨테이너</th><th>포트(Web/DICOM)</th><th>볼륨</th><th style={{ width: 230 }}>제어</th></tr></thead>
+        <thead><tr><th style={{ width: 24 }}></th><th>{tr("병원")}</th><th>{tr("컨테이너")}</th><th>{tr("포트(Web/DICOM)")}</th><th>{tr("볼륨")}</th><th style={{ width: 230 }}>{tr("제어")}</th></tr></thead>
         <tbody>
           {items.map((h) => (
             <tr key={h.hid}>
               <td>{h.provisioned ? <Dot state={h.state} /> : <span style={{ color: "var(--text-secondary)" }}>—</span>}</td>
               <td>#{h.hid} {h.name || h.code}</td>
-              <td>{h.entry?.container ?? <span style={{ color: "var(--text-secondary)" }}>공유 컨테이너 사용(폴백)</span>}</td>
+              <td>{h.entry?.container ?? <span style={{ color: "var(--text-secondary)" }}>{tr("공유 컨테이너 사용(폴백)")}</span>}</td>
               <td>{h.entry ? `${h.entry.web_port} / ${h.entry.dicom_port} · AET ${h.entry.aet}` : "—"}</td>
               <td style={{ color: "var(--text-secondary)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }} title={h.entry?.volume ?? ""}>{h.entry?.volume ?? "—"}</td>
               <td>
@@ -230,9 +231,9 @@ export function HospitalContainersSection({ hid }: { hid?: number } = {}) {
                     <button className="primary" disabled={busy === h.hid} onClick={() => provision(h.hid)}>{busy === h.hid ? "생성 중…" : "프로비저닝"}</button>
                   ) : (
                     <>
-                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "start")}>시작</button>
-                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "stop")}>중지</button>
-                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "remove")}>제거</button>
+                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "start")}>{tr("시작")}</button>
+                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "stop")}>{tr("중지")}</button>
+                      <button disabled={busy === h.hid} onClick={() => act(h.hid, "remove")}>{tr("제거")}</button>
                     </>
                   )}
                 </div>
@@ -283,18 +284,18 @@ export function DdnsSection() {
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Dot state={status.ok === true ? "running" : status.ok === false ? "exited" : ""} />
-        <div style={{ fontWeight: 700 }}>DDNS — 동적 도메인 갱신</div>
+        <div style={{ fontWeight: 700 }}>{tr("DDNS — 동적 도메인 갱신")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       <Row label="공급자">
         <select style={inp} value={cfg.provider} onChange={(e) => setCfg({ ...cfg, provider: e.target.value })}>
           <option value="duckdns">DuckDNS</option>
           <option value="dynu">Dynu</option>
-          <option value="custom">Custom (URL 템플릿)</option>
+          <option value="custom">{tr("Custom (URL 템플릿)")}</option>
         </select>
       </Row>
-      <Row label="도메인"><input style={{ ...inp, flex: 1 }} value={cfg.domain} onChange={(e) => setCfg({ ...cfg, domain: e.target.value })} placeholder="예: myhospital.duckdns.org" /></Row>
+      <Row label="도메인"><input style={{ ...inp, flex: 1 }} value={cfg.domain} onChange={(e) => setCfg({ ...cfg, domain: e.target.value })} placeholder={tr("예: myhospital.duckdns.org")} /></Row>
       <Row label="토큰">
         <input style={{ ...inp, flex: 1 }} type="password" value={cfg.token} onChange={(e) => setCfg({ ...cfg, token: e.target.value })}
           placeholder={cfg.token_set ? "설정됨(변경 시에만 입력)" : "공급자 발급 토큰"} />
@@ -308,11 +309,11 @@ export function DdnsSection() {
       <Row label="갱신 주기(분)"><input style={{ ...inp, width: 90 }} type="number" min={1} value={cfg.interval_min} onChange={(e) => setCfg({ ...cfg, interval_min: Number(e.target.value) || 30 })} /></Row>
       <Row label="자동 갱신">
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>켜면 주기적으로 공인 IP를 조회해 갱신합니다</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("켜면 주기적으로 공인 IP를 조회해 갱신합니다")}</span>
       </Row>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="primary" onClick={save}>저장</button>
-        <button onClick={updateNow}>지금 갱신</button>
+        <button className="primary" onClick={save}>{tr("저장")}</button>
+        <button onClick={updateNow}>{tr("지금 갱신")}</button>
       </div>
       <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
         마지막 갱신: {status.last_at ? new Date(status.last_at).toLocaleString() : "—"} · IP: {status.last_ip || "—"} · 결과: {status.ok == null ? "—" : status.ok ? "성공" : "실패"}

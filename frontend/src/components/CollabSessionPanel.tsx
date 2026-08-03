@@ -8,6 +8,7 @@ import { collab, type CollabEvent } from "../lib/collab";
 import { colorOf, sessionRoom } from "../lib/collabState";
 import { mesh, type PeerView } from "../lib/webrtcMesh";
 import { showToast } from "../lib/toast";
+import { t as tr } from "../lib/i18n";
 
 /** 위임 가능한 협진 capability — 백엔드 permissions.COLLAB_CAPS 와 같은 키.
  *  ⚠ 여기에 report.write 같은 실권한을 적어 보내도 서버가 화이트리스트로 걸러 버린다.
@@ -144,7 +145,7 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
       {/* ── 헤더: 역할 · 종료 ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px",
                     borderBottom: "1px solid var(--border)" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700 }}>협진</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{tr("협진")}</span>
         <span style={{ fontSize: 10.5, padding: "1px 6px", borderRadius: 8,
                        background: isHost ? "var(--accent-subtle)" : "var(--bg-elevated)",
                        color: isHost ? "#9ec5fb" : "var(--text-secondary)" }}>
@@ -159,8 +160,7 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
 
       {/* ── 제어권 상태 ── */}
       <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 11.5 }}>
-        <div style={{ color: "var(--text-secondary)" }}>
-          화면 조작권: <b style={{ color: iControl ? "var(--stat-final)" : "var(--text-primary)" }}>
+        <div style={{ color: "var(--text-secondary)" }}>{tr("화면 조작권:")}<b style={{ color: iControl ? "var(--stat-final)" : "var(--text-primary)" }}>
             {controller ? (controller.id === meId ? "나" : controller.name) : "없음"}
           </b>
         </div>
@@ -181,33 +181,31 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
                     onClick={() => collab.send({ t: "ctl.request", caps: wantCaps })}>
               {mySeat?.control === "requested" ? "승인 대기 중…" : "조작 권한 요청"}
             </button>
-            <div style={{ fontSize: 10, color: "var(--text-disabled)", marginTop: 3, lineHeight: 1.5 }}>
-              판독 수정 · 영상 삭제는 협진으로 위임되지 않습니다.
-            </div>
+            <div style={{ fontSize: 10, color: "var(--text-disabled)", marginTop: 3, lineHeight: 1.5 }}>{tr("판독 수정 · 영상 삭제는 협진으로 위임되지 않습니다.")}</div>
           </div>
         )}
         {iControl && !isHost && (
           <button style={{ fontSize: 11, padding: "3px 8px", width: "100%", marginTop: 4 }}
-                  onClick={() => collab.send({ t: "ctl.revoke" })}>조작 권한 반납</button>
+                  onClick={() => collab.send({ t: "ctl.revoke" })}>{tr("조작 권한 반납")}</button>
         )}
         {isHost && controller?.id !== meId && (
           <button style={{ fontSize: 11, padding: "3px 8px", width: "100%", marginTop: 4 }}
-                  onClick={() => collab.send({ t: "ctl.revoke" })}>조작 권한 회수</button>
+                  onClick={() => collab.send({ t: "ctl.revoke" })}>{tr("조작 권한 회수")}</button>
         )}
         {isHost && pending.length > 0 && (
           <div style={{ marginTop: 6 }}>
             {pending.map((p) => (
               <div key={p.id} style={{ background: "var(--bg-elevated)", borderRadius: 4,
                                        padding: "5px 6px", marginBottom: 4 }}>
-                <div style={{ fontSize: 11 }}><b>{p.name}</b> 님이 조작 권한을 요청했습니다</div>
+                <div style={{ fontSize: 11 }}><b>{p.name}</b>{tr("님이 조작 권한을 요청했습니다")}</div>
                 <div style={{ fontSize: 10, color: "var(--text-secondary)", margin: "2px 0 4px" }}>
                   {(p.caps ?? []).map((c) => CAP_LABEL[c] ?? c).join(" · ") || "화면 조작"}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button className="primary" style={{ fontSize: 11, padding: "2px 6px", flex: 1 }}
-                          onClick={() => collab.send({ t: "ctl.grant", target: p.id, caps: p.caps })}>승인</button>
+                          onClick={() => collab.send({ t: "ctl.grant", target: p.id, caps: p.caps })}>{tr("승인")}</button>
                   <button style={{ fontSize: 11, padding: "2px 6px", flex: 1 }}
-                          onClick={() => collab.send({ t: "ctl.revoke" })}>거절</button>
+                          onClick={() => collab.send({ t: "ctl.revoke" })}>{tr("거절")}</button>
                 </div>
               </div>
             ))}
@@ -239,15 +237,13 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
             ))}
           </div>
           {joined.length > 1 && peers.length === 0 && (
-            <div style={{ fontSize: 10, color: "var(--text-disabled)", marginTop: 4, lineHeight: 1.5 }}>
-              마이크나 카메라를 켜면 상대와 연결됩니다.
-            </div>
+            <div style={{ fontSize: 10, color: "var(--text-disabled)", marginTop: 4, lineHeight: 1.5 }}>{tr("마이크나 카메라를 켜면 상대와 연결됩니다.")}</div>
           )}
         </div>
       </Section>
 
       {/* ── 룸 채팅 ── */}
-      <Section title="채팅" open={showChat} onToggle={() => setShowChat((v) => !v)}>
+      <Section title={tr("채팅")} open={showChat} onToggle={() => setShowChat((v) => !v)}>
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
           <div style={{ flex: 1, overflowY: "auto", padding: 6, display: "flex",
                         flexDirection: "column", gap: 5, maxHeight: 260 }}>
@@ -268,10 +264,10 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
           </div>
           <div style={{ display: "flex", gap: 4, padding: 5, borderTop: "1px solid var(--border)" }}>
             <input value={draft} onChange={(e) => setDraft(e.target.value)} name="collab_room_msg"
-                   autoComplete="off" placeholder="내용을 입력하세요."
+                   autoComplete="off" placeholder={tr("내용을 입력하세요.")}
                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                    style={{ flex: 1, fontSize: 11.5 }} />
-            <button className="primary" onClick={send} style={{ fontSize: 11.5 }}>전송</button>
+            <button className="primary" onClick={send} style={{ fontSize: 11.5 }}>{tr("전송")}</button>
           </div>
         </div>
       </Section>
@@ -279,7 +275,7 @@ export function CollabSessionPanel({ session, onLeave, isHost, meId }: {
       {/* ── 참가자 ── */}
       <div style={{ overflowY: "auto", flexShrink: 0 }}>
         <div style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-secondary)",
-                      background: "var(--bg-canvas)" }}>참가자</div>
+                      background: "var(--bg-canvas)" }}>{tr("참가자")}</div>
         {session.participants.filter((p) => p.state !== "denied").map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px",
                                    fontSize: 11.5, borderBottom: "1px solid var(--border)",
@@ -315,15 +311,15 @@ export function CollabInviteBanner({ invite, onAccept, onDecline }: {
                   zIndex: 100000, background: "var(--bg-elevated)", border: "1px solid var(--accent)",
                   borderRadius: 8, padding: "12px 16px", boxShadow: "0 6px 24px rgba(0,0,0,.5)",
                   minWidth: 320 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>협진 초대</div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{tr("협진 초대")}</div>
       <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 10 }}>
         <b style={{ color: "var(--text-primary)" }}>{invite.from.name}</b>
         {invite.from.hospital ? ` (${invite.from.hospital})` : ""} 님이 협진에 초대했습니다.
         {invite.title && <div style={{ marginTop: 2 }}>{invite.title}</div>}
       </div>
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-        <button onClick={onDecline} style={{ fontSize: 12 }}>거절</button>
-        <button className="primary" onClick={onAccept} style={{ fontSize: 12 }}>참여</button>
+        <button onClick={onDecline} style={{ fontSize: 12 }}>{tr("거절")}</button>
+        <button className="primary" onClick={onAccept} style={{ fontSize: 12 }}>{tr("참여")}</button>
       </div>
     </div>
   );

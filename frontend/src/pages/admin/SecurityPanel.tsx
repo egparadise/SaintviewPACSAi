@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공용 헬퍼 위임 — 오류 문구는 기존 형식(상세만, 없으면 상태코드) 유지 ──
 const req = <T,>(path: string, init?: RequestInit) =>
@@ -139,19 +140,19 @@ export function SecurityPanel() {
       {/* ── 보안 대시보드 (상태등) ── */}
       <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 700 }}>🛡️ 보안 대시보드 — 랜섬·바이러스·접근 (탐지·경고 전용)</div>
+          <div style={{ fontWeight: 700 }}>{tr("🛡️ 보안 대시보드 — 랜섬·바이러스·접근 (탐지·경고 전용)")}</div>
           <div style={{ flex: 1 }} />
-          <button onClick={quickScan} disabled={busy}>빠른 스캔</button>
-          <button onClick={integrityScan} disabled={busy}>무결성 검사</button>
-          <button onClick={load}>새로고침</button>
+          <button onClick={quickScan} disabled={busy}>{tr("빠른 스캔")}</button>
+          <button onClick={integrityScan} disabled={busy}>{tr("무결성 검사")}</button>
+          <button onClick={load}>{tr("새로고침")}</button>
         </div>
         {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
         <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>항목</th><th>상태</th><th>상세</th></tr></thead>
+          <thead><tr><th>{tr("항목")}</th><th>{tr("상태")}</th><th>{tr("상세")}</th></tr></thead>
           <tbody>
             <tr>
-              <td>바이러스 (Defender)</td>
+              <td>{tr("바이러스 (Defender)")}</td>
               <td><Dot state={defState} />{!d.available ? "미가용" : d.RealTimeProtectionEnabled ? "실시간 보호 ON" : "실시간 보호 OFF"}</td>
               <td style={{ color: "var(--text-secondary)" }}>
                 {d.available
@@ -160,7 +161,7 @@ export function SecurityPanel() {
               </td>
             </tr>
             <tr>
-              <td>무결성 감시 (랜섬 방지)</td>
+              <td>{tr("무결성 감시 (랜섬 방지)")}</td>
               <td><Dot state={integState} />{sum.integrity.status === "ok" ? "정상" : sum.integrity.status === "warn" ? "경고" : "미검사"}</td>
               <td style={{ color: "var(--text-secondary)" }}>
                 마지막 검사 {fmtTs(sum.integrity.last_scan)}
@@ -171,7 +172,7 @@ export function SecurityPanel() {
               </td>
             </tr>
             <tr>
-              <td>로그인 잠금</td>
+              <td>{tr("로그인 잠금")}</td>
               <td><Dot state={lockState} />{sum.lockouts.locked.length ? `활성 잠금 ${sum.lockouts.locked.length}건` : "없음"}</td>
               <td style={{ color: "var(--text-secondary)" }}>
                 24h 실패 {sum.login_failures.failed_total}건 · 잠금 발동 {sum.login_failures.lockout_events}건
@@ -180,7 +181,7 @@ export function SecurityPanel() {
               </td>
             </tr>
             <tr>
-              <td>관리자 IP allowlist</td>
+              <td>{tr("관리자 IP allowlist")}</td>
               <td><Dot state={allowState} />{sum.policy.admin_allowlist.length ? `${sum.policy.admin_allowlist.length}개 항목` : "제한 없음"}</td>
               <td style={{ color: "var(--text-secondary)" }}>{sum.policy.admin_allowlist.join(", ") || "빈 목록 = 모든 IP 허용"}</td>
             </tr>
@@ -198,16 +199,16 @@ export function SecurityPanel() {
       {/* ── 활성 잠금 목록 ── */}
       {sum.lockouts.locked.length > 0 && (
         <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontWeight: 700 }}>🔒 활성 로그인 잠금</div>
+          <div style={{ fontWeight: 700 }}>{tr("🔒 활성 로그인 잠금")}</div>
           <div style={{ overflowX: "auto" }}>
           <table className="grid-table" style={{ fontSize: 12.5 }}>
-            <thead><tr><th>대상 (계정/IP)</th><th>잔여 시간</th><th /></tr></thead>
+            <thead><tr><th>{tr("대상 (계정/IP)")}</th><th>{tr("잔여 시간")}</th><th /></tr></thead>
             <tbody>
               {sum.lockouts.locked.map((l) => (
                 <tr key={l.key}>
                   <td>{l.key}</td>
                   <td>{Math.ceil(l.remaining_sec / 60)}분</td>
-                  <td><button onClick={() => unlock(l.key)}>해제</button></td>
+                  <td><button onClick={() => unlock(l.key)}>{tr("해제")}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -219,7 +220,7 @@ export function SecurityPanel() {
       {/* ── 무결성 경고 이력 ── */}
       {sum.integrity.alerts.length > 0 && (
         <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontWeight: 700 }}>⚠ 무결성 경고 이력 (최근)</div>
+          <div style={{ fontWeight: 700 }}>{tr("⚠ 무결성 경고 이력 (최근)")}</div>
           {sum.integrity.alerts.slice().reverse().map((a, i) => (
             <div key={i} style={{ fontSize: 12 }}>
               <span style={{ color: "var(--text-secondary)" }}>{fmtTs(a.at)}</span>{" — "}
@@ -232,26 +233,26 @@ export function SecurityPanel() {
       {/* ── 정책 설정 ── */}
       {policy && (
         <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8, maxWidth: 640 }}>
-          <div style={{ fontWeight: 700 }}>⚙️ 보안 정책 (security.policy — 전역)</div>
+          <div style={{ fontWeight: 700 }}>{tr("⚙️ 보안 정책 (security.policy — 전역)")}</div>
           <Row label="로그인 실패 임계(회)">
             <input style={{ ...inp, width: 90 }} type="number" min={1} max={100} value={policy.threshold}
               onChange={(e) => setPolicy({ ...policy, threshold: Number(e.target.value) || 5 })} />
-            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>계정·IP 별 연속 실패 시 잠금 (기본 5)</span>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("계정·IP 별 연속 실패 시 잠금 (기본 5)")}</span>
           </Row>
           <Row label="잠금 시간(분)">
             <input style={{ ...inp, width: 90 }} type="number" min={1} max={1440} value={policy.lock_min}
               onChange={(e) => setPolicy({ ...policy, lock_min: Number(e.target.value) || 15 })} />
-            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>기본 15분 · 성공 로그인 시 카운터 리셋</span>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("기본 15분 · 성공 로그인 시 카운터 리셋")}</span>
           </Row>
           <Row label="급격한 변화율 임계(%)">
             <input style={{ ...inp, width: 90 }} type="number" min={5} max={95} value={policy.mass_change_pct}
               onChange={(e) => setPolicy({ ...policy, mass_change_pct: Number(e.target.value) || 30 })} />
-            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>파일 수가 이 비율 이상 변하면 경고</span>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("파일 수가 이 비율 이상 변하면 경고")}</span>
           </Row>
           <Row label="백업 보호">
             <input type="checkbox" checked={policy.protect_backups}
               onChange={(e) => setPolicy({ ...policy, protect_backups: e.target.checked })} />
-            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>백업 산출물 읽기 전용 + SHA-256 매니페스트 기록·변조 감지</span>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("백업 산출물 읽기 전용 + SHA-256 매니페스트 기록·변조 감지")}</span>
           </Row>
           <Row label="관리자 IP allowlist">
             <textarea style={{ ...inp, flex: 1, minHeight: 54, fontFamily: "inherit" }} value={allowText}
@@ -264,8 +265,8 @@ export function SecurityPanel() {
               placeholder={"한 줄에 하나 — 스토리지·백업 폴더는 기본 포함"} />
           </Row>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="primary" onClick={savePolicy}>정책 저장</button>
-            <button onClick={load}>다시 불러오기</button>
+            <button className="primary" onClick={savePolicy}>{tr("정책 저장")}</button>
+            <button onClick={load}>{tr("다시 불러오기")}</button>
           </div>
           <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
             allowlist에 현재 접속 IP가 없으면 저장은 되지만 경고가 표시됩니다(자기 잠금 주의).

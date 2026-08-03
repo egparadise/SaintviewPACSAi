@@ -36,6 +36,7 @@ import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgGridLabel, mgSameXf, mgSide, mgTx, mgZoo
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 import { useLocale } from "../lib/useLocale";
+import { t as tr } from "../lib/i18n";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -765,7 +766,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
         const ns = im.find((s) => s.series_uid === q.series!.series_uid);
         return ns ? { ...q, series: ns, index: Math.min(q.index, Math.max(0, ns.instances.length - 1)) } : q;
       }));
-    }).catch(() => say("검사 갱신 실패"));
+    }).catch(() => say(tr("검사 갱신 실패")));
   };
   // 검사 닫기(실행) — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
   const proceedCloseExam = (i: number) => {
@@ -1215,7 +1216,7 @@ void applyHpSources(rule);
     setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
     histIdx.current = 0;
     setHistTick((t) => t + 1);
-    say("초기 상태로 되돌렸습니다 (셔터·주석 해제)");
+    say(tr("초기 상태로 되돌렸습니다 (셔터·주석 해제)"));
   };
   // 검사 구성이 바뀌면 히스토리 재시작 + 초기 스냅샷
   useEffect(() => {
@@ -1364,10 +1365,10 @@ void applyHpSources(rule);
       images.set(inst.sop_uid, { sop_uid: inst.sop_uid, series_uid: inst.series_uid ?? p.series.series_uid,
                                  rows: inst.rows, cols: inst.cols });
     }
-    if (!images.size) { say("GSPS 저장할 이미지가 없습니다"); return; }
+    if (!images.size) { say(tr("GSPS 저장할 이미지가 없습니다")); return; }
     const [wc, ww] = p?.wl ? p.wl.split(",").map(Number) : [null, null];
     await api.sendGsps(ex.d.id, { images: [...images.values()], annotations: list, wc, ww });
-    say("GSPS 저장됨 — Orthanc 동일 검사 귀속(PR)");
+    say(tr("GSPS 저장됨 — Orthanc 동일 검사 귀속(PR)"));
   };
   /** ③ GSPS 적용 — 선택한 PR 의 주석(녹색)+W/L 을 반영. 기존 외부 주석은 교체(중복 방지) */
   const applyGsps = (it: GspsItem) => {
@@ -1393,8 +1394,8 @@ void applyHpSources(rule);
   const doCtrAi = () => {
     const ex = exams[activeExam];
     if (!ex) return;
-    if (!["CR", "DX"].includes(ex.d.modality)) { say("AI CTR 은 CR/DX 검사 전용입니다"); return; }
-    say("AI CTR 계측 중…");
+    if (!["CR", "DX"].includes(ex.d.modality)) { say(tr("AI CTR 은 CR/DX 검사 전용입니다")); return; }
+    say(tr("AI CTR 계측 중…"));
     api.ctr(ex.d.id).then(async (r) => {
       const ar = await api.annotations(ex.d.id);
       const ctrs = ar.items.filter((x) => x.kind === "ctr");
@@ -1490,7 +1491,7 @@ void applyHpSources(rule);
             say(exists ? `🔑 키이미지 해제 — 남은 ${next.length}장`
                        : `🔑 키이미지 등록 (${next.length}장) — 워크리스트에 🔑 표시`);
           });
-        }).catch(() => say("키이미지 저장 실패"));
+        }).catch(() => say(tr("키이미지 저장 실패")));
         break;
       }
       case "reset": upd(active, { ...initPane(p.studyUid), series: p.series, index: p.index }); break;
@@ -1501,11 +1502,11 @@ void applyHpSources(rule);
         break;
       }
       case "print": window.print(); break;
-      case "refreshExam": loadSeries(); say("검사 정보를 갱신했습니다"); break;
+      case "refreshExam": loadSeries(); say(tr("검사 정보를 갱신했습니다")); break;
       case "clrAnno":
         setAnnos({}); setPend(null); setSelAnno(null); setSelAnnos(null); setMarquee(null); setCross3d({});
         setPanes((ps) => ps.map((q) => ({ ...q, shutter: null })));
-        say("측정·주석·셔터를 모두 지웠습니다");
+        say(tr("측정·주석·셔터를 모두 지웠습니다"));
         break;
       case "selAll":   // Select All — 모든 페인 선택 (키 'A' 와 동일)
         setSelPanes(new Set(panes.map((_, k) => k)));
@@ -1523,20 +1524,20 @@ void applyHpSources(rule);
           : `🎙 녹음 중(${dict.engine === "openai_api" ? "OpenAI" : "Whisper 로컬"})… Rec 를 다시 누르면 전사`);
         break;
       case "playdict":
-        if (!dict.playLast()) say("재생할 녹음이 없습니다 (서버 STT 엔진에서 녹음 후 재생 가능)");
+        if (!dict.playLast()) say(tr("재생할 녹음이 없습니다 (서버 STT 엔진에서 녹음 후 재생 가능)"));
         break;
       case "calibrate":   // 기준선(길이 측정) 2점 → 실측 mm → pixel_spacing 재설정
         calibRef.current = true;
         setTool("mline");
-        say("Calibrate — 실제 길이를 아는 기준선을 그으세요 (완료 후 mm 입력)");
+        say(tr("Calibrate — 실제 길이를 아는 기준선을 그으세요 (완료 후 mm 입력)"));
         break;
       case "capture": {
         // 현재 모니터의 영상 영역(모든 페인)을 화면 그대로 캡처 — 주석·측정·툴·문자 오버레이 포함.
         const container = vpRef.current;
         if (container) {
-          say("캡처 중…");
+          say(tr("캡처 중…"));
           void import("../lib/capturePane").then(({ capturePaneToPng }) =>
-            capturePaneToPng(container).then(() => say("캡처 저장됨 (PNG)")).catch(() => {
+            capturePaneToPng(container).then(() => say(tr("캡처 저장됨 (PNG)"))).catch(() => {
               // 폴백: 화면 캡처 실패 시 서버 렌더 이미지(주석 미포함)
               const inst = p.series?.instances[p.index];
               if (p.series && inst) {
@@ -1544,7 +1545,7 @@ void applyHpSources(rule);
                 a.href = instUrl(p.studyUid || detail.study_uid, p.series, inst, p.wl);
                 a.download = "capture.png"; a.click();
               }
-              say("화면 캡처 실패 — 서버 렌더 이미지로 저장");
+              say(tr("화면 캡처 실패 — 서버 렌더 이미지로 저장"));
             }));
         }
         break;
@@ -1559,7 +1560,7 @@ void applyHpSources(rule);
         const ex = exams[activeExam];
         if (!ex) break;
         api.loadGsps(ex.d.id).then((r) => {
-          if (!r.items.length) { say("불러올 GSPS(PR)가 없습니다"); return; }
+          if (!r.items.length) { say(tr("불러올 GSPS(PR)가 없습니다")); return; }
           setGspsPick(r.items);
         }).catch((e) => say(e instanceof Error ? e.message : "GSPS 조회 실패"));
         break;
@@ -1575,12 +1576,12 @@ void applyHpSources(rule);
         if (panes[active]?.shutter) {
           upd(active, { shutter: null });
           setTool("select"); setPend(null);
-          say("셔터 해제 — 적용된 작업이 제거되었습니다");
+          say(tr("셔터 해제 — 적용된 작업이 제거되었습니다"));
           schedHist();
         } else if (tool === id) {
           // 무장만 하고 아직 그리지 않은 상태에서 재클릭 = 해제(버튼 색 원복 — V2D pickTool 정합)
           setTool("select"); setPend(null);
-          say("셔터 도구 해제");
+          say(tr("셔터 도구 해제"));
         } else {
           setTool(id as Tool); setPend(null);
           setSelAnno(null); setSelAnnos(null); setMarquee(null);
@@ -1619,10 +1620,10 @@ void applyHpSources(rule);
   const applyCalibrationInfi = (pi: number, pts: { x: number; y: number }[]) => {
     // pts 는 이미지 픽셀 좌표 → 픽셀 길이 직접 계산
     const pixLen = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-    if (pixLen < 1) { say("Calibrate 취소 — 기준선이 너무 짧습니다"); return; }
+    if (pixLen < 1) { say(tr("Calibrate 취소 — 기준선이 너무 짧습니다")); return; }
     const mmStr = window.prompt(`기준선의 실제 길이(mm)를 입력하세요\n(화면상 ${pixLen.toFixed(1)}px)`, "10");
     const mm = Number(mmStr);
-    if (!mmStr || !Number.isFinite(mm) || mm <= 0) { say("Calibrate 취소"); return; }
+    if (!mmStr || !Number.isFinite(mm) || mm <= 0) { say(tr("Calibrate 취소")); return; }
     const mmPerPx = mm / pixLen;
     setPanes((ps) => ps.map((q, k) => (k === pi && q.series
       ? { ...q, series: { ...q.series, instances: q.series.instances.map((i) => ({ ...i, pixel_spacing: [mmPerPx, mmPerPx] })) } }
@@ -1680,9 +1681,9 @@ void applyHpSources(rule);
         break;
       }
       // ── 셔터 (페인 표시 가림) ──
-      case "shutRect": upd(pi, { shutter: { kind: "rect", pts } }); say("사각 셔터 적용 — 🧹로 해제"); schedHist(); break;
-      case "shutEl": upd(pi, { shutter: { kind: "ellipse", pts } }); say("타원 셔터 적용 — 🧹로 해제"); schedHist(); break;
-      case "shutPoly": upd(pi, { shutter: { kind: "poly", pts } }); say("다각 셔터 적용 — 🧹로 해제"); schedHist(); break;
+      case "shutRect": upd(pi, { shutter: { kind: "rect", pts } }); say(tr("사각 셔터 적용 — 🧹로 해제")); schedHist(); break;
+      case "shutEl": upd(pi, { shutter: { kind: "ellipse", pts } }); say(tr("타원 셔터 적용 — 🧹로 해제")); schedHist(); break;
+      case "shutPoly": upd(pi, { shutter: { kind: "poly", pts } }); say(tr("다각 셔터 적용 — 🧹로 해제")); schedHist(); break;
       // ── 3D Cursor: 클릭 지점을 모든 페인의 동일 3D 위치로 ──
       case "cursor3d": {
         const g = geomOf(inst);
@@ -1705,7 +1706,7 @@ void applyHpSources(rule);
             return { ...q, index: ki };
           }));
           setCross3d(am);
-          say("3D Cursor — 기하 정보 없음: index 비율 근사 동기");
+          say(tr("3D Cursor — 기하 정보 없음: index 비율 근사 동기"));
           break;
         }
         const P: number[] = [0, 1, 2].map((k) =>
@@ -1739,7 +1740,7 @@ void applyHpSources(rule);
         const x = Math.round(pts[0].x), y = Math.round(pts[0].y);
         const local = () => {   // 8bit 근사 폴백
           void samplePixels(url, cols, rows).then((data) => {
-            if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+            if (!data) { say(tr("픽셀 샘플 실패(CORS)")); return; }
             const v = rawOf(data.data[(Math.max(0, Math.min(data.height - 1, y)) * data.width +
                                        Math.max(0, Math.min(data.width - 1, x))) * 4], p.wl);
             addAnno(sop, { kind: "lens", pts, value: `≈${v.toFixed(0)}` });
@@ -1763,7 +1764,7 @@ void applyHpSources(rule);
         const cols = inst.cols || 1, rows = inst.rows || 1;
         const local = () => {   // 8bit 근사 폴백 (기존 동작)
           void samplePixels(url, cols, rows).then((data) => {
-            if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+            if (!data) { say(tr("픽셀 샘플 실패(CORS)")); return; }
             const st = roiStats(data, pts[0].x, pts[0].y, pts[1].x, pts[1].y, ell, p.wl);
             if (!st) return;
             const areaMm = sp
@@ -1790,7 +1791,7 @@ void applyHpSources(rule);
       }
       case "profile": {
         void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
-          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          if (!data) { say(tr("픽셀 샘플 실패(CORS)")); return; }
           const N = 80;
           const vals: number[] = [];
           for (let k = 0; k <= N; k++) {
@@ -1805,7 +1806,7 @@ void applyHpSources(rule);
       }
       case "table2d": {
         void samplePixels(url, inst.cols || 1, inst.rows || 1).then((data) => {
-          if (!data) { say("픽셀 샘플 실패(CORS)"); return; }
+          if (!data) { say(tr("픽셀 샘플 실패(CORS)")); return; }
           const x0 = Math.floor(Math.min(pts[0].x, pts[1].x)), x1 = Math.ceil(Math.max(pts[0].x, pts[1].x));
           const y0 = Math.floor(Math.min(pts[0].y, pts[1].y)), y1 = Math.ceil(Math.max(pts[0].y, pts[1].y));
           const step = Math.max(1, Math.ceil(Math.max(x1 - x0, y1 - y0) / 14));   // 최대 ~14×14
@@ -1917,7 +1918,7 @@ void applyHpSources(rule);
     });
     setSelAnno(null);
     schedHist();
-    say("선택 주석을 지웠습니다");
+    say(tr("선택 주석을 지웠습니다"));
   };
   // 마퀴 다중 선택 주석 삭제(§C) — selAnnosRef 의 idxs 를 내림차순으로 제거(인덱스 밀림 방지)
   const deleteSelAnnos = (): boolean => {
@@ -1946,7 +1947,7 @@ void applyHpSources(rule);
       return { ...prev, [sop]: list.slice(0, -1) };
     });
     schedHist();
-    say("마지막 주석을 지웠습니다");
+    say(tr("마지막 주석을 지웠습니다"));
   };
 
   /* 편집(이동/크기변경) 확정 후 ROI/렌즈 통계 라벨 재계산(§B) — pts 만 바뀌고 value(생성 시점 문자열)가
@@ -2262,7 +2263,7 @@ void applyHpSources(rule);
     if (snap) upd(pi, { series: snap.series, index: snap.index, studyUid: snap.studyUid, tz: undefined });
     else upd(pi, { series: series[0] ?? null, index: 0, studyUid: curD.study_uid, tz: undefined });
     setActive(pi);
-    say("Combine 해제 — 원래 시리즈로 복원");
+    say(tr("Combine 해제 — 원래 시리즈로 복원"));
   };
   // 툴바 Combine — 토글: 활성 페인이 결합 상태면 해제(원복), 아니면 검사 전체 결합
   const combine = () => { if (isCombined(panes[active])) uncombine(active); else combineAllInto(active); };
@@ -2275,8 +2276,8 @@ void applyHpSources(rule);
   };
   const combineInto = (pi: number, seriesUid: string) => {
     const dropped = findSeriesByUid(seriesUid);
-    if (!dropped) { say("Combine 실패 — 시리즈를 찾을 수 없습니다"); return; }
-    if (["SR", "KO", "PR", "SEG"].includes(dropped.s.modality)) { say("Combine 불가 — 비영상 시리즈(SR/KO/PR/SEG)"); return; }
+    if (!dropped) { say(tr("Combine 실패 — 시리즈를 찾을 수 없습니다")); return; }
+    if (["SR", "KO", "PR", "SEG"].includes(dropped.s.modality)) { say(tr("Combine 불가 — 비영상 시리즈(SR/KO/PR/SEG)")); return; }
     snapCombine(pi);
     const base = panes[pi]?.series ?? null;
     const merged = buildCombined(
@@ -2288,8 +2289,8 @@ void applyHpSources(rule);
   // Combine all(대상 페인) — 툴바 버튼·Circle Menu 용: 현재 검사 전체 (영상)시리즈를 지정 페인에 결합.
   const combineAllInto = (pi: number) => {
     const src = series.filter((s) => !["SR", "KO", "PR", "SEG"].includes(s.modality) && s.instances.length > 0);
-    if (!src.length) { say("Combine 취소 — 결합할 영상 시리즈가 없습니다"); return; }
-    if (src.length === 1) { say("Combine 취소 — 시리즈가 1개뿐입니다(결합할 대상 없음)"); return; }
+    if (!src.length) { say(tr("Combine 취소 — 결합할 영상 시리즈가 없습니다")); return; }
+    if (src.length === 1) { say(tr("Combine 취소 — 시리즈가 1개뿐입니다(결합할 대상 없음)")); return; }
     snapCombine(pi);
     const merged = buildCombined(
       [...src].sort((a, b) => a.series_number - b.series_number).map((s) => ({ s, studyUid: curD.study_uid })));
@@ -2309,7 +2310,7 @@ void applyHpSources(rule);
         r = await api.worklist({ limit: "500" });
         idx = r.items.findIndex((it) => it.id === curD.id);
       }
-      if (idx < 0) { say("워크리스트에서 현재 검사를 찾지 못했습니다"); return; }
+      if (idx < 0) { say(tr("워크리스트에서 현재 검사를 찾지 못했습니다")); return; }
       const opened = new Set<number>(examsRef.current.map((e) => e.d.id));
       try { (JSON.parse(localStorage.getItem("sv_infi_exams") ?? "[]") as number[]).forEach((id) => opened.add(id)); } catch { /* 무시 */ }
       let nxt: (typeof r.items)[number] | undefined;
@@ -2319,7 +2320,7 @@ void applyHpSources(rule);
       // 페이지 리로드 대신 제자리 전환 — ViewerWindow 가 sv-nav-study 를 받아 studyId 만 교체
       if (nxt) window.dispatchEvent(new CustomEvent("sv-nav-study", { detail: { id: nxt.id } }));
       else say(dir < 0 ? "위쪽에 아직 열지 않은 검사가 없습니다" : "아래쪽에 아직 열지 않은 검사가 없습니다");
-    } catch { say("워크리스트 조회 실패"); }
+    } catch { say(tr("워크리스트 조회 실패")); }
   };
   // Worklist 버튼(§3.1) — 워크리스트 창을 최전면으로 (다른 모니터에 있어도)
   // named window 재-open 은 브라우저가 해당 창을 raise 한다 (opener.focus() 는 대부분 무시됨)
@@ -2404,7 +2405,7 @@ void applyHpSources(rule);
         setCmpMaster(curD.study_uid);     // 기준=비교를 시작한 활성 검사(탭 전환 후에도 M 정확)
       }
       if (re) say(`과거검사 비교 — ${re.study_date} ${re.modality} (1:2 분할)`);
-    }).catch(() => say("과거검사 로드 실패"));
+    }).catch(() => say(tr("과거검사 로드 실패")));
   };
 
   // ── 표시 설정 (계정별 viewer.prefs 로밍): 오버레이 글자 크기/표시, 멀티선택 색 ──
@@ -2626,11 +2627,11 @@ void applyHpSources(rule);
       }
       if (dead) return;
       if (!items.length) {
-        if (sLayout.c < 2 && noSide) say("2D-MG는 좌우 두 열 이상에서만 맞붙일 수 있습니다 — 상단 1:2 / 2:2 / 2:3 버튼으로 분할을 바꿔 주세요");
-        else if (tiled) say("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요");
-        else if (rotated) say("2D-MG는 회전 상태에서 맞붙일 수 없습니다 — 회전을 원위치로 되돌려 주세요");
-        else if (noSide) say("2D-MG: 좌우 짝을 정할 수 없어 맞붙이지 않았습니다(검사명에 R/L 표기 확인)");
-        else if (cand) say("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다");
+        if (sLayout.c < 2 && noSide) say(tr("2D-MG는 좌우 두 열 이상에서만 맞붙일 수 있습니다 — 상단 1:2 / 2:2 / 2:3 버튼으로 분할을 바꿔 주세요"));
+        else if (tiled) say(tr("2D-MG는 페인당 1장일 때만 맞붙일 수 있습니다 — Image 분할을 1×1로 두고 Series 분할로 나눠 주세요"));
+        else if (rotated) say(tr("2D-MG는 회전 상태에서 맞붙일 수 없습니다 — 회전을 원위치로 되돌려 주세요"));
+        else if (noSide) say(tr("2D-MG: 좌우 짝을 정할 수 없어 맞붙이지 않았습니다(검사명에 R/L 표기 확인)"));
+        else if (cand) say(tr("2D-MG: 조직 경계를 찾지 못해 기본 표시를 유지합니다"));
         return;
       }
       /* 배율 맞추기 — 좌우 유방을 **실제 크기(mm) 기준으로 동일 배율**로 (Viewer2D 와 동일 규칙).
@@ -2763,7 +2764,7 @@ void applyHpSources(rule);
     if (cur) { upd(pi, { series: cur, index: 0, studyUid: curD.study_uid, tz: undefined }); setActive(pi); say(`시리즈 Se${cur.series_number} → 페인 로드 (드래그앤드롭)`); return; }
     const pr = priorSeries.find((e) => e.s.series_uid === seriesUid);
     if (pr) { upd(pi, { series: pr.s, index: 0, studyUid: pr.uid, tz: undefined }); setActive(pi); say(`[과거] Se${pr.s.series_number} → 페인 로드 (드래그앤드롭)`); return; }
-    say("드롭 실패 — 시리즈를 찾을 수 없습니다");
+    say(tr("드롭 실패 — 시리즈를 찾을 수 없습니다"));
   };
 
   // Series 페인 렌더 — 뷰포트 중첩 flex(경계 스플리터) 안에서 사용
@@ -2788,7 +2789,7 @@ void applyHpSources(rule);
                         textShadow: "0 0 3px #000", pointerEvents: "none" }}>
             📂 {p.media.name}
           </div>
-          <button title="미디어 닫기 — DICOM 표시로 복귀" onClick={() => upd(pi, { media: null })}
+          <button title={tr("미디어 닫기 — DICOM 표시로 복귀")} onClick={() => upd(pi, { media: null })}
                   style={{ position: "absolute", top: 3, right: 4, fontSize: 11, padding: "0 6px" }}>✕</button>
         </div>
       );
@@ -2831,9 +2832,7 @@ void applyHpSources(rule);
         {dragOverPane === pi && (
           <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "grid", placeItems: "center",
                         background: "rgba(56,189,248,0.18)", pointerEvents: "none",
-                        color: "#38bdf8", fontSize: 14, fontWeight: 800, textShadow: "0 1px 4px #000" }}>
-            ↓ 이 페인에 시리즈 표시
-          </div>
+                        color: "#38bdf8", fontSize: 14, fontWeight: 800, textShadow: "0 1px 4px #000" }}>{tr("↓ 이 페인에 시리즈 표시")}</div>
         )}
         {Array.from({ length: tilesOf(p) }, (_, t) => {
           const idx = p.index + t;
@@ -2998,9 +2997,7 @@ void applyHpSources(rule);
                 </>
                 );
               })() : p.series ? null : (
-                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12 }}>
-                  상단 썸네일에서 시리즈 선택
-                </div>
+                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12 }}>{tr("상단 썸네일에서 시리즈 선택")}</div>
               )}
             </div>
           );
@@ -3018,13 +3015,13 @@ void applyHpSources(rule);
                   onClick={() => { cineLast.current[pi] = 0; upd(pi, { playing: !p.playing }); }}>
               {p.playing ? "⏸" : "▶"}
             </span>
-            <input type="number" min={0.1} max={10} step={0.1} title="이 페인의 넘김 간격(초)"
+            <input type="number" min={0.1} max={10} step={0.1} title={tr("이 페인의 넘김 간격(초)")}
                    value={p.cineSec ?? cineDefault}
                    onChange={(e) => upd(pi, {
                      cineSec: Math.min(10, Math.max(0.1, Number(e.target.value) || cineDefault)),
                    })}
                    style={{ width: 42, fontSize: 10, padding: "0 2px" }} />
-            <span style={{ fontSize: 9.5, color: "#94a3b8" }}>초</span>
+            <span style={{ fontSize: 9.5, color: "#94a3b8" }}>{tr("초")}</span>
           </div>
         )}
       </div>
@@ -3058,7 +3055,7 @@ void applyHpSources(rule);
   const thumbCol = (
     <div ref={thumbColRef} style={{ width: ui.thumbW, background: "var(--bg-canvas)", borderRight: "1px solid var(--border)",
                   overflowY: "auto", padding: 4, display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-      <button onClick={combine} title="Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택"
+      <button onClick={combine} title={tr("Combine all — 현재 검사의 전체 영상 시리즈를 한 시리즈처럼 결합해 활성 페인에 연속 스크롤(다시 누르면 해제·원복). 썸네일을 페인에 끌어다 놓으면 Open/Combine/Combine all 선택")}
               style={{ fontSize: 10.5, ...(isCombined(panes[active])
                 ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb", fontWeight: 700 } : {}) }}>
         Combine{isCombined(panes[active]) ? " ●" : ""}
@@ -3267,9 +3264,7 @@ void applyHpSources(rule);
                  style={{ position: "fixed", left: Math.min(c.x, window.innerWidth - 200), top: Math.min(c.y, window.innerHeight - 130),
                           width: 190, background: "#0b1220", border: "1px solid #334155", borderRadius: 8,
                           boxShadow: "0 6px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
-              <div style={{ padding: "5px 12px", fontSize: 10.5, color: "#7dd3fc", borderBottom: "1px solid #1e293b" }}>
-                시리즈 드롭 — 동작 선택
-              </div>
+              <div style={{ padding: "5px 12px", fontSize: 10.5, color: "#7dd3fc", borderBottom: "1px solid #1e293b" }}>{tr("시리즈 드롭 — 동작 선택")}</div>
               {btn("Open", "이 페인에 표시(교체)", () => dropSeriesToPaneInfi(c.pi, c.uid), true)}
               {btn("Combine", "현재 시리즈에 이어붙임", () => combineInto(c.pi, c.uid))}
               {btn("Combine all", "검사 전체 시리즈 결합", () => combineAllInto(c.pi))}
@@ -3306,7 +3301,7 @@ void applyHpSources(rule);
             {e.d.modality}(Original) {e.d.patient_name}<br />
             {e.d.study_date} {(e.d.study_desc ?? "").slice(0, 14)}
             <span onClick={(ev) => { ev.stopPropagation(); requestClose({ kind: "one", i }); }}
-                  title="이 검사 닫기" style={{ marginLeft: 6, color: "var(--stat-emergency)" }}>✕</span>
+                  title={tr("이 검사 닫기")} style={{ marginLeft: 6, color: "var(--stat-emergency)" }}>✕</span>
           </span>
         ))}
       </div>
@@ -3335,20 +3330,20 @@ void applyHpSources(rule);
             const tot = Math.max(1, Math.ceil((exams[activeExam]?.series.length ?? 0) / cnt));
             return tot > 1 && (
               <span style={{ display: "flex", gap: 3, alignItems: "center", marginLeft: 6 }}
-                    title="시리즈가 분할보다 많습니다 — Shift+스크롤로 다음/이전 시리즈 페이지 이동">
+                    title={tr("시리즈가 분할보다 많습니다 — Shift+스크롤로 다음/이전 시리즈 페이지 이동")}>
                 <button onClick={() => pageSeries(-1)} disabled={seriesPage <= 0} style={{ padding: "0 5px", fontSize: 11 }}>◀</button>
                 <b style={{ fontSize: 11 }}>Srs {seriesPage + 1}/{tot}</b>
                 <button onClick={() => pageSeries(1)} disabled={seriesPage >= tot - 1} style={{ padding: "0 5px", fontSize: 11 }}>▶</button>
               </span>
             );
           })()}
-          <button title="3D — 현재 검사의 MPR/MIP 볼륨 뷰어 열기"
+          <button title={tr("3D — 현재 검사의 MPR/MIP 볼륨 뷰어 열기")}
                   onClick={() => setShow3d(true)}
                   style={{ marginLeft: 8, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
             3D
           </button>
           {cmpCfg.enabled !== false && (
-            <button title="Compare — 같은 환자의 과거검사를 골라 나란히 비교(동기 스크롤)"
+            <button title={tr("Compare — 같은 환자의 과거검사를 골라 나란히 비교(동기 스크롤)")}
                     onClick={openCompareModal}
                     style={{ marginLeft: 4, padding: "2px 12px", fontSize: 12, fontWeight: 700 }}>
               ⇄ Compare
@@ -3365,16 +3360,16 @@ void applyHpSources(rule);
             {panes[active]?.playing ? "⏸" : "▶"}
           </button>
           <input type="number" min={0.1} max={10} step={0.1}
-                 title="넘김 간격(초) — 활성/선택 페인에 적용"
+                 title={tr("넘김 간격(초) — 활성/선택 페인에 적용")}
                  value={panes[active]?.cineSec ?? cineDefault}
                  onChange={(e) => {
                    const v = Math.min(10, Math.max(0.1, Number(e.target.value) || cineDefault));
                    updMany(targetsOf(active), () => ({ cineSec: v }));
                  }}
                  style={{ width: 52, marginLeft: 3, fontSize: 12 }} />
-          <span style={{ fontSize: 11, marginLeft: 1 }}>초</span>
+          <span style={{ fontSize: 11, marginLeft: 1 }}>{tr("초")}</span>
           {/* 📂 미디어 열기 — JPEG/PNG/BMP/AVI/MP4/MPEG 를 활성 페인에서 표시/재생 */}
-          <button title="파일 열기 — 이미지(JPEG/PNG/BMP)·동영상(AVI/MP4/MPEG)을 활성 페인에서 보기"
+          <button title={tr("파일 열기 — 이미지(JPEG/PNG/BMP)·동영상(AVI/MP4/MPEG)을 활성 페인에서 보기")}
                   onClick={() => mediaInputRef.current?.click()}
                   style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }}>🎞️</button>
           <input ref={mediaInputRef} type="file" hidden
@@ -3393,7 +3388,7 @@ void applyHpSources(rule);
           {/* 2D-MG — 맘모 검사에서만 노출. 체크 시 좌우 유방 사이 빈 공간을 없애고 가운데에서 맞붙인다 */}
           {isMg && (
             <>
-              <label title="2D-MG — 좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 해제하면 원래대로 돌아갑니다."
+              <label title={tr("2D-MG — 좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 해제하면 원래대로 돌아갑니다.")}
                      style={{ display: "flex", gap: 3, alignItems: "center", fontWeight: 700, cursor: "pointer" }}>
                 <input type="checkbox" checked={mgOn}
                        onChange={(e) => {
@@ -3410,7 +3405,7 @@ void applyHpSources(rule);
                 const known = (MG_LAYOUTS as readonly string[]).includes(curKey);
                 return (
                   <select value={known ? curKey : ""}
-                          title="2D-MG 분할 — 기본값은 설정 ▸ 뷰어 공통 ▸ MG(2D-MG) 에서 정합니다"
+                          title={tr("2D-MG 분할 — 기본값은 설정 ▸ 뷰어 공통 ▸ MG(2D-MG) 에서 정합니다")}
                           onChange={(e) => {
                             const v = e.target.value;
                             if (!(MG_LAYOUTS as readonly string[]).includes(v)) return;
@@ -3435,7 +3430,7 @@ void applyHpSources(rule);
             </label>
           ))}
           {/* Stack 동기 방식 (G) — T-View·SaintView 와 같은 토글 */}
-          <button title="Stack 동기 방식 (G 키) — Spatial: DICOM 좌표로 해부학적 정합(두께·각도·장수 달라도) / Index: 1:1 인덱스(좌표 없는 데이터·강제 정합)"
+          <button title={tr("Stack 동기 방식 (G 키) — Spatial: DICOM 좌표로 해부학적 정합(두께·각도·장수 달라도) / Index: 1:1 인덱스(좌표 없는 데이터·강제 정합)")}
                   onClick={() => { setSpatialSync((v) => { say(!v ? "Stack 동기: Spatial(DICOM 좌표 정합)" : "Stack 동기: Index(1:1)"); return !v; }); }}
                   style={{ fontSize: 10.5, padding: "1px 7px", marginLeft: 4,
                            background: spatialSync ? "var(--accent)" : undefined,
@@ -3448,7 +3443,7 @@ void applyHpSources(rule);
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* Tools 를 감췄을 때 — 다시 펼 수 있는 얇은 손잡이 */}
         {!toolsOpen && (
-          <button onClick={() => setToolsOpen(true)} title="Tools 팔레트 펼치기"
+          <button onClick={() => setToolsOpen(true)} title={tr("Tools 팔레트 펼치기")}
                   style={{ width: 20, borderRadius: 0, padding: 0, flexShrink: 0, fontSize: 10.5,
                            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                            writingMode: "vertical-rl", letterSpacing: 2 }}>
@@ -3461,13 +3456,13 @@ void applyHpSources(rule);
                       display: "flex", flexDirection: "column", padding: "6px 5px", gap: 5, flexShrink: 0 }}>
           {/* §3.1 툴바 상단(원본 이미지2): Prev/Next · Crosslink · 행잉 · Worklist/Report · Close */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <button title="Prev — 워크리스트의 위 검사 열기" onClick={() => void nav(-1)}
+            <button title={tr("Prev — 워크리스트의 위 검사 열기")} onClick={() => void nav(-1)}
                     style={{ fontSize: 16, padding: "3px 12px" }}>◀</button>
             <span style={{ fontSize: 18 }}>👤</span>
-            <button title="Next — 워크리스트의 아래 검사 열기" onClick={() => void nav(1)}
+            <button title={tr("Next — 워크리스트의 아래 검사 열기")} onClick={() => void nav(1)}
                     style={{ fontSize: 16, padding: "3px 12px" }}>▶</button>
           </div>
-          <button title="Crosslink 마스터 토글 (§3.3)"
+          <button title={tr("Crosslink 마스터 토글 (§3.3)")}
                   onClick={() => setXlink((x) => ({ ...x, crosslink: !x.crosslink }))}
                   style={{ fontSize: 12.5, padding: "5px 0", background: xlink.crosslink ? "var(--accent)" : undefined,
                            color: xlink.crosslink ? "#fff" : undefined }}>
@@ -3509,19 +3504,19 @@ void applyHpSources(rule);
             <option value="tile">Tile 3x3</option>
             <option value="cmp">Compare 1x2</option>
             <option value="direct">{hpDirect ? "☑" : "☐"} 직접설정 (화면에서 직접 구성)</option>
-            {hpDirect && <option value="hpsave">💾 현재 화면을 프로토콜로 저장…</option>}
+            {hpDirect && <option value="hpsave">{tr("💾 현재 화면을 프로토콜로 저장…")}</option>}
           </select>
           <div style={{ display: "flex", gap: 2 }}>
-            <button title="Worklist — 워크리스트 화면 열기" onClick={gotoWorklist}
+            <button title={tr("Worklist — 워크리스트 화면 열기")} onClick={gotoWorklist}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>🗂</button>
-            <button title="Report 도크 — 판독 작성 패널 열기/닫기 (열림 상태는 계정에 저장)"
+            <button title={tr("Report 도크 — 판독 작성 패널 열기/닫기 (열림 상태는 계정에 저장)")}
                     onClick={() => {
                       const nv = !reportDock;
                       setReportDock(nv);
                       persistPrefs({ infi_report_dock: nv });
                     }}
                     style={{ flex: 1, fontSize: 18, padding: "5px 0", background: reportDock ? "var(--accent)" : undefined }}>📄</button>
-            <button title="Report 창 — 판독 작성 창(별도 웹창) 열기 · 모니터 배치는 Setting>모니터"
+            <button title={tr("Report 창 — 판독 작성 창(별도 웹창) 열기 · 모니터 배치는 Setting>모니터")}
                     onClick={() => {
                       // IN-2 ⑥: Setting>모니터의 판독창 모니터(monitor.report)에 배치 (TY Reading 버튼 동일)
                       void screenFeatures(monReport != null ? [monReport] : null, "width=1280,height=860")
@@ -3535,7 +3530,7 @@ void applyHpSources(rule);
                     style={{ flex: 1, fontSize: 18, padding: "5px 0" }}>📝</button>
           </div>
           <span style={{ position: "relative" }}>
-            <button title="Close — 검사 닫기(현재/전체) 후 워크리스트로" onClick={() => setCloseMenu((v) => !v)}
+            <button title={tr("Close — 검사 닫기(현재/전체) 후 워크리스트로")} onClick={() => setCloseMenu((v) => !v)}
                     style={{ width: "100%", fontSize: 12.5, padding: "5px 0" }}>⊠ Close</button>
             {closeMenu && (
               <div style={{ position: "absolute", left: 0, top: "105%", zIndex: 30, background: "var(--bg-elevated)",
@@ -3550,14 +3545,14 @@ void applyHpSources(rule);
           </span>
           {/* 작업 히스토리 — ◀ 이전 상태 · ◯ 초기 상태로 · ▶ 다음 상태 (이미지 조정/주석/방향 등) */}
           <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center", padding: "2px 0" }}>
-            <button title="이전 작업 상태로 (Undo)" onClick={() => histGo(-1)}
+            <button title={tr("이전 작업 상태로 (Undo)")} onClick={() => histGo(-1)}
                     disabled={histTick < 0 || histIdx.current <= 0}
                     style={{ flex: 1, fontSize: 13, padding: "3px 0" }}>◀</button>
-            <button title="초기 상태로 되돌리기 — 모든 조정/주석을 처음으로" onClick={histReset}
+            <button title={tr("초기 상태로 되돌리기 — 모든 조정/주석을 처음으로")} onClick={histReset}
                     disabled={histIdx.current < 0}
                     style={{ width: 30, height: 26, borderRadius: "50%", fontSize: 12, padding: 0,
                              display: "grid", placeItems: "center" }}>◯</button>
-            <button title="다음 작업 상태로 (Redo)" onClick={() => histGo(1)}
+            <button title={tr("다음 작업 상태로 (Redo)")} onClick={() => histGo(1)}
                     disabled={histIdx.current >= histRef.current.length - 1}
                     style={{ flex: 1, fontSize: 13, padding: "3px 0" }}>▶</button>
           </div>
@@ -3618,7 +3613,7 @@ void applyHpSources(rule);
                   {quickTools.length > 0 && (
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 5, margin: "5px 1px 3px" }}>
-                        <span title="자주 쓰는 툴 — 사용 횟수 상위 6개 (설정>뷰어에서 숨김 가능)"
+                        <span title={tr("자주 쓰는 툴 — 사용 횟수 상위 6개 (설정>뷰어에서 숨김 가능)")}
                               style={{ fontSize: 9, fontWeight: 700, color: "#facc15",
                                        whiteSpace: "nowrap" }}>★ Quick</span>
                         <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
@@ -3649,19 +3644,19 @@ void applyHpSources(rule);
             })()}
           </div>
           <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
-            <button title="W/L Preset 패널 토글" onClick={() => setWlPanel((v) => !v)}
+            <button title={tr("W/L Preset 패널 토글")} onClick={() => setWlPanel((v) => !v)}
                     style={{ fontSize: 12.5, padding: "5px 0", background: wlPanel ? "var(--accent)" : undefined,
                              color: wlPanel ? "#fff" : undefined }}>
               W/L
             </button>
-            <button title="Setting — 뷰어 설정 창 열기 (워크리스트의 설정과 동일)"
+            <button title={tr("Setting — 뷰어 설정 창 열기 (워크리스트의 설정과 동일)")}
                     onClick={() => setSettingsOpen(true)}
                     style={{ fontSize: 12.5, padding: "5px 0", background: settingsOpen ? "var(--accent)" : undefined,
                              color: settingsOpen ? "#fff" : undefined }}>
               Setting
             </button>
             {/* Tools 감추기 — 왼쪽 손잡이로 다시 편다(T-View·SaintView 동일) */}
-            <button title="Tools 감추기 (다시 펴려면 왼쪽 가장자리 손잡이 클릭)"
+            <button title={tr("Tools 감추기 (다시 펴려면 왼쪽 가장자리 손잡이 클릭)")}
                     onClick={() => setToolsOpen(false)}
                     style={{ fontSize: 12.5, padding: "5px 0" }}>◂ Hide</button>
           </div>
@@ -3739,7 +3734,7 @@ void applyHpSources(rule);
                    schedHist();
                    say(`AI 추천 W/L 적용: ${ai.label} (${ai.q})`);
                  }}
-                 title="AI 자동 W/L — 모달리티×부위 기반 추천값을 활성/선택 페인에 적용 (초안 규칙)"
+                 title={tr("AI 자동 W/L — 모달리티×부위 기반 추천값을 활성/선택 페인에 적용 (초안 규칙)")}
                  style={{ padding: "3px 6px", borderRadius: 3, cursor: "pointer",
                           color: "var(--ai)", fontWeight: 700 }}>
               ⚡ AI Auto
@@ -3763,7 +3758,7 @@ void applyHpSources(rule);
                     onDrag={(dx) => setUi((u) => ({ ...u, dockW: clampW(u.dockW - dx, 320, 520) }))} />
         )}
         {reportDock && !reportCollapsed && (
-          <button title="판독창 숨기기 (오른쪽으로 접기)" onClick={() => setReportCollapsed(true)}
+          <button title={tr("판독창 숨기기 (오른쪽으로 접기)")} onClick={() => setReportCollapsed(true)}
                   style={{ width: 16, padding: 0, borderRadius: 0, alignSelf: "stretch", fontSize: 12,
                            background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>▸</button>
         )}
@@ -3772,10 +3767,10 @@ void applyHpSources(rule);
                       onLoadPrior={dockLoadPrior} onStatus={say} />
         )}
         {reportDock && reportCollapsed && (
-          <button title="판독창 펼치기" onClick={() => setReportCollapsed(false)}
+          <button title={tr("판독창 펼치기")} onClick={() => setReportCollapsed(false)}
                   style={{ width: 24, padding: "8px 0", borderRadius: 0, alignSelf: "stretch",
                            writingMode: "vertical-rl", fontSize: 12, fontWeight: 700,
-                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>◂ 판독</button>
+                           background: "var(--bg-elevated)", border: "none", borderLeft: "1px solid var(--border)" }}>{tr("◂ 판독")}</button>
         )}
       </div>
 
@@ -3791,10 +3786,7 @@ void applyHpSources(rule);
               <button style={{ marginLeft: "auto" }} onClick={() => setCmpOpen(false)}>✕</button>
             </div>
             {cmpList.length === 0 && (
-              <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 8 }}>
-                이 환자의 과거검사가 없습니다.<br />
-                다른 환자와 비교하려면 워크리스트의 <b>＋Add</b> 버튼을 사용하세요(명시적 비교).
-              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 8 }}>{tr("이 환자의 과거검사가 없습니다.")}<br />{tr("다른 환자와 비교하려면 워크리스트의")}<b>＋Add</b>{tr("버튼을 사용하세요(명시적 비교).")}</div>
             )}
             {cmpList.map((re) => (
               <label key={re.id}
@@ -3853,7 +3845,7 @@ void applyHpSources(rule);
                       }}>
                 비교 열기 ({cmpSel.size}건)
               </button>
-              <button onClick={() => setCmpOpen(false)}>취소</button>
+              <button onClick={() => setCmpOpen(false)}>{tr("취소")}</button>
             </div>
           </div>
         </div>
@@ -3882,9 +3874,7 @@ void applyHpSources(rule);
                 ))}
               </tbody>
             </table>
-            <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 6 }}>
-              렌더 영상 기반 근사값(W/L 역변환 ≈) — 원본 픽셀값 아님
-            </div>
+            <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 6 }}>{tr("렌더 영상 기반 근사값(W/L 역변환 ≈) — 원본 픽셀값 아님")}</div>
           </div>
         </div>
       )}
@@ -3897,12 +3887,12 @@ void applyHpSources(rule);
           <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
                         width: "min(520px, 94vw)", maxHeight: "72vh", overflow: "auto", padding: 16 }}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-              <b style={{ fontSize: 13 }}>📥 GSPS(PR) 불러오기 — 적용할 Presentation State 선택</b>
+              <b style={{ fontSize: 13 }}>{tr("📥 GSPS(PR) 불러오기 — 적용할 Presentation State 선택")}</b>
               <button style={{ marginLeft: "auto" }} onClick={() => setGspsPick(null)}>✕</button>
             </div>
             {gspsPick.map((it) => (
               <div key={it.sop_instance_uid} onClick={() => applyGsps(it)}
-                   title="클릭 = 이 PR 의 주석·W/L 적용 (기존 외부 주석은 교체)"
+                   title={tr("클릭 = 이 PR 의 주석·W/L 적용 (기존 외부 주석은 교체)")}
                    style={{ padding: "6px 8px", borderRadius: 4, cursor: "pointer", fontSize: 12.5,
                             border: "1px solid var(--border)", marginBottom: 6 }}>
                 <b>{it.label || "(라벨 없음)"}</b>
@@ -3926,9 +3916,7 @@ void applyHpSources(rule);
             <b style={{ fontSize: 13 }}>
               {closeDlg.kind === "all" ? "모든 검사 닫기" : "검사 닫기"} — 변경사항 저장
             </b>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "8px 0 12px" }}>
-              주석·계측을 서버에 저장할까요?
-            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "8px 0 12px" }}>{tr("주석·계측을 서버에 저장할까요?")}</div>
             {([["save_current", "주석 저장 후 닫기", "측정·주석을 서버에 저장(계정 로밍)"],
                ["save_all", "전체 저장 후 닫기", "주석 + 표시상태(GSPS Presentation State)까지 저장"],
                ["none", "저장하지 않고 닫기", "이번 세션의 로컬 변경을 버립니다"]] as
@@ -3941,15 +3929,13 @@ void applyHpSources(rule);
                 <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 1 }}>{desc}</div>
               </button>
             ))}
-            <label title="체크하고 닫으면 다음부터 묻지 않고 이 동작으로 닫습니다 (viewer.prefs.infi_close_mode)"
+            <label title={tr("체크하고 닫으면 다음부터 묻지 않고 이 동작으로 닫습니다 (viewer.prefs.infi_close_mode)")}
                    style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5, marginTop: 4,
                             color: "var(--text-secondary)", cursor: "pointer" }}>
               <input type="checkbox" checked={closeRemember}
-                     onChange={(e) => setCloseRemember(e.target.checked)} />
-              이 선택을 기본 닫기 동작으로 저장(다음부터 묻지 않음)
-            </label>
+                     onChange={(e) => setCloseRemember(e.target.checked)} />{tr("이 선택을 기본 닫기 동작으로 저장(다음부터 묻지 않음)")}</label>
             <div style={{ textAlign: "right", marginTop: 8 }}>
-              <button onClick={() => setCloseDlg(null)}>취소</button>
+              <button onClick={() => setCloseDlg(null)}>{tr("취소")}</button>
             </div>
           </div>
         </div>
@@ -3959,9 +3945,7 @@ void applyHpSources(rule);
       {show3d && (
         <Suspense fallback={
           <div style={{ position: "fixed", inset: 0, background: "var(--bg-canvas)", zIndex: 200,
-                        display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>
-            3D 뷰어 로딩…
-          </div>
+                        display: "grid", placeItems: "center", color: "var(--text-secondary)" }}>{tr("3D 뷰어 로딩…")}</div>
         }>
           <Viewer3D studyUid={panes[active]?.studyUid || curD.study_uid}
                     onClose={() => setShow3d(false)} />
@@ -3972,9 +3956,7 @@ void applyHpSources(rule);
       {settingsOpen && (
         <Suspense fallback={
           <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center",
-                        background: "rgba(0,0,0,0.5)", zIndex: 100, color: "var(--text-secondary)" }}>
-            설정 로딩…
-          </div>
+                        background: "rgba(0,0,0,0.5)", zIndex: 100, color: "var(--text-secondary)" }}>{tr("설정 로딩…")}</div>
         }>
           <SettingsModal role={role} onClose={() => setSettingsOpen(false)} />
         </Suspense>

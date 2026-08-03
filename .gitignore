@@ -32,3 +32,4 @@ backend/cache/
 backend/uvicorn_err.log
 backend/restart.pid
 backend/restart.log
+.i18n_keys.json

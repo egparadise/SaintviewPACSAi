@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { showToast } from "../../lib/toast";
 import { panelFetch } from "../../api";
 import { OrderEntryRis, OrderList, type RisExam, type RisPatient } from "../../components/OrderEntryRis";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공용 헬퍼 위임 — 오류 문구는 기존 형식(`상태코드 상세`) 유지 ──
 const hl7Fetch = <T = unknown,>(path: string, init?: RequestInit) =>
@@ -120,27 +121,27 @@ export function Hl7ConfigSection({ hid }: { hid: number }) {
     catch (e) { setMsg(errMsg(e)); }
   };
 
-  if (!cfg) return <div style={card}>불러오는 중…</div>;
+  if (!cfg) return <div style={card}>{tr("불러오는 중…")}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>🔌 HL7 연동 — MLLP 수신(ADT/ORM) · ORU 발신</div>
+        <div style={{ fontWeight: 700 }}>{tr("🔌 HL7 연동 — MLLP 수신(ADT/ORM) · ORU 발신")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       <Row label="활성(enabled)">
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>기본 off — 켠 뒤 리스너를 시작하세요</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("기본 off — 켠 뒤 리스너를 시작하세요")}</span>
       </Row>
       <Row label="수신 포트(MLLP)"><input style={{ ...inp, width: 110 }} value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: e.target.value })} placeholder="2575" /></Row>
-      <Row label="수신기관 매핑(MSH-5/6)"><input style={{ ...inp, flex: 1 }} value={cfg.facility} onChange={(e) => setCfg({ ...cfg, facility: e.target.value })} placeholder="포트 공유 시 병원 구분값 (예: SAINTVIEW)" /></Row>
+      <Row label="수신기관 매핑(MSH-5/6)"><input style={{ ...inp, flex: 1 }} value={cfg.facility} onChange={(e) => setCfg({ ...cfg, facility: e.target.value })} placeholder={tr("포트 공유 시 병원 구분값 (예: SAINTVIEW)")} /></Row>
       <Row label="ORU 대상 host:port">
-        <input style={{ ...inp, flex: 1 }} value={cfg.oruHost} onChange={(e) => setCfg({ ...cfg, oruHost: e.target.value })} placeholder="EMR 수신 서버 IP" />
+        <input style={{ ...inp, flex: 1 }} value={cfg.oruHost} onChange={(e) => setCfg({ ...cfg, oruHost: e.target.value })} placeholder={tr("EMR 수신 서버 IP")} />
         <input style={{ ...inp, width: 90 }} value={cfg.oruPort} onChange={(e) => setCfg({ ...cfg, oruPort: e.target.value })} placeholder="port" />
       </Row>
       <Row label="전송 재시도 최대"><input style={{ ...inp, width: 70 }} value={cfg.retryMax} onChange={(e) => setCfg({ ...cfg, retryMax: e.target.value })} /></Row>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="primary" onClick={save}>저장</button>
+        <button className="primary" onClick={save}>{tr("저장")}</button>
         <button onClick={toggleListener} disabled={!cfg.port}>
           {listenerRunning ? "리스너 중지" : "리스너 시작"} (포트 {cfg.port || "—"})
         </button>
@@ -148,23 +149,23 @@ export function Hl7ConfigSection({ hid }: { hid: number }) {
           {listenerRunning ? "● 수신 중" : "○ 중지됨"}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={syncOru} title="확정 판독 중 ORU 미적재분을 outbox에 적재">확정판독 ORU 적재</button>
+        <button onClick={syncOru} title={tr("확정 판독 중 ORU 미적재분을 outbox에 적재")}>{tr("확정판독 ORU 적재")}</button>
       </div>
       <Msg text={msg} />
 
-      <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>📥 수신함(inbox) — ADT=환자 캐시 · ORM=오더 생성</div>
+      <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>{tr("📥 수신함(inbox) — ADT=환자 캐시 · ORM=오더 생성")}</div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th>#</th><th>타입</th><th>환자ID</th><th>Accession</th><th>상태</th><th>수신시각</th><th>오류/조치</th></tr></thead>
+          <thead><tr><th>#</th><th>{tr("타입")}</th><th>{tr("환자ID")}</th><th>Accession</th><th>{tr("상태")}</th><th>{tr("수신시각")}</th><th>{tr("오류/조치")}</th></tr></thead>
           <tbody>
-            {inbox.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>수신 메시지 없음</td></tr>}
+            {inbox.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>{tr("수신 메시지 없음")}</td></tr>}
             {inbox.map((m) => (
               <tr key={m.id}>
                 <td>{m.id}</td><td>{m.msg_type}</td><td>{m.patient_id || "—"}</td><td>{m.accession || "—"}</td>
                 <td><StatusBadge s={m.status} /></td><td>{fmtTs(m.created_at)}</td>
                 <td>
                   {m.error && <span style={{ color: "var(--danger,#f87171)" }}>{m.error.slice(0, 60)} </span>}
-                  {m.status === "error" && <button onClick={() => reprocess(m.id)}>재처리</button>}
+                  {m.status === "error" && <button onClick={() => reprocess(m.id)}>{tr("재처리")}</button>}
                 </td>
               </tr>
             ))}
@@ -172,17 +173,17 @@ export function Hl7ConfigSection({ hid }: { hid: number }) {
         </table>
       </div>
 
-      <div style={{ fontWeight: 600, fontSize: 12.5 }}>📤 발신함(outbox) — 판독 확정 ORU^R01</div>
+      <div style={{ fontWeight: 600, fontSize: 12.5 }}>{tr("📤 발신함(outbox) — 판독 확정 ORU^R01")}</div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th>#</th><th>타입</th><th>환자ID</th><th>Accession</th><th>상태</th><th>재시도</th><th>조치</th></tr></thead>
+          <thead><tr><th>#</th><th>{tr("타입")}</th><th>{tr("환자ID")}</th><th>Accession</th><th>{tr("상태")}</th><th>{tr("재시도")}</th><th>{tr("조치")}</th></tr></thead>
           <tbody>
-            {outbox.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>발신 메시지 없음</td></tr>}
+            {outbox.length === 0 && <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>{tr("발신 메시지 없음")}</td></tr>}
             {outbox.map((m) => (
               <tr key={m.id}>
                 <td>{m.id}</td><td>{m.msg_type}</td><td>{m.patient_id || "—"}</td><td>{m.accession || "—"}</td>
                 <td><StatusBadge s={m.status} /></td><td>{m.retry_count ?? 0}</td>
-                <td>{m.status !== "sent" && <button onClick={() => sendOut(m.id)}>전송</button>}</td>
+                <td>{m.status !== "sent" && <button onClick={() => sendOut(m.id)}>{tr("전송")}</button>}</td>
               </tr>
             ))}
           </tbody>
@@ -221,28 +222,28 @@ export function RemoteReadingSection({ hid }: { hid: number }) {
     setCfg((c) => c && { ...c, apiKey: Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("") });
   };
 
-  if (!cfg) return <div style={card}>불러오는 중…</div>;
+  if (!cfg) return <div style={card}>{tr("불러오는 중…")}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontWeight: 700 }}>🩺 원격판독 판독문 입력 창구 — 병원별 API 키</div>
+      <div style={{ fontWeight: 700 }}>{tr("🩺 원격판독 판독문 입력 창구 — 병원별 API 키")}</div>
       <Row label="활성(enabled)"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /></Row>
       <Row label="API 키">
         <input style={{ ...inp, flex: 1 }} type={showKey ? "text" : "password"} value={cfg.apiKey}
-               onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })} placeholder="원격판독사에 전달할 비밀 키" />
+               onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })} placeholder={tr("원격판독사에 전달할 비밀 키")} />
         <button onClick={() => setShowKey(!showKey)}>{showKey ? "숨김" : "표시"}</button>
-        <button onClick={genKey}>키 생성</button>
+        <button onClick={genKey}>{tr("키 생성")}</button>
       </Row>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="primary" onClick={save}>저장</button>
-        <button onClick={load}>새로고침</button>
+        <button className="primary" onClick={save}>{tr("저장")}</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
       <Msg text={msg} />
-      <div style={{ fontWeight: 600, fontSize: 12.5 }}>최근 수신 판독문</div>
+      <div style={{ fontWeight: 600, fontSize: 12.5 }}>{tr("최근 수신 판독문")}</div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th>#</th><th>Accession</th><th>판독의</th><th>수신시각</th></tr></thead>
+          <thead><tr><th>#</th><th>Accession</th><th>{tr("판독의")}</th><th>{tr("수신시각")}</th></tr></thead>
           <tbody>
-            {recent.length === 0 && <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>수신 내역 없음</td></tr>}
+            {recent.length === 0 && <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>{tr("수신 내역 없음")}</td></tr>}
             {recent.map((m) => (
               <tr key={m.id}>
                 <td>{m.id}</td><td>{m.accession || "—"}</td>
@@ -290,27 +291,25 @@ export function MwlSection({ hid }: { hid: number }) {
     } catch (e) { setMsg(errMsg(e)); }
   };
 
-  if (!cfg) return <div style={card}>불러오는 중…</div>;
+  if (!cfg) return <div style={card}>{tr("불러오는 중…")}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10, maxWidth: 640 }}>
-      <div style={{ fontWeight: 700 }}>📡 MWL(Modality Worklist) SCP — 장비에 환자·검사 정보 주기</div>
+      <div style={{ fontWeight: 700 }}>{tr("📡 MWL(Modality Worklist) SCP — 장비에 환자·검사 정보 주기")}</div>
       <Row label="활성(enabled)"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /></Row>
       <Row label="포트"><input style={{ ...inp, width: 110 }} value={cfg.port} onChange={(e) => setCfg({ ...cfg, port: e.target.value })} placeholder="10450" /></Row>
       <Row label="AE Title"><input style={{ ...inp, width: 170 }} value={cfg.aet} onChange={(e) => setCfg({ ...cfg, aet: e.target.value })} /></Row>
       <Row label="등록 장비만 허용">
         <input type="checkbox" checked={cfg.registeredOnly} onChange={(e) => setCfg({ ...cfg, registeredOnly: e.target.checked })} />
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>병원 등록 Modality(modality.nodes)의 AET에서 온 C-FIND만 응답</span>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("병원 등록 Modality(modality.nodes)의 AET에서 온 C-FIND만 응답")}</span>
       </Row>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="primary" onClick={save}>저장</button>
+        <button className="primary" onClick={save}>{tr("저장")}</button>
         <button onClick={toggle}>{status?.running ? "SCP 중지" : "SCP 시작"}</button>
         <span style={{ fontSize: 12, color: status?.running ? "var(--success,#4ade80)" : "var(--text-secondary)" }}>
           {status?.running ? `● 가동 중 — AET=${status.aet} Port=${status.port}` : "○ 중지됨"}
         </span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        미완료(scheduled) 오더를 장비 C-FIND 질의(Modality·AET·예정일)로 응답합니다. HL7 ORM 오더와 가상환자 오더가 조회 대상입니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("미완료(scheduled) 오더를 장비 C-FIND 질의(Modality·AET·예정일)로 응답합니다. HL7 ORM 오더와 가상환자 오더가 조회 대상입니다.")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -378,10 +377,10 @@ export function TestgenSection({ hid }: { hid: number }) {
     return `✅ 환자 ${r.patient_key} — 오더 ${r.orders.length}건 저장 (MWL 조회 가능): ${r.orders.map((o) => o.accession_no).join(", ")}`;
   };
 
-  if (!cfg) return <div style={card}>불러오는 중…</div>;
+  if (!cfg) return <div style={card}>{tr("불러오는 중…")}</div>;
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontWeight: 700 }}>🧪 가상 환자 생성기 — 오더 입력(RIS) · 생성 오더는 MWL 조회 대상</div>
+      <div style={{ fontWeight: 700 }}>{tr("🧪 가상 환자 생성기 — 오더 입력(RIS) · 생성 오더는 MWL 조회 대상")}</div>
 
       {/* 좌: 오더 입력 5컬럼 · 우: 등록된 오더/장비 가져간 오더 목록(수정·삭제·실시간) */}
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -396,7 +395,7 @@ export function TestgenSection({ hid }: { hid: number }) {
 
       {/* 생성 규칙 (프리픽스/자릿수) — 접이식 유지, 위 Generate 링크가 이 규칙 사용 */}
       <details style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-        <summary style={{ fontSize: 12.5, cursor: "pointer", color: "var(--text-secondary)" }}>⚙ 생성 규칙 저장 (프리픽스/자릿수)</summary>
+        <summary style={{ fontSize: 12.5, cursor: "pointer", color: "var(--text-secondary)" }}>{tr("⚙ 생성 규칙 저장 (프리픽스/자릿수)")}</summary>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
           <Row label="환자ID 프리픽스"><input style={{ ...inp, width: 90 }} value={cfg.pidPrefix} onChange={(e) => setCfg({ ...cfg, pidPrefix: e.target.value })} /></Row>
           <Row label="ID 자릿수"><input style={{ ...inp, width: 60 }} value={cfg.pidDigits} onChange={(e) => setCfg({ ...cfg, pidDigits: e.target.value })} /></Row>
@@ -410,8 +409,8 @@ export function TestgenSection({ hid }: { hid: number }) {
           <Row label="Body Part(콤마)"><input style={{ ...inp, flex: 1 }} value={cfg.bodyParts} onChange={(e) => setCfg({ ...cfg, bodyParts: e.target.value })} placeholder="CHEST,ABDOMEN" /></Row>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button onClick={saveCfg}>생성 규칙 저장</button>
-          <button onClick={load}>다시 불러오기</button>
+          <button onClick={saveCfg}>{tr("생성 규칙 저장")}</button>
+          <button onClick={load}>{tr("다시 불러오기")}</button>
         </div>
       </details>
     </div>

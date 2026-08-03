@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { PERM_DENIED_TIP, api, hasPerm, loadPermMe, type PermMe, type PhraseRow, type Report, type StudyDetail } from "../api";
 import { dictationLabel, useDictation } from "../lib/useDictation";
 import { MicIcon } from "./MicIcon";
+import { t as tr } from "../lib/i18n";
 
 export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   detail: StudyDetail;
@@ -131,7 +132,7 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
       const r = await api.reports(detail.id);
       setVreports(r.items);
       setReadingTouched(false);
-      if (rdOpts.save_alert) alert("리포트가 저장되었습니다");
+      if (rdOpts.save_alert) alert(tr("리포트가 저장되었습니다"));
       else onStatus("리포트 저장됨");
     } catch (e) {
       alert(e instanceof Error ? e.message : "저장 실패");
@@ -304,19 +305,19 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
         <button style={{ padding: "0 6px" }} onClick={() => setFontPx((f) => Math.max(10, f - 1))}>−</button>
         <span>{fontPx}px</span>
         <button style={{ padding: "0 6px" }} onClick={() => setFontPx((f) => Math.min(22, f + 1))}>＋</button>
-        <label title="CVR Notice — critical 소견 경고 표시" style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        <label title={tr("CVR Notice — critical 소견 경고 표시")} style={{ display: "flex", gap: 3, alignItems: "center" }}>
           <input type="checkbox" checked={!!rdOpts.cvr_notice}
                  onChange={(e) => setRdOpts((p) => ({ ...p, cvr_notice: e.target.checked }))} />
           CVR
         </label>
         <span style={{ flex: 1 }} />
-        <button title="이전 과거검사 비교" style={{ padding: "0 7px" }}
+        <button title={tr("이전 과거검사 비교")} style={{ padding: "0 7px" }}
                 disabled={!relExams.length}
                 onClick={() => onLoadPrior(relExams[0].id)}>◀</button>
-        <button title="다음 과거검사 비교" style={{ padding: "0 7px" }}
+        <button title={tr("다음 과거검사 비교")} style={{ padding: "0 7px" }}
                 disabled={relExams.length < 2}
                 onClick={() => onLoadPrior(relExams[1].id)}>▶</button>
-        <button title="서버 저장본으로 되돌리기" style={{ padding: "1px 7px" }}
+        <button title={tr("서버 저장본으로 되돌리기")} style={{ padding: "1px 7px" }}
                 onClick={() => initDockText(report)}>Reset</button>
         {/* report.write 게이트(레인 W) + 확정 잠금 — 서버 403/409 가 최종 방어선, UI 는 비활성+안내 툴팁(UX) */}
         <button className="primary" title={locked ? LOCK_TIP : canWrite ? `저장 (${rdOpts.key_save ?? "Ctrl+S"})` : PERM_DENIED_TIP}
@@ -331,13 +332,11 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
       {finalizedDock && (
         <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 8px",
                       borderBottom: "1px solid var(--border)", fontSize: 11 }}>
-          <label title="잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다"
+          <label title={tr("잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다")}
                  style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-            <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />
-            🔒 판독 확정(잠금) — 변경 금지
-          </label>
+            <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />{tr("🔒 판독 확정(잠금) — 변경 금지")}</label>
           {locked && (
-            <span style={{ color: "var(--text-secondary)" }}>잠금 상태 — 판독을 변경할 수 없습니다</span>
+            <span style={{ color: "var(--text-secondary)" }}>{tr("잠금 상태 — 판독을 변경할 수 없습니다")}</span>
           )}
         </div>
       )}
@@ -400,19 +399,17 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
             </div>
           )}
           <div style={{ padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)",
-                        background: "var(--bg-elevated)", borderTop: "1px solid var(--border)" }}>
-            Prior Studies (클릭=판독 펼침 · 썸네일 클릭=비교 로드)
-          </div>
+                        background: "var(--bg-elevated)", borderTop: "1px solid var(--border)" }}>{tr("Prior Studies (클릭=판독 펼침 · 썸네일 클릭=비교 로드)")}</div>
           {relExams.map((e) => (
             <div key={e.id}>
               <div onClick={() => togglePriorReport(e.id)}
-                   title="클릭=이 검사의 판독 내용 펼침/접기 · 썸네일 클릭=활성 페인에 비교 로드"
+                   title={tr("클릭=이 검사의 판독 내용 펼침/접기 · 썸네일 클릭=활성 페인에 비교 로드")}
                    style={{ padding: "4px 8px", fontSize: 11.5, cursor: "pointer", borderBottom: "1px solid #24282d",
                             display: "flex", alignItems: "center", gap: 7 }}
                    onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                    onMouseLeave={(ev) => (ev.currentTarget.style.background = "")}>
                 {priorThumbs[e.id]
-                  ? <img src={priorThumbs[e.id]} alt="" title="비교 로드 — 활성 페인에 표시"
+                  ? <img src={priorThumbs[e.id]} alt="" title={tr("비교 로드 — 활성 페인에 표시")}
                          onClick={(ev) => { ev.stopPropagation(); onLoadPrior(e.id); }}
                          style={{ width: 58, height: 44, objectFit: "cover",
                           borderRadius: 2, border: "1px solid var(--border)", background: "#000", flexShrink: 0 }} />
@@ -428,8 +425,8 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
               {priorOpen === e.id && (
                 <div style={{ padding: "6px 10px 8px 14px", fontSize: 11, lineHeight: 1.55, background: "var(--bg-canvas)",
                               borderBottom: "1px solid #24282d", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                  {priorRpt[e.id] === "loading" && <span style={{ color: "var(--text-secondary)" }}>판독 불러오는 중…</span>}
-                  {priorRpt[e.id] === "none" && <span style={{ color: "var(--text-secondary)" }}>이 검사의 판독이 없습니다</span>}
+                  {priorRpt[e.id] === "loading" && <span style={{ color: "var(--text-secondary)" }}>{tr("판독 불러오는 중…")}</span>}
+                  {priorRpt[e.id] === "none" && <span style={{ color: "var(--text-secondary)" }}>{tr("이 검사의 판독이 없습니다")}</span>}
                   {typeof priorRpt[e.id] === "object" && (
                     <>
                       <div style={{ color: "var(--text-secondary)", fontWeight: 700, marginBottom: 2 }}>Reading</div>

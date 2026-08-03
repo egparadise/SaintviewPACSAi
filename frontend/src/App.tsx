@@ -18,6 +18,7 @@ import { CollabGlobal } from "./components/CollabGlobal";
 import { collab } from "./lib/collab";
 import { MobileCapture } from "./pages/MobileCapture";
 import { AdminConsole } from "./pages/AdminConsole";
+import { t as tr } from "./lib/i18n";
 
 // 이 오리진의 포털 역할(포트 기반) — 모듈 로드 시 1회 판정
 const PORTAL = portalRole();
@@ -77,15 +78,14 @@ function AdminLogin({ onLogin, onBack }: { onLogin: (r: LoginResp) => void; onBa
       <form onSubmit={submit} style={{ background: "var(--bg-panel)", padding: 32, borderRadius: 8,
                                        border: "1px solid var(--border)", width: 320, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>Saintview <span style={{ color: "var(--ai)" }}>PACS AI</span></div>
-        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>관리자 로그인</div>
-        <input placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <input placeholder="비밀번호" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>{tr("관리자 로그인")}</div>
+        <input placeholder={tr("아이디")} value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input placeholder={tr("비밀번호")} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> 자동 로그인
-        </label>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />{tr("자동 로그인")}</label>
         {error && <div style={{ color: "var(--stat-emergency)", fontSize: 12 }}>{error}</div>}
-        <button className="primary" type="submit">로그인</button>
-        <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>← 홈으로</button>
+        <button className="primary" type="submit">{tr("로그인")}</button>
+        <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>{tr("← 홈으로")}</button>
       </form>
     </div>
   );
@@ -167,9 +167,9 @@ export default function App() {
           <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>
             {session.name} 님, 작업 화면은 각 포털에서 열립니다.
           </div>
-          <button className="primary" onClick={() => gotoPortal("admin")}>관리자 포털로 이동</button>
-          <button onClick={() => gotoPortal("client")}>Client 뷰어 포털로 이동</button>
-          <button onClick={logout} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>로그아웃</button>
+          <button className="primary" onClick={() => gotoPortal("admin")}>{tr("관리자 포털로 이동")}</button>
+          <button onClick={() => gotoPortal("client")}>{tr("Client 뷰어 포털로 이동")}</button>
+          <button onClick={logout} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>{tr("로그아웃")}</button>
         </div>
       </div>
     );
@@ -207,12 +207,10 @@ export default function App() {
         <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{session.name} [{session.role}]</span>
         {/* 다학제 협진 — 여기는 친구·메신저(항상 접근 가능)만 연다.
             실제 영상 공유(세션)는 뷰어 창에서 [협진] 버튼으로 시작한다. */}
-        <button onClick={() => setCollabOpen((v) => !v)} title="다학제 협진 — 친구 · 메신저"
-                style={collabOpen ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : undefined}>
-          협진
-        </button>
-        <button onClick={() => setSettingsOpen(true)}>설정</button>
-        <button onClick={logout}>로그아웃</button>
+        <button onClick={() => setCollabOpen((v) => !v)} title={tr("다학제 협진 — 친구 · 메신저")}
+                style={collabOpen ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : undefined}>{tr("협진")}</button>
+        <button onClick={() => setSettingsOpen(true)}>{tr("설정")}</button>
+        <button onClick={logout}>{tr("로그아웃")}</button>
       </header>
       <CollabGlobal open={collabOpen} onClose={() => setCollabOpen(false)} />
       {settingsOpen && <SettingsModal role={session.role} scope="viewer" onClose={() => setSettingsOpen(false)} />}

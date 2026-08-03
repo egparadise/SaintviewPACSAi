@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import invizLogo from "../assets/inviz-logo.png";
 import heroLaptop from "../assets/hero-laptop.png";
+import { t as tr } from "../lib/i18n";
 
 const INVIZ_URL = "https://www.inviz.co.kr/";
 
@@ -95,29 +96,24 @@ export function Landing({ onSignup, onAdminLogin, onClientLogin }: {
   return (
     <div className="lp">
       <nav className="lp-nav">
-        <a className="lp-logo" href={INVIZ_URL} target="_blank" rel="noopener noreferrer" title="Inviz 홈페이지로 이동">
+        <a className="lp-logo" href={INVIZ_URL} target="_blank" rel="noopener noreferrer" title={tr("Inviz 홈페이지로 이동")}>
           <img src={invizLogo} alt="Inviz" />
         </a>
         <div className="lp-navbtns">
           <button className="lp-btn primary" onClick={onSignup} disabled={!canSignup}
-                  title={canSignup ? "" : "현재 온라인 가입이 비활성화되어 있습니다"}>병원 가입</button>
-          <button className="lp-btn" onClick={onClientLogin}>Client 뷰어 접속</button>
-          <button className="lp-btn" onClick={onAdminLogin}>관리자 로그인</button>
+                  title={canSignup ? "" : "현재 온라인 가입이 비활성화되어 있습니다"}>{tr("병원 가입")}</button>
+          <button className="lp-btn" onClick={onClientLogin}>{tr("Client 뷰어 접속")}</button>
+          <button className="lp-btn" onClick={onAdminLogin}>{tr("관리자 로그인")}</button>
         </div>
       </nav>
 
       <section className="lp-hero">
         <div>
-          <span className="lp-badge">✨ AI로 연결된 스마트 Web PACS Platform</span>
+          <span className="lp-badge">{tr("✨ AI로 연결된 스마트 Web PACS Platform")}</span>
           <h1 className="lp-title">Saintview <span className="grad">PACS AI</span></h1>
-          <p className="lp-sub">
-            웹 기반 PACS + AI 판독 보조 플랫폼 —<br />
-            DICOM 수신 · 보관 · 조회와 Structured Report 초안 생성을 하나로
-          </p>
+          <p className="lp-sub">{tr("웹 기반 PACS + AI 판독 보조 플랫폼 —")}<br />{tr("DICOM 수신 · 보관 · 조회와 Structured Report 초안 생성을 하나로")}</p>
           {!canSignup && (
-            <div style={{ fontSize: 12.5, color: "#a1435a", marginTop: 12 }}>
-              현재 온라인 가입이 비활성화되어 있습니다 — 관리자에게 문의하세요.
-            </div>
+            <div style={{ fontSize: 12.5, color: "#a1435a", marginTop: 12 }}>{tr("현재 온라인 가입이 비활성화되어 있습니다 — 관리자에게 문의하세요.")}</div>
           )}
         </div>
         <div className="lp-hero-art"><HeroArt /></div>
@@ -142,7 +138,7 @@ export function Landing({ onSignup, onAdminLogin, onClientLogin }: {
 
       <footer className="lp-foot">
         <div className="lp-foot-t">Smarter Workflow, <span className="grad">Better Care</span></div>
-        <div className="lp-foot-s">Saintview PACS AI는 의료진의 더 나은 진단과 효율적인 워크플로우를 지원합니다.</div>
+        <div className="lp-foot-s">{tr("Saintview PACS AI는 의료진의 더 나은 진단과 효율적인 워크플로우를 지원합니다.")}</div>
       </footer>
     </div>
   );

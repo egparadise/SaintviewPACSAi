@@ -10,6 +10,7 @@ import {
 import { UsersPanel } from "./ServerAdmin";
 import { pendMsg } from "./ServerMaintenance";
 import { MicIcon } from "../../components/MicIcon";
+import { t as tr } from "../../lib/i18n";
 
 // ── 공통 소형 UI (기존 관리 콘솔 다크 테마·표 스타일 유지) ──
 const card: React.CSSProperties = { background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 };
@@ -59,9 +60,9 @@ export function DbSchemaPanel() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>🗄️ DB 구조 (읽기 전용)</div>
+        <div style={{ fontWeight: 700 }}>{tr("🗄️ DB 구조 (읽기 전용)")}</div>
         <div style={{ flex: 1 }} />
-        <button onClick={load}>새로고침</button>
+        <button onClick={load}>{tr("새로고침")}</button>
       </div>
 
       {!schema ? <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg || "확인 중…"}</div> : (
@@ -76,7 +77,7 @@ export function DbSchemaPanel() {
                 <span style={{ color: "var(--text-secondary)", fontSize: 11.5 }}>{t.rows.toLocaleString()}행</span>
               </div>
             ))}
-            {schema.tables.length === 0 && <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>테이블이 없습니다.</div>}
+            {schema.tables.length === 0 && <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>{tr("테이블이 없습니다.")}</div>}
           </div>
           {/* 컬럼 상세 */}
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -86,29 +87,27 @@ export function DbSchemaPanel() {
                 {/* 표가 카드 폭을 넘으면 가로 스크롤 — 내용이 상자 밖으로 튀어나오지 않게 */}
                 <div style={{ overflowX: "auto" }}>
                 <table className="grid-table" style={{ fontSize: 12 }}>
-                  <thead><tr><th>컬럼</th><th>타입</th></tr></thead>
+                  <thead><tr><th>{tr("컬럼")}</th><th>{tr("타입")}</th></tr></thead>
                   <tbody>{sel.columns.map((c) => <tr key={c.name}><td>{c.name}</td><td><code style={{ fontSize: 11.5 }}>{c.type}</code></td></tr>)}</tbody>
                 </table>
                 </div>
               </>
-            ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>좌측에서 테이블을 선택하면 컬럼·행수를 표시합니다.</div>}
+            ) : <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("좌측에서 테이블을 선택하면 컬럼·행수를 표시합니다.")}</div>}
           </div>
         </div>
       )}
 
       {/* DB 도구 열기 — server.dbtool(path). 초기값=저장 경로 또는 자동 탐지 기본값, [찾기]=서버 파일 탐색 */}
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)", flexShrink: 0 }}>DB 도구 경로(서버측)</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)", flexShrink: 0 }}>{tr("DB 도구 경로(서버측)")}</span>
         <input style={{ ...inp, flex: 1, minWidth: 220 }} value={toolPath} onChange={(e) => { setToolPath(e.target.value); setToolHint(""); }}
-               placeholder="예: C:\\Program Files\\DB Browser for SQLite\\DB Browser for SQLite.exe" />
-        <button onClick={() => setPickerOpen(true)} title="서버 컴퓨터의 파일 탐색기로 실행 파일(.exe)을 선택합니다">찾기…</button>
-        <button onClick={saveTool}>경로 저장</button>
-        <button className="primary" onClick={openTool}>DB 도구 열기</button>
+               placeholder={tr("예: C:\\\\Program Files\\\\DB Browser for SQLite\\\\DB Browser for SQLite.exe")} />
+        <button onClick={() => setPickerOpen(true)} title={tr("서버 컴퓨터의 파일 탐색기로 실행 파일(.exe)을 선택합니다")}>{tr("찾기…")}</button>
+        <button onClick={saveTool}>{tr("경로 저장")}</button>
+        <button className="primary" onClick={openTool}>{tr("DB 도구 열기")}</button>
       </div>
       {toolHint && <div style={{ fontSize: 11, color: "var(--accent)" }}>{toolHint}</div>}
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        구조 조회는 읽기 전용(introspection)입니다. [DB 도구 열기]는 서버 컴퓨터에서 설정된 외부 프로그램을 실행합니다(원격 브라우저에는 표시되지 않음).
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("구조 조회는 읽기 전용(introspection)입니다. [DB 도구 열기]는 서버 컴퓨터에서 설정된 외부 프로그램을 실행합니다(원격 브라우저에는 표시되지 않음).")}</div>
       <Msg text={msg} />
       {pickerOpen && (
         <ExePickerModal
@@ -151,10 +150,10 @@ function ExePickerModal({ initial, onPick, onClose }: {
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
                     width: "min(520px, 92vw)", height: "min(480px, 82vh)", display: "flex",
                     flexDirection: "column", padding: 12, gap: 8 }}>
-        <b style={{ fontSize: 13 }}>🗄️ DB 도구 실행 파일 선택 (서버 컴퓨터)</b>
+        <b style={{ fontSize: 13 }}>{tr("🗄️ DB 도구 실행 파일 선택 (서버 컴퓨터)")}</b>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button onClick={() => nav(parent ?? "")} disabled={!path}
-                  title={parent ? "상위 폴더로" : "드라이브 목록으로"} style={{ padding: "2px 8px", fontSize: 12 }}>⬆ 상위</button>
+                  title={parent ? "상위 폴더로" : "드라이브 목록으로"} style={{ padding: "2px 8px", fontSize: 12 }}>{tr("⬆ 상위")}</button>
           <code title={path} style={{ flex: 1, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {path || "(드라이브를 선택하세요)"}
           </code>
@@ -162,7 +161,7 @@ function ExePickerModal({ initial, onPick, onClose }: {
         {err && <div style={{ fontSize: 11.5, color: "var(--stat-emergency,#f87171)" }}>{err}</div>}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
           {loading ? (
-            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>불러오는 중…</div>
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>{tr("불러오는 중…")}</div>
           ) : (
             <>
               {dirs.map((d) => (
@@ -179,17 +178,15 @@ function ExePickerModal({ initial, onPick, onClose }: {
                 </div>
               ))}
               {dirs.length === 0 && files.length === 0 && (
-                <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>하위 폴더·실행 파일 없음</div>
+                <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>{tr("하위 폴더·실행 파일 없음")}</div>
               )}
             </>
           )}
         </div>
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
-            .exe 클릭으로 선택 — [이 파일 선택] 후 [경로 저장]으로 확정
-          </span>
-          <button onClick={onClose} style={{ fontSize: 12 }}>취소</button>
-          <button className="primary" disabled={!picked} onClick={() => onPick(picked)} style={{ fontSize: 12 }}>이 파일 선택</button>
+          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>{tr(".exe 클릭으로 선택 — [이 파일 선택] 후 [경로 저장]으로 확정")}</span>
+          <button onClick={onClose} style={{ fontSize: 12 }}>{tr("취소")}</button>
+          <button className="primary" disabled={!picked} onClick={() => onPick(picked)} style={{ fontSize: 12 }}>{tr("이 파일 선택")}</button>
         </div>
       </div>
     </div>
@@ -259,16 +256,16 @@ function SignupFieldsSection({ kind, title }: { kind: SignupKind; title: string 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 12.5 }}>{title}</div>
         <div style={{ flex: 1 }} />
-        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+        <button className="primary" onClick={save} disabled={!dirty}>{tr("저장")}</button>
       </div>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th>입력 항목</th><th style={{ textAlign: "center" }}>표시</th><th style={{ textAlign: "center" }}>필수</th></tr></thead>
+        <thead><tr><th>{tr("입력 항목")}</th><th style={{ textAlign: "center" }}>{tr("표시")}</th><th style={{ textAlign: "center" }}>{tr("필수")}</th></tr></thead>
         <tbody>
           {fields.map((f, i) => {
             const locked = LOCKED_FIELD_KEYS.has(f.key);
             return (
               <tr key={f.key}>
-                <td>{f.label} {locked && <span title="기본 필드 — 표시 해제 불가" style={{ fontSize: 11 }}>🔒</span>}</td>
+                <td>{f.label} {locked && <span title={tr("기본 필드 — 표시 해제 불가")} style={{ fontSize: 11 }}>🔒</span>}</td>
                 <td style={{ textAlign: "center" }}>
                   <input type="checkbox" checked={f.enabled} disabled={locked}
                          onChange={(e) => edit(i, { enabled: e.target.checked, ...(e.target.checked ? {} : { required: false }) })} />
@@ -290,7 +287,7 @@ function SignupFieldsSection({ kind, title }: { kind: SignupKind; title: string 
 export function SignupFieldsPanel() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontWeight: 700 }}>📝 가입 환경 설정 — 입력 항목 (병원 / Client / Modality)</div>
+      <div style={{ fontWeight: 700 }}>{tr("📝 가입 환경 설정 — 입력 항목 (병원 / Client / Modality)")}</div>
       <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
         각 등록 화면에 표시할 입력 항목과 필수 여부를 설정합니다. 🔒 기본 필드는 표시 해제할 수 없습니다.
         미설정 시 화면은 기존 기본 폼을 그대로 사용합니다.
@@ -321,17 +318,15 @@ export function AdminAccountsPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>🛡️ 관리자 계정 등록 (전역 admin)</div>
+        <div style={{ fontWeight: 700 }}>{tr("🛡️ 관리자 계정 등록 (전역 admin)")}</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input style={{ ...inp, width: 130 }} placeholder="아이디*" value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
-          <input style={{ ...inp, width: 150 }} type="password" placeholder="비밀번호* (8자+)" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
-          <input style={{ ...inp, width: 120 }} placeholder="표시 이름" value={f.display_name} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
-          <input style={{ ...inp, width: 170 }} placeholder="이메일" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
-          <button className="primary" onClick={create}>＋ 관리자 등록</button>
+          <input style={{ ...inp, width: 130 }} placeholder={tr("아이디*")} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />
+          <input style={{ ...inp, width: 150 }} type="password" placeholder={tr("비밀번호* (8자+)")} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+          <input style={{ ...inp, width: 120 }} placeholder={tr("표시 이름")} value={f.display_name} onChange={(e) => setF({ ...f, display_name: e.target.value })} />
+          <input style={{ ...inp, width: 170 }} placeholder={tr("이메일")} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+          <button className="primary" onClick={create}>{tr("＋ 관리자 등록")}</button>
         </div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          역할 admin · 소속 전역(공용)으로 즉시 생성합니다. 병원 소속 관리자·역할 변경 등 세부 편집은 아래 [계정/역할 관리]에서.
-        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("역할 admin · 소속 전역(공용)으로 즉시 생성합니다. 병원 소속 관리자·역할 변경 등 세부 편집은 아래 [계정/역할 관리]에서.")}</div>
         <Msg text={msg} />
       </div>
       <UsersPanel key={refresh} />
@@ -401,17 +396,17 @@ export function LogsPanel({ hid }: { hid?: number }) {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <input style={{ ...inp, width: 130 }} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="시작일" />
+        <input style={{ ...inp, width: 130 }} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title={tr("시작일")} />
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>~</span>
-        <input style={{ ...inp, width: 130 }} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="종료일" />
-        <input style={{ ...inp, width: 150 }} placeholder="검색어" value={q} onChange={(e) => setQ(e.target.value)}
+        <input style={{ ...inp, width: 130 }} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title={tr("종료일")} />
+        <input style={{ ...inp, width: 150 }} placeholder={tr("검색어")} value={q} onChange={(e) => setQ(e.target.value)}
                onKeyDown={(e) => e.key === "Enter" && load()} />
         <button onClick={load} disabled={busy}>{busy ? "조회 중…" : "조회"}</button>
-        <button onClick={csv} title="현재 필터 조건 그대로 CSV 다운로드">CSV 다운로드</button>
+        <button onClick={csv} title={tr("현재 필터 조건 그대로 CSV 다운로드")}>{tr("CSV 다운로드")}</button>
       </div>
       <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
         <table className="grid-table" style={{ fontSize: 12 }}>
-          <thead><tr><th>시각</th><th>종류</th><th>사용자</th>{!hid && <th>병원</th>}<th>동작</th><th>상세</th></tr></thead>
+          <thead><tr><th>{tr("시각")}</th><th>{tr("종류")}</th><th>{tr("사용자")}</th>{!hid && <th>{tr("병원")}</th>}<th>{tr("동작")}</th><th>{tr("상세")}</th></tr></thead>
           <tbody>
             {items.map((l, i) => (
               <tr key={i}>
@@ -426,9 +421,7 @@ export function LogsPanel({ hid }: { hid?: number }) {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        이벤트(로그인·설정·파괴 작업 감사) / 네트워크(접속·Echo) / DICOM(수신·전송) — 최대 300건 표시, 전체는 [CSV 다운로드].
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("이벤트(로그인·설정·파괴 작업 감사) / 네트워크(접속·Echo) / DICOM(수신·전송) — 최대 300건 표시, 전체는 [CSV 다운로드].")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -598,11 +591,11 @@ export function StatsPanel({ hid }: { hid?: number }) {
           {STAT_GROUPS.filter((g) => !(hid && g.key === "hospital")).map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
         </select>
         <div style={{ flex: 1 }} />
-        <input style={{ ...inp, width: 130 }} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="시작일" />
+        <input style={{ ...inp, width: 130 }} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title={tr("시작일")} />
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>~</span>
-        <input style={{ ...inp, width: 130 }} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="종료일" />
+        <input style={{ ...inp, width: 130 }} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title={tr("종료일")} />
         <button onClick={load} disabled={busy}>{busy ? "조회 중…" : "조회"}</button>
-        <button onClick={xlsx} title="현재 필터 조건 그대로 Excel(.xlsx) 다운로드">Excel 내보내기</button>
+        <button onClick={xlsx} title={tr("현재 필터 조건 그대로 Excel(.xlsx) 다운로드")}>{tr("Excel 내보내기")}</button>
       </div>
 
       {/* 그래프 — 막대(그룹별 검사 수) + 도넛(판독 vs 미판독) · 표는 아래 유지 */}
@@ -615,7 +608,7 @@ export function StatsPanel({ hid }: { hid?: number }) {
             <StatsBarChart rows={cRows} />
           </div>
           <div style={{ flex: "0 1 260px", minWidth: 220, border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px" }}>
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 4 }}>판독 vs 미판독</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 4 }}>{tr("판독 vs 미판독")}</div>
             <StatsDonut reports={sumReports} unreported={sumUnreported} />
           </div>
         </div>
@@ -623,7 +616,7 @@ export function StatsPanel({ hid }: { hid?: number }) {
 
       <div style={{ overflowX: "auto" }}>
       <table className="grid-table" style={{ fontSize: 12.5 }}>
-        <thead><tr><th>구분</th><th>검사</th><th>판독</th><th>미판독</th><th style={{ width: "38%" }}>검사 수(비율)</th></tr></thead>
+        <thead><tr><th>{tr("구분")}</th><th>{tr("검사")}</th><th>{tr("판독")}</th><th>{tr("미판독")}</th><th style={{ width: "38%" }}>{tr("검사 수(비율)")}</th></tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.key}>
@@ -643,9 +636,7 @@ export function StatsPanel({ hid }: { hid?: number }) {
         </tbody>
       </table>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        기간 미지정=전체. 막대는 목록 내 최대 검사 수 기준 상대 비율입니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("기간 미지정=전체. 막대는 목록 내 최대 검사 수 기준 상대 비율입니다.")}</div>
       <Msg text={msg} />
     </div>
   );
@@ -686,38 +677,36 @@ export function AiProvidersPanel() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>🤖 AI 등록 항목 (오픈소스 · 상업 API)</div>
+        <div style={{ fontWeight: 700 }}>{tr("🤖 AI 등록 항목 (오픈소스 · 상업 API)")}</div>
         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10,
-                       background: "var(--accent-subtle)", color: "var(--ai,#a78bfa)", border: "1px solid var(--border)" }}>
-          RAG 분석 연동 — 개발 예정
-        </span>
+                       background: "var(--accent-subtle)", color: "var(--ai,#a78bfa)", border: "1px solid var(--border)" }}>{tr("RAG 분석 연동 — 개발 예정")}</span>
         <div style={{ flex: 1 }} />
-        <button onClick={add}>＋ 추가</button>
-        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+        <button onClick={add}>{tr("＋ 추가")}</button>
+        <button className="primary" onClick={save} disabled={!dirty}>{tr("저장")}</button>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12.5 }}>
-          <thead><tr><th>이름</th><th>종류</th><th>Endpoint</th><th>모델</th><th>키 참조</th><th>사용</th><th>비고</th><th></th></tr></thead>
+          <thead><tr><th>{tr("이름")}</th><th>{tr("종류")}</th><th>Endpoint</th><th>{tr("모델")}</th><th>{tr("키 참조")}</th><th>{tr("사용")}</th><th>{tr("비고")}</th><th></th></tr></thead>
           <tbody>
             {items.map((p, i) => (
               <tr key={i}>
                 <td><input style={{ ...inp, width: 110 }} value={p.name} onChange={(e) => edit(i, { name: e.target.value })} /></td>
                 <td>
                   <select style={{ ...inp, padding: "3px 6px" }} value={p.kind} onChange={(e) => edit(i, { kind: e.target.value as "oss" | "api" })}>
-                    <option value="oss">오픈소스</option>
-                    <option value="api">상업 API</option>
+                    <option value="oss">{tr("오픈소스")}</option>
+                    <option value="api">{tr("상업 API")}</option>
                   </select>
                 </td>
                 <td><input style={{ ...inp, width: 170 }} value={p.endpoint} onChange={(e) => edit(i, { endpoint: e.target.value })} placeholder="http://…" /></td>
                 <td><input style={{ ...inp, width: 120 }} value={p.model} onChange={(e) => edit(i, { model: e.target.value })} /></td>
                 <td><input style={{ ...inp, width: 110 }} value={p.api_key_ref} onChange={(e) => edit(i, { api_key_ref: e.target.value })}
-                           placeholder="키 이름(참조)" title="API 키 원문이 아니라 서버 보안 저장소의 참조 이름을 입력" /></td>
+                           placeholder={tr("키 이름(참조)")} title={tr("API 키 원문이 아니라 서버 보안 저장소의 참조 이름을 입력")} /></td>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={p.enabled} onChange={(e) => edit(i, { enabled: e.target.checked })} /></td>
                 <td><input style={{ ...inp, width: 120 }} value={p.note} onChange={(e) => edit(i, { note: e.target.value })} /></td>
-                <td><button onClick={() => del(i)}>삭제</button></td>
+                <td><button onClick={() => del(i)}>{tr("삭제")}</button></td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>등록된 AI 항목이 없습니다 — [＋ 추가] 후 저장하세요.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={8} style={{ color: "var(--text-secondary)" }}>{tr("등록된 AI 항목이 없습니다 — [＋ 추가] 후 저장하세요.")}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -798,10 +787,10 @@ export function SttServerPanel() {
   return (
     <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700 }}>🎙 AI 음성 판독 (STT) — 서버 엔진</div>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>OpenAI Whisper(로컬/API)·브라우저 — 전역 설정, 모든 병원·Client 공통</span>
+        <div style={{ fontWeight: 700 }}>{tr("🎙 AI 음성 판독 (STT) — 서버 엔진")}</div>
+        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("OpenAI Whisper(로컬/API)·브라우저 — 전역 설정, 모든 병원·Client 공통")}</span>
         <div style={{ flex: 1 }} />
-        <button className="primary" onClick={save} disabled={!dirty}>저장</button>
+        <button className="primary" onClick={save} disabled={!dirty}>{tr("저장")}</button>
       </div>
 
       {stat && (
@@ -812,19 +801,19 @@ export function SttServerPanel() {
           {badge(stat.available.faster_whisper, "faster-whisper")}
           {badge(stat.available.openai_whisper, "openai-whisper")}
           {badge(stat.available.openai_api_key, "OPENAI_API_KEY")}
-          <button onClick={loadStatus} style={{ padding: "1px 8px", fontSize: 11 }}>새로고침</button>
+          <button onClick={loadStatus} style={{ padding: "1px 8px", fontSize: 11 }}>{tr("새로고침")}</button>
         </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", maxWidth: 560 }}>
-        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>엔진</span>
+        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{tr("엔진")}</span>
         <select style={{ ...inp, padding: "5px 8px" }} value={engine}
                 onChange={(e) => { setEngine(e.target.value); setDirty(true); }}>
-          <option value="browser">브라우저 내장 (Web Speech — Client 로컬, 서버 미전송)</option>
-          <option value="whisper_local">Whisper 로컬 (오픈소스 · 온프레미스 · PHI 안전)</option>
-          <option value="openai_api">OpenAI API (whisper-1 · 음성 외부 전송)</option>
+          <option value="browser">{tr("브라우저 내장 (Web Speech — Client 로컬, 서버 미전송)")}</option>
+          <option value="whisper_local">{tr("Whisper 로컬 (오픈소스 · 온프레미스 · PHI 안전)")}</option>
+          <option value="openai_api">{tr("OpenAI API (whisper-1 · 음성 외부 전송)")}</option>
         </select>
-        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>모델</span>
+        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{tr("모델")}</span>
         <input style={inp} value={model} onChange={(e) => { setModel(e.target.value); setDirty(true); }}
                placeholder={engine === "openai_api" ? "whisper-1" : "base / small / medium / large-v3"} />
       </div>
@@ -841,10 +830,8 @@ export function SttServerPanel() {
       </div>
 
       <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-        · <b>Whisper 로컬 설치</b>: 서버에서 <code>pip install faster-whisper</code>(권장) 또는 <code>pip install openai-whisper</code>(+ffmpeg) 후 [새로고침].<br />
-        · <b>OpenAI API</b>: 서버 환경변수 <code>OPENAI_API_KEY</code> 설정(코드/DB 저장 금지 — 절대 규칙 4). <span style={{ color: "var(--stat-emergency)" }}>음성이 외부로 전송됩니다.</span><br />
-        · Client 판독창의 마이크 버튼은 이 서버 설정을 그대로 사용합니다(연동).
-      </div>
+        · <b>{tr("Whisper 로컬 설치")}</b>{tr(": 서버에서")}<code>pip install faster-whisper</code>{tr("(권장) 또는")}<code>pip install openai-whisper</code>{tr("(+ffmpeg) 후 [새로고침].")}<br />
+        · <b>OpenAI API</b>{tr(": 서버 환경변수")}<code>OPENAI_API_KEY</code>{tr("설정(코드/DB 저장 금지 — 절대 규칙 4).")}<span style={{ color: "var(--stat-emergency)" }}>{tr("음성이 외부로 전송됩니다.")}</span><br />{tr("· Client 판독창의 마이크 버튼은 이 서버 설정을 그대로 사용합니다(연동).")}</div>
       <Msg text={msg} />
     </div>
   );

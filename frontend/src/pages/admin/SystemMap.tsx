@@ -9,6 +9,7 @@ import {
   api, type HospitalRow, type HospitalUsage, type InfraHospitalRow, type MaintStorage,
   type PortalStatus,
 } from "../../api";
+import { t as tr } from "../../lib/i18n";
 
 // ── 상태등 3값 (ok/bad/unknown) ──
 type Tri = "ok" | "bad" | "unknown";
@@ -220,14 +221,14 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* 툴바 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>🗺️ 시스템 구조도 — 라이브</div>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{tr("🗺️ 시스템 구조도 — 라이브")}</div>
         <div style={{ flex: 1 }} />
         {progress && <span style={{ fontSize: 12, color: "var(--accent,#7dd3fc)" }}>⏳ {progress}</span>}
         <button className="primary" disabled={checking} onClick={fullCheck}
-                title="부모 공유 Orthanc → 각 병원 컨테이너 순서로 C-ECHO 를 수행합니다">
+                title={tr("부모 공유 Orthanc → 각 병원 컨테이너 순서로 C-ECHO 를 수행합니다")}>
           {checking ? "점검 중…" : "🔍 전체 점검"}
         </button>
-        <button onClick={loadAll} disabled={checking}>새로고침</button>
+        <button onClick={loadAll} disabled={checking}>{tr("새로고침")}</button>
         <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
           {loadedAt ? `갱신 ${loadedAt.toLocaleTimeString()} · 60초 자동` : "불러오는 중…"}
         </span>
@@ -237,7 +238,7 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
       <div style={parentBox}>
         {/* 헤더: 설정값 + 상태등 + 부모 서버 강제 제어 */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 700, fontSize: 13.5 }}>🌐 Admin System — 부모 컨테이너</div>
+          <div style={{ fontWeight: 700, fontSize: 13.5 }}>{tr("🌐 Admin System — 부모 컨테이너")}</div>
           <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
             {net ? <>
               {net.name || "이름 미설정"} · 진입점 <code>{net.ip || "?"}:{net.port || "9000"}</code>
@@ -245,16 +246,16 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
             </> : "설정 불러오는 중…"}
           </span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
-            <button style={ctlBtnStyle} title="메인 docker 스택(DB·Orthanc·OHIF) 전체 시작"
-                    onClick={(e) => ctl(e, "부모 스택 전체 시작", () => api.infraMainAction("start"))}>▶ 전체 시작</button>
-            <button style={ctlBtnStyle} title="메인 docker 스택 전체 재시작"
-                    onClick={(e) => ctl(e, "부모 스택 전체 재시작", () => api.infraMainAction("restart"))}>⟳ 재시작</button>
-            <button style={ctlBtnStyle} title="메인 docker 스택 전체 중지 — DB 중지 시 프로그램 전체가 동작하지 않습니다"
+            <button style={ctlBtnStyle} title={tr("메인 docker 스택(DB·Orthanc·OHIF) 전체 시작")}
+                    onClick={(e) => ctl(e, "부모 스택 전체 시작", () => api.infraMainAction("start"))}>{tr("▶ 전체 시작")}</button>
+            <button style={ctlBtnStyle} title={tr("메인 docker 스택 전체 재시작")}
+                    onClick={(e) => ctl(e, "부모 스택 전체 재시작", () => api.infraMainAction("restart"))}>{tr("⟳ 재시작")}</button>
+            <button style={ctlBtnStyle} title={tr("메인 docker 스택 전체 중지 — DB 중지 시 프로그램 전체가 동작하지 않습니다")}
                     onClick={(e) => ctl(e, "부모 스택 전체 중지", () => api.infraMainAction("stop"),
-                                        "DB·Orthanc·OHIF 가 모두 내려갑니다 — 프로그램이 동작하지 않게 됩니다")}>■ 전체 중지</button>
-            <button style={ctlBtnStyle} title="백엔드 API 프로세스 재시작 (약 5초 순단 후 자동 재접속)"
+                                        "DB·Orthanc·OHIF 가 모두 내려갑니다 — 프로그램이 동작하지 않게 됩니다")}>{tr("■ 전체 중지")}</button>
+            <button style={ctlBtnStyle} title={tr("백엔드 API 프로세스 재시작 (약 5초 순단 후 자동 재접속)")}
                     onClick={(e) => ctl(e, "백엔드 재시작", () => api.serverControl("restart"),
-                                        "재시작 동안 몇 초간 접속이 끊깁니다")}>⟳ 백엔드</button>
+                                        "재시작 동안 몇 초간 접속이 끊깁니다")}>{tr("⟳ 백엔드")}</button>
           </span>
         </div>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -265,7 +266,7 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
                 tip={dbSt ? (dbSt.ok ? `DB 연결 정상${dbSt.target ? ` — ${dbSt.target}` : ""}` : `DB 오류 — ${dbSt.detail ?? ""}`) : "확인 중…"} />
           <Lamp state={echoTri(echo.parent)} label="공유 Orthanc DICOM"
                 tip={echoTip(`공유 Orthanc (127.0.0.1:${net?.dicom_port || "4242"})`, echo.parent)} />
-          {dockerOk === false && <span style={{ fontSize: 11.5, color: "var(--danger,#f87171)" }}>⚠ docker 미가용 — 컨테이너 상태는 레지스트리 기준</span>}
+          {dockerOk === false && <span style={{ fontSize: 11.5, color: "var(--danger,#f87171)" }}>{tr("⚠ docker 미가용 — 컨테이너 상태는 레지스트리 기준")}</span>}
         </div>
 
         {/* 용량 게이지 — DB·Image + Backup 한 줄 */}
@@ -277,7 +278,7 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
             <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
               Backup: {fmtMb(st.backup.size_mb)}{st.backup.quota_gb ? ` / 상한 ${st.backup.quota_gb} GB` : ""} · {st.backup.path || "경로 미설정"}
             </div>
-          </> : <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>⚠ 저장 공간 정보 미수신</div>}
+          </> : <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("⚠ 저장 공간 정보 미수신")}</div>}
         </div>
 
         {/* ══ 자식 컨테이너 격자 — 병원별 ══ */}
@@ -313,11 +314,9 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  {provisioned ? <>
-                    컨테이너 <code>{inf!.entry!.container}</code> · <span title={inf!.status}>{inf!.state || "unknown"}</span><br />
+                  {provisioned ? <>{tr("컨테이너")}<code>{inf!.entry!.container}</code> · <span title={inf!.status}>{inf!.state || "unknown"}</span><br />
                     AET <code>{inf!.entry!.aet}</code> · 포트 Web {inf!.entry!.web_port} / DICOM {inf!.entry!.dicom_port}
-                  </> : <>
-                    미프로비저닝 — <b>공유 Orthanc 사용</b><br />
+                  </> : <>{tr("미프로비저닝 —")}<b>{tr("공유 Orthanc 사용")}</b><br />
                     AET <code>{h.scp_aet || h.ae_title || "—"}</code>{h.scp_port ? ` · 수신 Port ${h.scp_port}` : ""}
                   </>}
                 </div>
@@ -335,13 +334,13 @@ export default function SystemMap({ onSelectHospital }: { onSelectHospital?: (hi
                   <Gauge label={`검사 ${u.db.studies} · 판독 ${u.db.reports}`} pct={null}
                          text={`💾 ${fmtMb(u.storage.disk_mb)}${u.storage.orthanc_ok ? "" : " ⚠"}`} />
                 ) : (
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>사용량 정보 없음</div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("사용량 정보 없음")}</div>
                 )}
               </div>
             );
           })}
           {hosps.length === 0 && (
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 8 }}>등록된 병원이 없습니다 — [＋ 병원 등록·관리]에서 추가하세요.</div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 8 }}>{tr("등록된 병원이 없습니다 — [＋ 병원 등록·관리]에서 추가하세요.")}</div>
           )}
         </div>
       </div>

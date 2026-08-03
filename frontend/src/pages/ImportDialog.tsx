@@ -2,6 +2,7 @@
 // 원본 PiViewSTAR 'Import DICOM Files' 다이얼로그 대응 (폴더 선택·확장자 필터·결과표).
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { t as tr } from "../lib/i18n";
 
 type Row = { filename: string; size: number; status: string };   // size<0 = 표시 생략("-")
 
@@ -95,7 +96,7 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
   };
 
   const start = async () => {
-    if (!picked.length) { alert("DICOM 파일 또는 폴더를 먼저 선택하세요"); return; }
+    if (!picked.length) { alert(tr("DICOM 파일 또는 폴더를 먼저 선택하세요")); return; }
     setBusy(true);
     setRows([]);
     try {
@@ -157,14 +158,12 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
                     padding: 16, display: "flex", flexDirection: "column", gap: 12,
                     boxShadow: "0 12px 40px rgba(0,0,0,0.55)" }}>
         <div style={{ display: "flex", alignItems: "center", cursor: "move", userSelect: "none" }}
-             onPointerDown={onHeadDown} title="드래그로 이동 — 업로드는 백그라운드에서 계속됩니다">
+             onPointerDown={onHeadDown} title={tr("드래그로 이동 — 업로드는 백그라운드에서 계속됩니다")}>
           <b style={{ fontSize: 13 }}>📥 Import DICOM Files{localMode ? " — LOCAL" : ""}</b>
-          {busy && <span style={{ marginLeft: 8, fontSize: 11, color: "#4ade80" }}>● 백그라운드 진행 중 — 다른 화면을 사용해도 계속됩니다</span>}
+          {busy && <span style={{ marginLeft: 8, fontSize: 11, color: "#4ade80" }}>{tr("● 백그라운드 진행 중 — 다른 화면을 사용해도 계속됩니다")}</span>}
           {localMode && (
             <span style={{ marginLeft: 8, fontSize: 11, color: "#f59e0b" }}
-                  title={localRoot ? `저장 위치: ${localRoot}\\Image` : undefined}>
-              로컬 Image 폴더에 저장됩니다 (서버 업로드 아님)
-            </span>
+                  title={localRoot ? `저장 위치: ${localRoot}\\Image` : undefined}>{tr("로컬 Image 폴더에 저장됩니다 (서버 업로드 아님)")}</span>
           )}
           <button style={{ marginLeft: "auto" }} onClick={guardedClose} title={busy ? "업로드 완료 후 닫을 수 있습니다" : "닫기"} disabled={busy}>✕</button>
         </div>
@@ -174,10 +173,10 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
           <legend style={{ fontSize: 12, color: "var(--text-secondary)", padding: "0 6px" }}>Import Parameters</legend>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
             <span style={{ width: 96, fontSize: 12.5, color: "var(--text-secondary)" }}>Search Directory</span>
-            <input readOnly value={source} placeholder="USB/CD 폴더 또는 파일을 선택하세요"
+            <input readOnly value={source} placeholder={tr("USB/CD 폴더 또는 파일을 선택하세요")}
                    style={{ flex: 1, fontSize: 12 }} />
-            <button title="폴더 선택 (USB·CD 전체)" onClick={() => dirRef.current?.click()}>📁 폴더</button>
-            <button title="파일 선택 (.dcm 여러 개)" onClick={() => fileRef.current?.click()}>… 파일</button>
+            <button title={tr("폴더 선택 (USB·CD 전체)")} onClick={() => dirRef.current?.click()}>{tr("📁 폴더")}</button>
+            <button title={tr("파일 선택 (.dcm 여러 개)")} onClick={() => fileRef.current?.click()}>{tr("… 파일")}</button>
           </div>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
             <input type="checkbox" checked={dcmOnly}
@@ -185,9 +184,7 @@ export function ImportDialog({ onClose, onDone, localMode, localRoot }: {
                      setDcmOnly(e.target.checked);
                      // 선택돼 있으면 즉시 재스캔 — 기본(해제)은 하위 모든 파일에서 DICM 시그니처 자동 감지
                      if (allRef.current.length) void scan(allRef.current, e.target.checked);
-                   }} />
-            Extension *.dcm Files Only (기본 해제 — 폴더 이하 <b>모든 파일</b>에서 DICOM 자동 감지)
-          </label>
+                   }} />{tr("Extension *.dcm Files Only (기본 해제 — 폴더 이하")}<b>{tr("모든 파일")}</b>{tr("에서 DICOM 자동 감지)")}</label>
           {/* 숨은 파일 입력 — 폴더(webkitdirectory)·다중 파일 */}
           <input ref={dirRef} type="file" multiple hidden
                  // @ts-expect-error webkitdirectory 는 표준 타입에 없음

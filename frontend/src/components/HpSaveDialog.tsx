@@ -9,6 +9,7 @@ import {
   HP_BP_SOURCES, HP_BP_SOURCE_DEFAULT, HP_MODALITIES, HP_SLOT_SOURCES,
   buildHpRule, type HpCapture, type HpRule,
 } from "../lib/viewerConfig";
+import { t as tr } from "../lib/i18n";
 
 export function HpSaveDialog({ capture, study, onClose, onSaved }: {
   capture: HpCapture;
@@ -68,12 +69,12 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
                     width: 560, maxWidth: "94vw", maxHeight: "90vh", overflow: "auto", padding: 18,
                     display: "flex", flexDirection: "column", gap: 11 }}>
-        <div style={{ fontSize: 15.5, fontWeight: 800 }}>현재 화면을 행잉 프로토콜로 저장</div>
+        <div style={{ fontSize: 15.5, fontWeight: 800 }}>{tr("현재 화면을 행잉 프로토콜로 저장")}</div>
 
         {/* 지금 화면에서 읽어낸 구성 — 무엇이 저장되는지 먼저 보여준다 */}
         <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "8px 10px",
                       background: "var(--bg-canvas)", fontSize: 11.5, lineHeight: 1.8 }}>
-          <b style={{ fontSize: 12 }}>저장되는 화면 구성</b>
+          <b style={{ fontSize: 12 }}>{tr("저장되는 화면 구성")}</b>
           <div>· 분할 — Series {capture.s.r}×{capture.s.c} · Image {capture.i.r}×{capture.i.c}</div>
           <div>· W/L — {capture.wl ? capture.wl : "서버 기본"}</div>
           <div>· 연동 — {["crosslink", "auto_sync", "sync_other", "scout", "all_lines"]
@@ -84,7 +85,7 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
 
         <L t="프로토콜명 *">
           <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
-                 placeholder="예: CHEST 비교 2분할" style={{ width: "100%" }} />
+                 placeholder={tr("예: CHEST 비교 2분할")} style={{ width: "100%" }} />
         </L>
 
         <div style={{ display: "flex", gap: 10 }}>
@@ -92,14 +93,14 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
             <L t="장비">
               <input list="sv-hpsave-mods" value={modality}
                      onChange={(e) => setModality(e.target.value.toUpperCase().trim())}
-                     placeholder="빈칸=모든 장비" style={{ width: "100%" }} />
+                     placeholder={tr("빈칸=모든 장비")} style={{ width: "100%" }} />
               <datalist id="sv-hpsave-mods">{HP_MODALITIES.map((m) => <option key={m} value={m} />)}</datalist>
             </L>
           </div>
           <div style={{ flex: 1 }}>
             <L t="부위">
               <input value={bodyPart} onChange={(e) => setBodyPart(e.target.value.toUpperCase())}
-                     placeholder="예: CHEST (빈칸=무관)" style={{ width: "100%" }} />
+                     placeholder={tr("예: CHEST (빈칸=무관)")} style={{ width: "100%" }} />
             </L>
           </div>
           <div style={{ width: 120 }}>
@@ -112,9 +113,7 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
 
         <div style={{ border: "1px solid var(--border)", borderRadius: 6, padding: "7px 9px",
                       background: "var(--bg-canvas)" }}>
-          <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 5 }}>
-            부위를 찾을 DICOM 필드
-          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 5 }}>{tr("부위를 찾을 DICOM 필드")}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
             {HP_BP_SOURCES.map((f) => (
               <label key={f.key} title={`(${f.tag})`}
@@ -130,29 +129,23 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
 
         <L t="설명">
           <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2}
-                    placeholder="이 프로토콜을 언제 쓰는지" style={{ width: "100%", resize: "vertical" }} />
+                    placeholder={tr("이 프로토콜을 언제 쓰는지")} style={{ width: "100%", resize: "vertical" }} />
         </L>
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}
-                 title="켜면 검사를 열 때 자동 적용합니다. 꺼두면(기본) 뷰어 공통 Layout 이 적용되고, 이 규칙은 HP 메뉴에서 직접 고를 때만 걸립니다.">
-            <input type="checkbox" checked={onOpen} onChange={(e) => setOnOpen(e.target.checked)} />
-            Exam 열 때 HP 사용
-          </label>
+                 title={tr("켜면 검사를 열 때 자동 적용합니다. 꺼두면(기본) 뷰어 공통 Layout 이 적용되고, 이 규칙은 HP 메뉴에서 직접 고를 때만 걸립니다.")}>
+            <input type="checkbox" checked={onOpen} onChange={(e) => setOnOpen(e.target.checked)} />{tr("Exam 열 때 HP 사용")}</label>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}
-                 title="다른 규칙보다 먼저 감지해 적용합니다(기본 꺼짐)">
-            <input type="checkbox" checked={priority} onChange={(e) => setPriority(e.target.checked)} />
-            가장 우선 적용
-          </label>
+                 title={tr("다른 규칙보다 먼저 감지해 적용합니다(기본 꺼짐)")}>
+            <input type="checkbox" checked={priority} onChange={(e) => setPriority(e.target.checked)} />{tr("가장 우선 적용")}</label>
         </div>
 
         {err && <div style={{ fontSize: 12, color: "var(--stat-emergency)" }}>{err}</div>}
-        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          저장하면 설정 ▸ 행잉(HP) 목록 아래에 이어서 나타나며, 뷰어 HP 메뉴에서도 바로 고를 수 있습니다.
-        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("저장하면 설정 ▸ 행잉(HP) 목록 아래에 이어서 나타나며, 뷰어 HP 메뉴에서도 바로 고를 수 있습니다.")}</div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} disabled={busy}>취소</button>
+          <button onClick={onClose} disabled={busy}>{tr("취소")}</button>
           <button className="primary" onClick={() => void save()} disabled={busy || !name.trim()}>
             {busy ? "저장 중…" : "저장"}
           </button>

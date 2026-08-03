@@ -16,6 +16,7 @@ import {
   type TreeNode,
   type WorklistTab,
 } from "../WorklistTree";
+import { t as tr } from "../../lib/i18n";
 
 // 표기·순서 규약: SaintView → I-View → T-View (설정 모달과 동일)
 const VIEWERS = [
@@ -93,48 +94,47 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 860 }}>
-      <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-        설정 모달의 [워크리스트]와 <b>동일 구현</b> — 여기서는 <b>병원 기본값</b>으로 저장됩니다.
+      <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("설정 모달의 [워크리스트]와")}<b>{tr("동일 구현")}</b>{tr("— 여기서는")}<b>{tr("병원 기본값")}</b>으로 저장됩니다.
         계정별 설정이 있는 사용자는 그 값이 우선하고(설정 저장·레이아웃/스플리터 변경 포함),
         계정 설정이 아직 없는 사용자는 이 병원 기본값이 적용됩니다.
       </div>
 
-      <Group title="워크리스트 동작">
+      <Group title={tr("워크리스트 동작")}>
         <Row label="갱신 방식">
           <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <select value={refreshSec > 0 ? "auto" : "manual"}
                     onChange={(e) => setRefreshSec(e.target.value === "auto" ? (refreshSec || 10) : 0)}>
-              <option value="manual">수동 (SEARCH 누를 때만)</option>
-              <option value="auto">자동 (주기 갱신)</option>
+              <option value="manual">{tr("수동 (SEARCH 누를 때만)")}</option>
+              <option value="auto">{tr("자동 (주기 갱신)")}</option>
             </select>
             {refreshSec > 0 && (
               <>
                 <input type="number" min={1} max={3600} value={refreshSec} style={{ width: 72 }}
                        onChange={(e) => setRefreshSec(Math.max(1, Math.min(3600, Number(e.target.value) || 1)))} />
-                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>초마다</span>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("초마다")}</span>
               </>
             )}
           </span>
         </Row>
         <Row label="기본 상태 필터">
           <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
-            <option value="">전체</option><option value="unread">미판독</option>
-            <option value="draft">초안</option><option value="final">확정</option>
+            <option value="">{tr("전체")}</option><option value="unread">{tr("미판독")}</option>
+            <option value="draft">{tr("초안")}</option><option value="final">{tr("확정")}</option>
           </select>
         </Row>
         <Row label="더블클릭 동작">
           <select value={dblAction} onChange={(e) => setDblAction(e.target.value as "viewer2d" | "ohif")}>
-            <option value="viewer2d">내장 뷰어</option><option value="ohif">OHIF</option>
+            <option value="viewer2d">{tr("내장 뷰어")}</option><option value="ohif">OHIF</option>
           </select>
         </Row>
         <Row label="◀ 이동 방향">
           <select value={navLeft} onChange={(e) => setNavLeft(e.target.value as "past" | "recent")}>
-            <option value="past">과거 검사로</option><option value="recent">최신 검사로</option>
+            <option value="past">{tr("과거 검사로")}</option><option value="recent">{tr("최신 검사로")}</option>
           </select>
         </Row>
       </Group>
 
-      <Group title="그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)">
+      <Group title={tr("그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)")}>
         <FilterSettingList
           all={Object.keys(COLUMN_DEFS)}
           selected={columns}
@@ -149,9 +149,7 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
           <Group key={vk} title={label + " 워크리스트 — 뷰어별 그리드 컬럼 (병원 기본)"}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
               <input type="checkbox" checked={!ov}
-                     onChange={(e) => setWlBy((p) => ({ ...p, [vk]: e.target.checked ? null : [...columns] }))} />
-              공통 워크리스트 설정 사용 (기본) — 해제하면 이 뷰어 전용 컬럼 구성을 편집합니다
-            </label>
+                     onChange={(e) => setWlBy((p) => ({ ...p, [vk]: e.target.checked ? null : [...columns] }))} />{tr("공통 워크리스트 설정 사용 (기본) — 해제하면 이 뷰어 전용 컬럼 구성을 편집합니다")}</label>
             {ov && (
               <FilterSettingList
                 all={Object.keys(COLUMN_DEFS)}
@@ -164,7 +162,7 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
         );
       })}
 
-      <Group title="검색 필드 구성 (Find criteria)">
+      <Group title={tr("검색 필드 구성 (Find criteria)")}>
         <DualList
           all={Object.keys(FIND_FIELDS)}
           selected={findFields}
@@ -173,7 +171,7 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
         />
       </Group>
 
-      <Group title="워크리스트 구성요소 (Study List 제외 추가/삭제)">
+      <Group title={tr("워크리스트 구성요소 (Study List 제외 추가/삭제)")}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
           {([
             ["orders", "오더/예약 (Order)"],
@@ -194,34 +192,34 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
       </Group>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button className="primary" onClick={savePrefs}>저장 (병원 기본값)</button>
+        <button className="primary" onClick={savePrefs}>{tr("저장 (병원 기본값)")}</button>
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{msg}</span>
       </div>
 
-      <Group title="워크리스트 페이지 탭 (최대 10 — 변경 즉시 저장)">
+      <Group title={tr("워크리스트 페이지 탭 (최대 10 — 변경 즉시 저장)")}>
         <table className="grid-table">
-          <thead><tr><th style={{ width: 130 }}>이름</th><th>검색 조건</th><th style={{ width: 118 }}></th></tr></thead>
+          <thead><tr><th style={{ width: 130 }}>{tr("이름")}</th><th>{tr("검색 조건")}</th><th style={{ width: 118 }}></th></tr></thead>
           <tbody>
             {tabs.map((t, i) => (
               <tr key={t.id}>
                 <td>{t.label}</td>
                 <td style={{ color: "var(--text-secondary)" }}>{folderSummary(t.filter)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button style={{ padding: "0 6px", fontSize: 11 }} title="이름·검색 조건 수정"
-                          onClick={() => setTabModal({ index: i })}>수정</button>
-                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title="위로"
+                  <button style={{ padding: "0 6px", fontSize: 11 }} title={tr("이름·검색 조건 수정")}
+                          onClick={() => setTabModal({ index: i })}>{tr("수정")}</button>
+                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title={tr("위로")}
                           onClick={() => {
                             const next = [...tabs];
                             [next[i - 1], next[i]] = [next[i], next[i - 1]];
                             setTabs(next); saveTabs(next);
                           }}>▲</button>
-                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === tabs.length - 1} title="아래로"
+                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === tabs.length - 1} title={tr("아래로")}
                           onClick={() => {
                             const next = [...tabs];
                             [next[i], next[i + 1]] = [next[i + 1], next[i]];
                             setTabs(next); saveTabs(next);
                           }}>▼</button>
-                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={t.id === "default"} title="삭제"
+                  <button style={{ padding: "0 6px", fontSize: 11 }} disabled={t.id === "default"} title={tr("삭제")}
                           onClick={() => {
                             if (!window.confirm(`'${t.label}' 페이지를 삭제할까요?`)) return;
                             const next = tabs.filter((x) => x.id !== t.id);
@@ -231,16 +229,16 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
               </tr>
             ))}
             {tabs.length === 0 && (
-              <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>페이지 없음</td></tr>
+              <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>{tr("페이지 없음")}</td></tr>
             )}
           </tbody>
         </table>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={() => setTabModal("add")} disabled={tabs.length >= 10}>＋ 페이지 추가</button>
+          <button onClick={() => setTabModal("add")} disabled={tabs.length >= 10}>{tr("＋ 페이지 추가")}</button>
         </div>
       </Group>
 
-      <Group title="검색 폴더 트리 (탐색기형 — 변경 즉시 저장)">
+      <Group title={tr("검색 폴더 트리 (탐색기형 — 변경 즉시 저장)")}>
         <div style={{
           height: 190, display: "flex", flexDirection: "column", padding: 4,
           border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-canvas)",
@@ -249,9 +247,7 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
                             onSelect={(n) => setSelTreeId(n.id)}
                             onChange={(next) => { setTree(next); saveTree(next); }} />
         </div>
-        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          각 폴더는 자기 조건만 가지며, 워크리스트에서 폴더 클릭 시 상위 경로 조건이 누적 병합되어 검색됩니다.
-        </div>
+        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("각 폴더는 자기 조건만 가지며, 워크리스트에서 폴더 클릭 시 상위 경로 조건이 누적 병합되어 검색됩니다.")}</div>
       </Group>
 
       {tabModal !== null && (
@@ -263,7 +259,7 @@ export function HospitalWorklistSettings({ hid }: { hid: number }) {
           onSave={(label, filter) => {
             let next: WorklistTab[];
             if (tabModal === "add") {
-              if (tabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다"); return; }
+              if (tabs.length >= 10) { alert(tr("워크리스트 페이지는 최대 10개입니다")); return; }
               next = [...tabs, { id: newId(), label, filter }];
             } else {
               next = tabs.map((t, i) => (i === tabModal.index ? { ...t, label, filter } : t));

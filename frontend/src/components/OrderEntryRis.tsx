@@ -5,6 +5,7 @@
 // 저장 방식(testgen POST / createOrder)은 호출측 onSave 로 주입 — 이 파일은 API 를 오더 조회/수정/삭제에만 사용.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, type OrderRow } from "../api";
+import { t as tr } from "../lib/i18n";
 
 // ── 계약 타입 (SPEC 고정 — 이름/필드 변경 금지) ──
 export interface RisPatient {
@@ -305,14 +306,14 @@ export function OrderEntryRis(props: {
                    onChange={(e) => setPt({ ...pt, scheduled_time: e.target.value })} />
           </Field>
           <Field label="장비 AET">
-            <input style={inp} value={pt.station_aet} placeholder="CR01 (빈칸=ANY)"
+            <input style={inp} value={pt.station_aet} placeholder={tr("CR01 (빈칸=ANY)")}
                    onChange={(e) => setPt({ ...pt, station_aet: e.target.value })} />
           </Field>
           <Field label="Study ID">
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input style={{ ...inp, flex: 1 }} value={pt.dicom_study_id}
                      onChange={(e) => setPt({ ...pt, dicom_study_id: e.target.value })} />
-              <button title="번호 자동 생성" onClick={genSid} style={{ padding: "1px 7px" }}>자동</button>
+              <button title={tr("번호 자동 생성")} onClick={genSid} style={{ padding: "1px 7px" }}>{tr("자동")}</button>
             </span>
           </Field>
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
@@ -331,7 +332,7 @@ export function OrderEntryRis(props: {
 
         {/* ③ BODY PART */}
         <Col title="Body Part">
-          {!region && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>Region을 선택하세요</div>}
+          {!region && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("Region을 선택하세요")}</div>}
           {bodyParts.map((bp) => (
             <PickBtn key={bp} label={bp} selected={bodyPart === bp} onClick={() => setBodyPart(bp)} />
           ))}
@@ -348,8 +349,7 @@ export function OrderEntryRis(props: {
         {/* ⑤ 검사 항목 */}
         <Col title={`검사 항목 (${exams.length})`} flex={1.4}>
           {exams.length === 0 && (
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-              추가된 검사 항목이 없습니다.<br />Region → Body Part → {cat.third} 선택 후 [+ Add] 하세요.
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>{tr("추가된 검사 항목이 없습니다.")}<br />Region → Body Part → {cat.third} 선택 후 [+ Add] 하세요.
             </div>
           )}
           {exams.map((x, i) => (
@@ -357,7 +357,7 @@ export function OrderEntryRis(props: {
                  style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-canvas)" }}>
               <span style={{ flex: 1 }}>{x.body_part} · {x.projection} · {pt.modality || "—"}</span>
               <button onClick={() => setExams((xs) => xs.filter((_, j) => j !== i))}
-                      title="삭제" style={{ padding: "0 6px" }}>✕</button>
+                      title={tr("삭제")} style={{ padding: "0 6px" }}>✕</button>
             </div>
           ))}
         </Col>
@@ -475,10 +475,10 @@ export function OrderList(props: {
       <div style={{ fontWeight: 600, fontSize: 12.5 }}>📋 등록된 오더 ({registered.length})</div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12, width: "100%" }}>
-          <thead><tr><th>Accession</th><th>환자</th><th>설명</th><th>Mod</th><th>예약일</th><th style={{ width: 52 }} /></tr></thead>
+          <thead><tr><th>Accession</th><th>{tr("환자")}</th><th>{tr("설명")}</th><th>Mod</th><th>{tr("예약일")}</th><th style={{ width: 52 }} /></tr></thead>
           <tbody>
             {registered.length === 0 && (
-              <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>등록된 오더 없음 — 좌측에서 오더를 생성하세요</td></tr>
+              <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("등록된 오더 없음 — 좌측에서 오더를 생성하세요")}</td></tr>
             )}
             {registered.map((o) => (
               <Fragment key={o.id}>
@@ -489,8 +489,8 @@ export function OrderList(props: {
                   <td>{o.modality}</td>
                   <td>{o.scheduled_date || "—"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    <button title="수정" disabled={busy} onClick={() => (editId === o.id ? cancelEdit() : startEdit(o))} style={{ padding: "0 6px" }}>✎</button>{" "}
-                    <button title="삭제" disabled={busy} onClick={() => del(o)} style={{ padding: "0 6px" }}>✕</button>
+                    <button title={tr("수정")} disabled={busy} onClick={() => (editId === o.id ? cancelEdit() : startEdit(o))} style={{ padding: "0 6px" }}>✎</button>{" "}
+                    <button title={tr("삭제")} disabled={busy} onClick={() => del(o)} style={{ padding: "0 6px" }}>✕</button>
                   </td>
                 </tr>
                 {editId === o.id && ef && (
@@ -532,8 +532,8 @@ export function OrderList(props: {
                           <input style={{ ...inp, width: 260 }} value={ef.procedure_desc} onChange={(e) => setE("procedure_desc", e.target.value)} />
                         </EField>
                         <div style={{ flex: 1 }} />
-                        <button className="primary" disabled={busy} onClick={saveEdit}>저장</button>
-                        <button disabled={busy} onClick={cancelEdit}>취소</button>
+                        <button className="primary" disabled={busy} onClick={saveEdit}>{tr("저장")}</button>
+                        <button disabled={busy} onClick={cancelEdit}>{tr("취소")}</button>
                       </div>
                     </td>
                   </tr>
@@ -546,13 +546,13 @@ export function OrderList(props: {
 
       {/* ── 장비가 가져간 오더 (taken_aet 관찰 기록) ── */}
       <div style={{ fontWeight: 600, fontSize: 12.5, marginTop: 4 }}>🏷 장비가 가져간 오더 ({taken.length})</div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>장비가 MWL 로 조회해 간 오더 — 등록 목록에서 자동 분리됩니다</div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("장비가 MWL 로 조회해 간 오더 — 등록 목록에서 자동 분리됩니다")}</div>
       <div style={{ overflowX: "auto" }}>
         <table className="grid-table" style={{ fontSize: 12, width: "100%" }}>
-          <thead><tr><th>장비(AET)</th><th>가져간 시각</th><th>Accession</th><th>환자</th><th>설명</th><th style={{ width: 30 }} /></tr></thead>
+          <thead><tr><th>{tr("장비(AET)")}</th><th>{tr("가져간 시각")}</th><th>Accession</th><th>{tr("환자")}</th><th>{tr("설명")}</th><th style={{ width: 30 }} /></tr></thead>
           <tbody style={{ opacity: 0.62 }}>
             {taken.length === 0 && (
-              <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>아직 장비가 가져간 오더 없음</td></tr>
+              <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>{tr("아직 장비가 가져간 오더 없음")}</td></tr>
             )}
             {taken.map((o) => (
               <tr key={o.id}>
@@ -562,7 +562,7 @@ export function OrderList(props: {
                 <td>{o.patient_name || "—"}</td>
                 <td title={o.procedure_desc}>{(o.procedure_desc || "—").slice(0, 28)}</td>
                 <td>
-                  <button title="삭제" disabled={busy} onClick={() => del(o)} style={{ padding: "0 6px" }}>✕</button>
+                  <button title={tr("삭제")} disabled={busy} onClick={() => del(o)} style={{ padding: "0 6px" }}>✕</button>
                 </td>
               </tr>
             ))}

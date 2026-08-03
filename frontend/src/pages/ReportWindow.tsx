@@ -5,6 +5,7 @@ import { api, ensureToken, type PhraseRow, type RelatedExam, type Report, type S
 import { onStudySync, postStudySync } from "../lib/sync";
 import { dictationLabel, useDictation } from "../lib/useDictation";
 import { MicIcon } from "../components/MicIcon";
+import { t as tr } from "../lib/i18n";
 
 type Tab = "read" | "hist" | "std" | "tpl";
 
@@ -341,7 +342,7 @@ export function ReportWindow() {
       const r = await api.reports(detail.id);
       setReports(r.items);
       setTouched(false);
-      if (rdOpts.save_alert) alert("리포트가 저장되었습니다"); else setMsg("저장됨");
+      if (rdOpts.save_alert) alert(tr("리포트가 저장되었습니다")); else setMsg("저장됨");
     } catch (e) {
       alert(e instanceof Error ? e.message : "저장 실패");
       void syncLock();   // 다른 창에서 잠금 변경(409) 등 — 서버 기준 잠금 상태 재동기화
@@ -492,7 +493,7 @@ export function ReportWindow() {
                       display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ display: "flex", borderBottom: "1px solid var(--border)" }}>
             <div style={sideTabStyle(sideTab === "hist")} onClick={() => setSideTab("hist")}>History</div>
-            <div style={sideTabStyle(sideTab === "sheet")} onClick={() => setSideTab("sheet")}>기록지</div>
+            <div style={sideTabStyle(sideTab === "sheet")} onClick={() => setSideTab("sheet")}>{tr("기록지")}</div>
           </div>
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {sideTab === "hist" ? (
@@ -501,15 +502,11 @@ export function ReportWindow() {
                               padding: "60px 18px", textAlign: "center" }}>
                   <div style={{ fontSize: 34, opacity: 0.5 }}>🕘</div>
                   <b style={{ fontSize: 13.5 }}>No previous reports</b>
-                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    이 환자의 이전 검사 기록이 없거나 판독이 완료되지 않았습니다.
-                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("이 환자의 이전 검사 기록이 없거나 판독이 완료되지 않았습니다.")}</div>
                   <button className="primary" style={{ padding: "4px 14px", fontSize: 12 }}
                           onClick={() => window.open(
                             `${window.location.origin}${window.location.pathname}?viewer=2d&study=${detail.id}`,
-                            "sv_viewer")}>
-                    ▶ 이전 검사 영상 요청
-                  </button>
+                            "sv_viewer")}>{tr("▶ 이전 검사 영상 요청")}</button>
                 </div>
               ) : (
                 <>
@@ -526,7 +523,7 @@ export function ReportWindow() {
                   {/* Same Compare — 선택 기준(마지막 클릭)과 같은 장비·검사명(부위)만 정렬 */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid var(--border)" }}>
                     <button onClick={() => setSameCompare((s) => !s)} disabled={!refExam}
-                            title="Same Compare — 선택한 과거영상과 같은 장비·검사명(부위)만 정렬 (먼저 과거영상 클릭)"
+                            title={tr("Same Compare — 선택한 과거영상과 같은 장비·검사명(부위)만 정렬 (먼저 과거영상 클릭)")}
                             style={{ fontSize: 11, padding: "3px 10px", opacity: refExam ? 1 : 0.5,
                                      background: sameCompare ? "var(--accent)" : undefined, color: sameCompare ? "#fff" : undefined }}>
                       Same Compare{sameCompare ? " ●" : ""}
@@ -538,7 +535,7 @@ export function ReportWindow() {
                   {/* 과거검사 이미지 — 단일클릭=판독 표시, 더블클릭=1:2 Compare 열기 */}
                   {histList.map((e) => (
                     <div key={e.id} onClick={() => pickPast(e)} onDoubleClick={() => openCompare(e)}
-                         title="단일클릭=판독 표시 · 더블클릭=1:2 Compare(현재 옆) 열기"
+                         title={tr("단일클릭=판독 표시 · 더블클릭=1:2 Compare(현재 옆) 열기")}
                          style={{ padding: "8px 10px", cursor: "pointer", borderBottom: "2px solid var(--border)",
                                   background: e.id === selPast ? "var(--bg-elevated)" : undefined }}>
                       {/* 상단: 날짜 + 복사(과거 판독→현재 판독영역) */}
@@ -546,8 +543,8 @@ export function ReportWindow() {
                         <span style={{ fontSize: 11.5, color: "var(--text-secondary)", flex: 1 }}>{e.study_date}</span>
                         {pastTexts[e.id] ? (
                           <button onClick={(ev) => { ev.stopPropagation(); pasteReading(pastTexts[e.id]); }}
-                                  title="이 과거 판독을 현재 판독영역에 복사"
-                                  className="primary" style={{ fontSize: 10.5, padding: "1px 10px" }}>복사</button>
+                                  title={tr("이 과거 판독을 현재 판독영역에 복사")}
+                                  className="primary" style={{ fontSize: 10.5, padding: "1px 10px" }}>{tr("복사")}</button>
                         ) : null}
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>{e.modality} · {e.study_desc || "-"}
@@ -571,12 +568,12 @@ export function ReportWindow() {
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                         <span style={{ fontSize: 11, color: "var(--accent)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>[{relatedView.label}]</span>
                         <button onClick={() => pasteReading(relatedView.text)} disabled={finalized || locked}
-                                title="현재 판독영역(마지막 포커스 필드)에 복사" style={{ fontSize: 10.5, padding: "1px 8px" }}>→ 복사</button>
+                                title={tr("현재 판독영역(마지막 포커스 필드)에 복사")} style={{ fontSize: 10.5, padding: "1px 8px" }}>{tr("→ 복사")}</button>
                       </div>
                       <div draggable
                            onDragStart={(ev) => ev.dataTransfer.setData("text/plain", relatedView.text)}
                            onMouseDown={() => { grabRef.current = true; }}
-                           title="드래그하여 판독영역(Reading/Conclusion)에 놓기 · 또는 좌클릭 누른 채 V"
+                           title={tr("드래그하여 판독영역(Reading/Conclusion)에 놓기 · 또는 좌클릭 누른 채 V")}
                            style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)", cursor: "grab",
                                     border: "1px dashed var(--border)", borderRadius: 4, padding: 6 }}>
                         {relatedView.text}
@@ -593,12 +590,12 @@ export function ReportWindow() {
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                       <span style={{ fontSize: 11, color: "var(--accent)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>[{relatedView.label}] 과거 판독</span>
                       <button onClick={() => pasteReading(relatedView.text)} disabled={finalized || locked}
-                              title="현재 판독영역에 복사" style={{ fontSize: 10.5, padding: "1px 8px" }}>→ 복사</button>
+                              title={tr("현재 판독영역에 복사")} style={{ fontSize: 10.5, padding: "1px 8px" }}>{tr("→ 복사")}</button>
                     </div>
                     <div draggable
                          onDragStart={(ev) => ev.dataTransfer.setData("text/plain", relatedView.text)}
                          onMouseDown={() => { grabRef.current = true; }}
-                         title="드래그하여 판독영역에 놓기 · 또는 좌클릭 누른 채 V"
+                         title={tr("드래그하여 판독영역에 놓기 · 또는 좌클릭 누른 채 V")}
                          style={{ fontSize: fontPx, whiteSpace: "pre-wrap", color: "var(--text-secondary)", cursor: "grab",
                                   border: "1px dashed var(--border)", borderRadius: 4, padding: 6 }}>
                       {relatedView.text}
@@ -607,17 +604,17 @@ export function ReportWindow() {
                 )}
                 <table className="grid-table" style={{ fontSize: 12 }}>
                   <tbody>
-                    <tr><th style={{ width: 90 }}>환자 ID</th><td>{detail.patient_key}</td></tr>
-                  <tr><th>이름</th><td>{detail.patient_name}</td></tr>
-                  <tr><th>성별/생년</th><td>{detail.sex} / {detail.birth_date}</td></tr>
-                  <tr><th>검사명</th><td>{detail.study_desc}</td></tr>
+                    <tr><th style={{ width: 90 }}>{tr("환자 ID")}</th><td>{detail.patient_key}</td></tr>
+                  <tr><th>{tr("이름")}</th><td>{detail.patient_name}</td></tr>
+                  <tr><th>{tr("성별/생년")}</th><td>{detail.sex} / {detail.birth_date}</td></tr>
+                  <tr><th>{tr("검사명")}</th><td>{detail.study_desc}</td></tr>
                   <tr><th>Modality</th><td>{detail.modality}</td></tr>
-                  <tr><th>부위</th><td>{detail.body_part}</td></tr>
-                  <tr><th>검사일</th><td>{detail.study_date}</td></tr>
+                  <tr><th>{tr("부위")}</th><td>{detail.body_part}</td></tr>
+                  <tr><th>{tr("검사일")}</th><td>{detail.study_date}</td></tr>
                   <tr><th>Accession</th><td>{detail.accession_no}</td></tr>
-                  <tr><th>기관</th><td>{detail.institution || "-"}</td></tr>
-                  <tr><th>의뢰의</th><td>{detail.referring_physician || "-"}</td></tr>
-                  <tr><th>임상정보</th><td>{detail.clinical_info || "-"}</td></tr>
+                  <tr><th>{tr("기관")}</th><td>{detail.institution || "-"}</td></tr>
+                  <tr><th>{tr("의뢰의")}</th><td>{detail.referring_physician || "-"}</td></tr>
+                  <tr><th>{tr("임상정보")}</th><td>{detail.clinical_info || "-"}</td></tr>
                 </tbody>
                 </table>
               </>
@@ -634,7 +631,7 @@ export function ReportWindow() {
             <span style={{ color: "var(--text-secondary)" }}>{detail.modality}/{detail.study_date}</span>
             {msg && <span style={{ color: "var(--stat-final)" }}>{msg}</span>}
             <span style={{ flex: 1 }} />
-            <label title="CVR Notice — critical 소견 경고" style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <label title={tr("CVR Notice — critical 소견 경고")} style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <input type="checkbox" checked={!!rdOpts.cvr_notice}
                      onChange={(e) => setRdOpts((p) => ({ ...p, cvr_notice: e.target.checked }))} />
               CVR Notice
@@ -645,7 +642,7 @@ export function ReportWindow() {
             <button title={`▶ ${navLeft === "past" ? "한 단계 최신" : "한 단계 과거"} 검사 (뷰어 ▶와 동일 — 정책에서 변경)`}
                     style={{ padding: "1px 10px" }}
                     disabled={navTargetIdx(1) < 0} onClick={() => void nav(1)}>▶</button>
-            <button title="서버 저장본으로 되돌리기" style={{ padding: "2px 10px" }} onClick={() => initText(report)}>Reset</button>
+            <button title={tr("서버 저장본으로 되돌리기")} style={{ padding: "2px 10px" }} onClick={() => initText(report)}>Reset</button>
             <button className="primary" title={locked ? LOCK_TIP : `저장 (${String(rdOpts.key_save ?? "Ctrl+S")})`} style={{ padding: "2px 12px" }}
                     disabled={!report || finalized || locked} onClick={() => void save()}>Save</button>
             <button title={locked ? LOCK_TIP : `승인 — 확정·서명 (${String(rdOpts.key_approve ?? "Ctrl+Shift+A")})`}
@@ -657,18 +654,14 @@ export function ReportWindow() {
           {finalized && (
             <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "5px 12px",
                           borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-              <label title="잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다"
+              <label title={tr("잠금 중에는 판독 수정·확정·재생성·병합이 전부 차단됩니다")}
                      style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />
-                🔒 판독 확정(잠금) — 변경 금지
-              </label>
-              {locked && <span style={{ color: "var(--text-secondary)" }}>잠금 상태 — 판독을 변경할 수 없습니다</span>}
+                <input type="checkbox" checked={locked} onChange={(e) => void toggleLock(e.target.checked)} />{tr("🔒 판독 확정(잠금) — 변경 금지")}</label>
+              {locked && <span style={{ color: "var(--text-secondary)" }}>{tr("잠금 상태 — 판독을 변경할 수 없습니다")}</span>}
             </div>
           )}
           {!!rdOpts.cvr_notice && report && /critical/i.test(JSON.stringify(report.sr_json.findings)) && (
-            <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 12px", fontWeight: 700 }}>
-              ⚠ CVR Notice — CRITICAL 소견 포함 검사
-            </div>
+            <div style={{ background: "var(--stat-emergency)", color: "#fff", fontSize: 12, padding: "4px 12px", fontWeight: 700 }}>{tr("⚠ CVR Notice — CRITICAL 소견 포함 검사")}</div>
           )}
           <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "14px 18px",
                         display: "flex", flexDirection: "column", gap: 10, maxWidth: 1100 }}>
@@ -680,20 +673,20 @@ export function ReportWindow() {
               <span><b>Report Day:</b> <input readOnly value={detail.study_date} style={{ ...inStyle, width: 120, display: "inline-block" }} /></span>
             </div>
             <div style={labelStyle}>Hospital Comment</div>
-            <input value={hosp} disabled={finalized || locked} placeholder="병원 코멘트 (저장 시 함께 기록)"
+            <input value={hosp} disabled={finalized || locked} placeholder={tr("병원 코멘트 (저장 시 함께 기록)")}
                    onChange={(e) => setHosp(e.target.value)} style={inStyle} />
             <div style={labelStyle}>Study/Req Comment</div>
             <input readOnly value={detail.clinical_info ?? ""} style={inStyle} />
             <div style={labelStyle}>Refer Comment</div>
             <input readOnly value={detail.referring_physician ?? ""} style={inStyle} />
-            <div style={labelStyle}>Reading {dictField.current === "reading" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>● 음성 입력 중</span>}</div>
-            <textarea value={reading} placeholder="판독 소견을 입력하세요 (마이크로 음성 입력 가능)" disabled={finalized || locked}
+            <div style={labelStyle}>Reading {dictField.current === "reading" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>{tr("● 음성 입력 중")}</span>}</div>
+            <textarea value={reading} placeholder={tr("판독 소견을 입력하세요 (마이크로 음성 입력 가능)")} disabled={finalized || locked}
                       title={locked ? LOCK_TIP : undefined}
                       onFocus={() => { dictField.current = "reading"; }}
                       onChange={(e) => { setReading(e.target.value); setTouched(true); lastTypedRef.current = Date.now(); }}
                       style={{ ...taStyle, minHeight: 140, flex: 1.2 }} />
-            <div style={labelStyle}>Conclusion {dictField.current === "conclusion" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>● 음성 입력 중</span>}</div>
-            <textarea value={conclusion} placeholder="결론을 입력하세요 (마이크로 음성 입력 가능)" disabled={finalized || locked}
+            <div style={labelStyle}>Conclusion {dictField.current === "conclusion" && dictation.recording && <span style={{ color: "var(--stat-emergency)" }}>{tr("● 음성 입력 중")}</span>}</div>
+            <textarea value={conclusion} placeholder={tr("결론을 입력하세요 (마이크로 음성 입력 가능)")} disabled={finalized || locked}
                       title={locked ? LOCK_TIP : undefined}
                       onFocus={() => { dictField.current = "conclusion"; }}
                       onChange={(e) => { setConclusion(e.target.value); lastTypedRef.current = Date.now(); }}
@@ -737,7 +730,7 @@ export function ReportWindow() {
                 </span>
                 {p.shortcut && <span style={{ color: "var(--accent)", flexShrink: 0 }}>Alt+{p.shortcut}</span>}
                 {p.id < 0 && (
-                  <span title="내 항목 삭제" style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
+                  <span title={tr("내 항목 삭제")} style={{ flexShrink: 0, color: "var(--stat-emergency)" }}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (window.confirm(`'${p.name}' 항목을 삭제할까요?`)) {
@@ -766,12 +759,12 @@ export function ReportWindow() {
                 </div>
                 {tplPreview.reading_text && (
                   <div style={{ fontSize: 11.5, whiteSpace: "pre-wrap", color: "var(--text-secondary)", marginBottom: 6 }}>
-                    <b style={{ color: "var(--text-primary)" }}>판독</b><br />{tplPreview.reading_text}
+                    <b style={{ color: "var(--text-primary)" }}>{tr("판독")}</b><br />{tplPreview.reading_text}
                   </div>
                 )}
                 {tplPreview.text && (
                   <div style={{ fontSize: 11.5, whiteSpace: "pre-wrap", color: "var(--text-secondary)" }}>
-                    <b style={{ color: "var(--text-primary)" }}>결론</b><br />{tplPreview.text}
+                    <b style={{ color: "var(--text-primary)" }}>{tr("결론")}</b><br />{tplPreview.text}
                   </div>
                 )}
               </div>

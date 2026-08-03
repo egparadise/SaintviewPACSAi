@@ -3,6 +3,7 @@
 // 이미지는 /api/local/instances/{iid}/rendered (인증 fetch→blob) — 로컬 확인용, 거창한 도구 없음.
 import { useEffect, useRef, useState } from "react";
 import { api, localRendered, type LocalSeriesNode } from "../api";
+import { t as tr } from "../lib/i18n";
 
 // W/L 프리셋 — 자동(파라미터 생략)=서버 기본. CT 대표 4종
 const WL_PRESETS: { key: string; label: string; wc?: number; ww?: number }[] = [
@@ -99,10 +100,10 @@ export function LocalViewer({ studyId, title, onClose }: {
         {/* 헤더 */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
                       borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <b style={{ fontSize: 13 }}>🗔 로컬 뷰어</b>
+          <b style={{ fontSize: 13 }}>{tr("🗔 로컬 뷰어")}</b>
           <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden",
                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-          <button style={{ marginLeft: "auto" }} onClick={onClose} title="닫기 (Esc)">✕</button>
+          <button style={{ marginLeft: "auto" }} onClick={onClose} title={tr("닫기 (Esc)")}>✕</button>
         </div>
 
         {/* 컨트롤: 시리즈 콤보 · ◀▶ · W/L 프리셋 · 확대 */}
@@ -115,14 +116,14 @@ export function LocalViewer({ studyId, title, onClose }: {
                 S{s.series_number} · {s.modality} {s.series_desc || "(무제)"} — {s.instances.length}장
               </option>
             ))}
-            {!series?.length && <option>시리즈 없음</option>}
+            {!series?.length && <option>{tr("시리즈 없음")}</option>}
           </select>
           <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
-            <button style={btn} disabled={iIdx <= 0} onClick={() => step(-1)} title="이전 이미지 (←)">◀</button>
+            <button style={btn} disabled={iIdx <= 0} onClick={() => step(-1)} title={tr("이전 이미지 (←)")}>◀</button>
             <span style={{ minWidth: 62, textAlign: "center", color: "var(--text-secondary)" }}>
               {count ? `${iIdx + 1} / ${count}` : "0 / 0"}
             </span>
-            <button style={btn} disabled={iIdx >= count - 1} onClick={() => step(1)} title="다음 이미지 (→)">▶</button>
+            <button style={btn} disabled={iIdx >= count - 1} onClick={() => step(1)} title={tr("다음 이미지 (→)")}>▶</button>
           </span>
           <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
             <span style={{ color: "var(--text-secondary)" }}>W/L</span>
@@ -132,10 +133,10 @@ export function LocalViewer({ studyId, title, onClose }: {
             ))}
           </span>
           <span style={{ display: "flex", gap: 3, alignItems: "center", marginLeft: "auto" }}>
-            <button style={btn} onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} title="축소">−</button>
+            <button style={btn} onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))} title={tr("축소")}>−</button>
             <span style={{ minWidth: 44, textAlign: "center", color: "var(--text-secondary)" }}>{Math.round(zoom * 100)}%</span>
-            <button style={btn} onClick={() => setZoom((z) => Math.min(8, +(z + 0.25).toFixed(2)))} title="확대">＋</button>
-            <button style={btn} onClick={() => setZoom(1)} title="원본 배율">1:1</button>
+            <button style={btn} onClick={() => setZoom((z) => Math.min(8, +(z + 0.25).toFixed(2)))} title={tr("확대")}>＋</button>
+            <button style={btn} onClick={() => setZoom(1)} title={tr("원본 배율")}>1:1</button>
           </span>
         </div>
 
@@ -144,13 +145,13 @@ export function LocalViewer({ studyId, title, onClose }: {
              style={{ flex: 1, minHeight: 0, background: "#000", overflow: "auto",
                       display: "grid", placeItems: "center", position: "relative" }}>
           {series === null ? (
-            <span style={{ color: "#9ca3af", fontSize: 12.5 }}>로딩 중…</span>
+            <span style={{ color: "#9ca3af", fontSize: 12.5 }}>{tr("로딩 중…")}</span>
           ) : err ? (
             <span style={{ color: "var(--stat-emergency)", fontSize: 12.5, padding: 16, textAlign: "center" }}>
               ⚠ {err}
             </span>
           ) : !inst ? (
-            <span style={{ color: "#9ca3af", fontSize: 12.5 }}>표시할 이미지가 없습니다</span>
+            <span style={{ color: "#9ca3af", fontSize: 12.5 }}>{tr("표시할 이미지가 없습니다")}</span>
           ) : (
             url && (
               <img src={url} alt={`Img ${inst.instance_number}`}
@@ -167,9 +168,7 @@ export function LocalViewer({ studyId, title, onClose }: {
         </div>
 
         <div style={{ padding: "4px 12px", fontSize: 11, color: "var(--text-secondary)",
-                      borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          휠=이미지 스크롤 · ←/→=이동 · Esc=닫기 — 로컬 확인용 경량 뷰어 (서버 데이터와 무관)
-        </div>
+                      borderTop: "1px solid var(--border)", flexShrink: 0 }}>{tr("휠=이미지 스크롤 · ←/→=이동 · Esc=닫기 — 로컬 확인용 경량 뷰어 (서버 데이터와 무관)")}</div>
       </div>
     </div>
   );

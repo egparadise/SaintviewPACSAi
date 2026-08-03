@@ -1,6 +1,7 @@
 // Saintview PACS AI Client 뷰어 로그인 — 병원 ID + 개별 ID + Password (3필드)
 import { useState } from "react";
 import { api, setToken, type LoginResp } from "../api";
+import { t as tr } from "../lib/i18n";
 
 const inp: React.CSSProperties = {
   width: "100%", background: "var(--bg-canvas)", color: "var(--text-primary)",
@@ -80,38 +81,29 @@ export function ClientLogin({ onLogin, onBack }: {
         <div style={{ fontSize: 18, fontWeight: 800 }}>
           Saintview <span style={{ color: "var(--ai,#a78bfa)" }}>PACS AI</span>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>Client 뷰어 로그인</div>
-        <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>병원 ID
-          <input style={inp} placeholder="병원 코드 또는 이름(예: HOSP002, 광주씨티병원)" value={hospitalId} onChange={(e) => setHospitalId(e.target.value)} autoFocus />
+        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6 }}>{tr("Client 뷰어 로그인")}</div>
+        <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("병원 ID")}<input style={inp} placeholder={tr("병원 코드 또는 이름(예: HOSP002, 광주씨티병원)")} value={hospitalId} onChange={(e) => setHospitalId(e.target.value)} autoFocus />
         </label>
-        <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>개별 ID
-          <input style={inp} placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("개별 ID")}<input style={inp} placeholder={tr("아이디")} value={username} onChange={(e) => setUsername(e.target.value)} />
         </label>
         <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>Password
           <input style={inp} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text-secondary)" }}>
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          자동 로그인 (이 PC에 유지)
-        </label>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />{tr("자동 로그인 (이 PC에 유지)")}</label>
         {error && <div style={{ color: "var(--stat-emergency,#f87171)", fontSize: 12 }}>{error}</div>}
-        <button className="primary" type="submit">PACS Viewer 로그인</button>
+        <button className="primary" type="submit">{tr("PACS Viewer 로그인")}</button>
         {onBack && (
           <button type="button" onClick={onBack}
-                  style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>
-            ← 홈으로
-          </button>
+                  style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer" }}>{tr("← 홈으로")}</button>
         )}
       </form>
       {dup && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
                         padding: 24, width: 400, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>이미 사용 중인 ID</div>
-            <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--text-secondary)" }}>
-              현재 접속하는 ID는 이미 사용중입니다.<br />
-              로그인 된 곳을 종료하고 여기에서 로그인 하시겠습니까?
-            </div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{tr("이미 사용 중인 ID")}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--text-secondary)" }}>{tr("현재 접속하는 ID는 이미 사용중입니다.")}<br />{tr("로그인 된 곳을 종료하고 여기에서 로그인 하시겠습니까?")}</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setDup(false)} style={{ padding: "6px 18px" }}>No</button>
               <button type="button" className="primary" onClick={takeover} style={{ padding: "6px 18px" }}>Yes</button>
@@ -123,21 +115,17 @@ export function ClientLogin({ onLogin, onBack }: {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1100 }}>
           <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
                         padding: 26, width: 380, maxWidth: "90vw", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>비밀번호 변경 (최초 로그인)</div>
-            <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text-secondary)" }}>
-              발급받은 초기 비밀번호는 최초 1회 반드시 변경해야 합니다. 새 비밀번호를 두 번 입력하세요(8자 이상).
-            </div>
-            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>새 비밀번호
-              <input style={inp} type="password" value={np1} autoFocus onChange={(e) => setNp1(e.target.value)} />
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{tr("비밀번호 변경 (최초 로그인)")}</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--text-secondary)" }}>{tr("발급받은 초기 비밀번호는 최초 1회 반드시 변경해야 합니다. 새 비밀번호를 두 번 입력하세요(8자 이상).")}</div>
+            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("새 비밀번호")}<input style={inp} type="password" value={np1} autoFocus onChange={(e) => setNp1(e.target.value)} />
             </label>
-            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>새 비밀번호 확인
-              <input style={inp} type="password" value={np2} onChange={(e) => setNp2(e.target.value)}
+            <label style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("새 비밀번호 확인")}<input style={inp} type="password" value={np2} onChange={(e) => setNp2(e.target.value)}
                      onKeyDown={(e) => { if (e.key === "Enter") void doChange(); }} />
             </label>
             {cerr && <div style={{ color: "var(--stat-emergency,#f87171)", fontSize: 12 }}>{cerr}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={cancelChange} style={{ padding: "6px 16px" }}>취소</button>
-              <button type="button" className="primary" onClick={doChange} style={{ padding: "6px 16px" }}>변경 후 로그인</button>
+              <button type="button" onClick={cancelChange} style={{ padding: "6px 16px" }}>{tr("취소")}</button>
+              <button type="button" className="primary" onClick={doChange} style={{ padding: "6px 16px" }}>{tr("변경 후 로그인")}</button>
             </div>
           </div>
         </div>

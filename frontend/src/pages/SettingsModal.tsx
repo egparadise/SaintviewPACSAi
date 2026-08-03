@@ -116,15 +116,11 @@ function UsageTop({ usage, labelOf, onReset }: {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)" }}>
-          자주 쓰는 툴 TOP10 (사용 횟수순)
-        </span>
-        <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={onReset}>기록 초기화</button>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-secondary)" }}>{tr("자주 쓰는 툴 TOP10 (사용 횟수순)")}</span>
+        <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={onReset}>{tr("기록 초기화")}</button>
       </div>
       {top.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          기록 없음 — 뷰어에서 툴을 사용하면 집계됩니다.
-        </div>
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("기록 없음 — 뷰어에서 툴을 사용하면 집계됩니다.")}</div>
       ) : (
         <ol style={{ margin: 0, paddingLeft: 22, fontSize: 12,
                      display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 16px" }}>
@@ -196,7 +192,7 @@ function CrashLogPanel() {
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <b style={{ fontSize: 13 }}>오류 기록</b>
+        <b style={{ fontSize: 13 }}>{tr("오류 기록")}</b>
         <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
           {items.length ? `${items.length}건 (최근 순)` : "기록 없음 — 정상입니다"}
         </span>
@@ -204,13 +200,12 @@ function CrashLogPanel() {
           <button style={{ fontSize: 11 }} disabled={!items.length}
                   onClick={() => setOpen((v) => !v)}>{open ? "접기" : "펼치기"}</button>
           <button style={{ fontSize: 11 }} disabled={!items.length}
-                  onClick={() => void navigator.clipboard?.writeText(text)}>전체 복사</button>
+                  onClick={() => void navigator.clipboard?.writeText(text)}>{tr("전체 복사")}</button>
           <button style={{ fontSize: 11 }} disabled={!items.length}
-                  onClick={() => { clearCrashLog(); setItems([]); setOpen(false); }}>지우기</button>
+                  onClick={() => { clearCrashLog(); setItems([]); setOpen(false); }}>{tr("지우기")}</button>
         </span>
       </div>
-      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 4 }}>
-        화면이 백지가 되거나 영상이 뜨지 않았을 때 <b>새로고침해도 여기에 남습니다</b>.
+      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 4 }}>{tr("화면이 백지가 되거나 영상이 뜨지 않았을 때")}<b>{tr("새로고침해도 여기에 남습니다")}</b>.
         [전체 복사] 로 담아 개발자에게 전달하면 원인을 바로 찾을 수 있습니다.
       </div>
       {open && (
@@ -660,7 +655,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     }
     // 열려 있는 Worklist 에 즉시 반영 신호 — 컬럼·패널·크기(뷰어별) 재로드/재해석 (Refresh 없이 반영)
     window.dispatchEvent(new CustomEvent("sv-settings-saved"));
-    setSaved("저장됨 — 워크리스트에 즉시 반영되었습니다");
+    setSaved(tr("저장됨 — 워크리스트에 즉시 반영되었습니다"));
     setSavedOnce(true);
     setTimeout(() => setSaved(""), 2500);
   };
@@ -675,7 +670,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     ...(maxed ? { width: "100vw" } : { maxWidth: "100vw" }),
                     padding: "0 6px", boxSizing: "border-box" }}>
       {/* 설정 창 왼쪽 Refresh — 저장 후 전체 새로고침으로 적용값을 즉시 확인 */}
-      <button title="모든 설정을 저장하고 화면을 새로고침 — 적용된 값을 바로 확인합니다"
+      <button title={tr("모든 설정을 저장하고 화면을 새로고침 — 적용된 값을 바로 확인합니다")}
               onClick={async () => { await save(); window.location.reload(); }}
               style={{
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
@@ -685,7 +680,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               }}>
         <span style={{ fontSize: 20, lineHeight: 1 }}>⟳</span>
         <span>Refresh</span>
-        <span style={{ fontSize: 10.5, opacity: 0.85 }}>저장+적용</span>
+        <span style={{ fontSize: 10.5, opacity: 0.85 }}>{tr("저장+적용")}</span>
       </button>
       <div style={{
         background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8,
@@ -752,21 +747,16 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
           {/* 우측 페이지 */}
           <div style={{ flex: 1, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
             {visibleTabs.length === 0 && (
-              <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                이 설정에 접근할 권한이 없습니다.
-              </div>
+              <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>{tr("이 설정에 접근할 권한이 없습니다.")}</div>
             )}
             {page === "viewer" && (
               <>
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                  뷰어 선택·모드·OHIF 등 <b>공통 설정</b>입니다. 표시·아이콘·사용 패턴은 좌측
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("뷰어 선택·모드·OHIF 등")}<b>{tr("공통 설정")}</b>입니다. 표시·아이콘·사용 패턴은 좌측
                   [뷰어 — TY Viewer]/[뷰어 — In Viewer] 탭에서 뷰어별로 설정하며, 기능은 두 뷰어 동일합니다.
                 </div>
-                <Group title="영상 파이프라인">
+                <Group title={tr("영상 파이프라인")}>
                   <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
-                    <input type="checkbox" checked={wasmPipe} onChange={(e) => setWasmPipe(e.target.checked)} />
-                    WASM 디코딩 파이프라인 (베타) — 원본 픽셀(WADO-RS bulkdata)을 브라우저에서 직접 디코딩
-                  </label>
+                    <input type="checkbox" checked={wasmPipe} onChange={(e) => setWasmPipe(e.target.checked)} />{tr("WASM 디코딩 파이프라인 (베타) — 원본 픽셀(WADO-RS bulkdata)을 브라우저에서 직접 디코딩")}</label>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     켜면 2D 뷰어가 서버 렌더링(JPEG) 대신 원본 16bit 프레임을 받아 WASM 코덱으로 디코딩합니다.
                     W/L 조정이 서버 왕복 없이 즉시 반영되고, 병원 설정의 전송구문(JPEG2000/JPEG-LS)으로 수신합니다.
@@ -775,10 +765,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 </Group>
                 {/* 제품 모드 프로파일 + 선택 뷰어 — 같은 높이 좌/우 배치(좁으면 줄바꿈) */}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>
-                <Group title="제품 모드 프로파일 (05 Mode Profile — 서버 JSON)" style={{ flex: "1 1 360px", minWidth: 0 }}>
+                <Group title={tr("제품 모드 프로파일 (05 Mode Profile — 서버 JSON)")} style={{ flex: "1 1 360px", minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <select id="sv-mode" value={modeSel} onChange={(e) => setModeSel(e.target.value)}>
-                      <option value="" disabled>모드 선택…</option>
+                      <option value="" disabled>{tr("모드 선택…")}</option>
                       {Object.entries(modeProfiles).map(([k, p]) => (
                         <option key={k} value={k}>{p.label ?? k}{k === modeSel ? " ✓ (현재 적용)" : ""}</option>
                       ))}
@@ -807,13 +797,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       const cvw = vw.client_viewer as string | undefined;
                       if (cvw && CLIENT_VIEWERS.some((x) => x.id === cvw)) setClientViewer(cvw);
                       setSaved(`'${prof.label ?? m}' 모드 적용 — 왼쪽 ⟳ Refresh로 즉시 확인`);
-                    }}>적용</button>
+                    }}>{tr("적용")}</button>
                     {isAdmin && (
-                      <button title="현재 워크리스트·뷰어 레이아웃(컬럼·검색필드·팔레트/썸네일 배치·선택 뷰어)을 선택한 프로파일에 저장 (전역)"
+                      <button title={tr("현재 워크리스트·뷰어 레이아웃(컬럼·검색필드·팔레트/썸네일 배치·선택 뷰어)을 선택한 프로파일에 저장 (전역)")}
                               onClick={async () => {
                         const m = modeSel;
                         const prof = modeProfiles[m];
-                        if (!prof) { alert("저장할 프로파일을 먼저 선택하세요"); return; }
+                        if (!prof) { alert(tr("저장할 프로파일을 먼저 선택하세요")); return; }
                         if (!confirm(`현재 화면 구성을 '${prof.label ?? m}' 프로파일에 저장할까요? (전역 — 모든 사용자에게 적용)`)) return;
                         const wl = (await api.getSetting("worklist.prefs")).value as Record<string, unknown>;
                         const vw = (await api.getSetting("viewer.prefs")).value as Record<string, unknown>;
@@ -831,18 +821,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         setModeProfiles(next);
                         setModeJson(JSON.stringify({ profiles: next }, null, 2));
                         setSaved(`현재 화면 구성을 '${prof.label ?? m}' 프로파일에 저장했습니다 (전역)`);
-                      }}>현재 화면을 프로파일에 저장</button>
+                      }}>{tr("현재 화면을 프로파일에 저장")}</button>
                     )}
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                     Core 기능은 동일, 화면 구성(컬럼·검색필드·팔레트/썸네일 배치·더블클릭·선택 뷰어)만 제품별 프로파일로 전환 — 타 PACS 사용 경험 그대로 이전.
-                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>I-View</b>=INFINITT 스타일 레이아웃 저장소 · <b>T-View</b>=자체 뷰어 레이아웃.
-                  </div>
+                    프로파일 정의는 서버 전역 설정(mode.profiles)에서 로드. <b>I-View</b>{tr("=INFINITT 스타일 레이아웃 저장소 ·")}<b>T-View</b>{tr("=자체 뷰어 레이아웃.")}</div>
                   {isAdmin && (
                     <details>
-                      <summary style={{ fontSize: 11.5, cursor: "pointer", color: "var(--text-secondary)" }}>
-                        프로파일 JSON 편집 (관리자 — 전역 적용)
-                      </summary>
+                      <summary style={{ fontSize: 11.5, cursor: "pointer", color: "var(--text-secondary)" }}>{tr("프로파일 JSON 편집 (관리자 — 전역 적용)")}</summary>
                       <textarea value={modeJson} onChange={(e) => setModeJson(e.target.value)}
                                 spellCheck={false}
                                 style={{
@@ -857,16 +844,16 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                             if (!parsed.profiles) throw new Error("최상위에 profiles 객체가 필요합니다");
                             await api.putSetting("mode.profiles", parsed, "global");
                             setModeProfiles(parsed.profiles);
-                            setSaved("모드 프로파일 JSON 저장됨 (전역)");
+                            setSaved(tr("모드 프로파일 JSON 저장됨 (전역)"));
                           } catch (e) {
                             alert(e instanceof Error ? `JSON 오류: ${e.message}` : "저장 실패");
                           }
-                        }}>JSON 저장</button>
+                        }}>{tr("JSON 저장")}</button>
                       </div>
                     </details>
                   )}
                 </Group>
-                <Group title="선택 뷰어 (Client Viewer)" style={{ flex: "1 1 300px", minWidth: 0 }}>
+                <Group title={tr("선택 뷰어 (Client Viewer)")} style={{ flex: "1 1 300px", minWidth: 0 }}>
                   <Row label="사용할 뷰어">
                     <select value={clientViewer} onChange={(e) => setClientViewer(e.target.value)}>
                       {CLIENT_VIEWERS.map((v) => (
@@ -911,37 +898,35 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </Row>
                   <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.7 }}>
                     워크리스트·뷰어·설정에 공통 적용됩니다(선택 즉시 반영, 계정에 저장).
-                    아랍어는 화면 방향이 <b>오른쪽 → 왼쪽</b>으로 바뀝니다.<br />
-                    ⚠ 현재 번역은 <b>자주 쓰는 화면</b>(설정 항목·워크리스트 조작·뷰어 도구·공통 버튼)부터
+                    아랍어는 화면 방향이 <b>{tr("오른쪽 → 왼쪽")}</b>{tr("으로 바뀝니다.")}<br />{tr("⚠ 현재 번역은")}<b>{tr("자주 쓰는 화면")}</b>(설정 항목·워크리스트 조작·뷰어 도구·공통 버튼)부터
                     적용돼 있습니다. 설정 화면의 긴 설명문 등 나머지는 아직 한국어로 나옵니다.
                   </div>
                 </Group>
-                <Group title="워크리스트 동작">
+                <Group title={tr("워크리스트 동작")}>
                   <Row label="갱신 방식">
                     <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       <select value={refreshSec > 0 ? "auto" : "manual"}
                               onChange={(e) => setRefreshSec(e.target.value === "auto" ? (refreshSec || 10) : 0)}>
-                        <option value="manual">수동 (SEARCH 누를 때만)</option>
-                        <option value="auto">자동 (주기 갱신)</option>
+                        <option value="manual">{tr("수동 (SEARCH 누를 때만)")}</option>
+                        <option value="auto">{tr("자동 (주기 갱신)")}</option>
                       </select>
                       {refreshSec > 0 && (
                         <>
                           <input type="number" min={1} max={3600} value={refreshSec} style={{ width: 72 }}
                                  onChange={(e) => setRefreshSec(Math.max(1, Math.min(3600, Number(e.target.value) || 1)))} />
-                          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>초마다</span>
+                          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("초마다")}</span>
                         </>
                       )}
                     </span>
                   </Row>
-                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                    기본은 <b>수동</b>입니다 — 워크리스트가 저절로 바뀌지 않고 SEARCH 를 누를 때만 새로 읽습니다.
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>{tr("기본은")}<b>{tr("수동")}</b>입니다 — 워크리스트가 저절로 바뀌지 않고 SEARCH 를 누를 때만 새로 읽습니다.
                     자동으로 두면 지정한 초마다 목록을 다시 읽습니다(선택·스크롤은 유지).
                   </div>
                   <Row label="기본 상태 필터">
                     <select value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
-                      <option value="">전체</option><option value="unread">미판독(확정 전)</option>
-                      <option value="draft_ready">AI초안</option>
-                      <option value="reading">판독중</option><option value="received">도착</option>
+                      <option value="">{tr("전체")}</option><option value="unread">{tr("미판독(확정 전)")}</option>
+                      <option value="draft_ready">{tr("AI초안")}</option>
+                      <option value="reading">{tr("판독중")}</option><option value="received">{tr("도착")}</option>
                     </select>
                   </Row>
                   <Row label="단축키">
@@ -952,8 +937,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </Row>
                   <Row label="더블클릭 동작">
                     <select value={dblAction} onChange={(e) => setDblAction(e.target.value as "viewer2d" | "ohif")}>
-                      <option value="viewer2d">자체 뷰어 (View&Draft)</option>
-                      <option value="ohif">OHIF 뷰어</option>
+                      <option value="viewer2d">{tr("자체 뷰어 (View&Draft)")}</option>
+                      <option value="ohif">{tr("OHIF 뷰어")}</option>
                     </select>
                   </Row>
                 </Group>
@@ -969,21 +954,21 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
             {page === "network" && (
               <>
-                <Group title="로컬 구성">
+                <Group title={tr("로컬 구성")}>
                   <Row label="API 서버"><code style={{ fontSize: 12 }}>http://localhost:8000</code></Row>
                   <Row label="OHIF 뷰어"><code style={{ fontSize: 12 }}>http://localhost:3000</code></Row>
                 </Group>
-                <Group title="DICOM 서버 (Orthanc)" right={<button onClick={testOrthanc}>연결 테스트</button>}>
+                <Group title={tr("DICOM 서버 (Orthanc)")} right={<button onClick={testOrthanc}>{tr("연결 테스트")}</button>}>
                   {orthanc === null ? (
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>확인 중…</div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("확인 중…")}</div>
                   ) : orthanc.alive ? (
                     <table className="grid-table">
                       <tbody>
-                        <tr><th style={{ width: 110 }}>상태</th><td style={{ color: "var(--stat-final)" }}>● 연결됨</td></tr>
+                        <tr><th style={{ width: 110 }}>{tr("상태")}</th><td style={{ color: "var(--stat-final)" }}>{tr("● 연결됨")}</td></tr>
                         <tr><th>AE Title</th><td>{orthanc.aet}</td></tr>
-                        <tr><th>DICOM 포트</th><td>{orthanc.dicom_port} (C-STORE 수신)</td></tr>
-                        <tr><th>버전</th><td>Orthanc {orthanc.version}</td></tr>
-                        <tr><th>저장 검사</th><td>{orthanc.studies_count}건</td></tr>
+                        <tr><th>{tr("DICOM 포트")}</th><td>{orthanc.dicom_port} (C-STORE 수신)</td></tr>
+                        <tr><th>{tr("버전")}</th><td>Orthanc {orthanc.version}</td></tr>
+                        <tr><th>{tr("저장 검사")}</th><td>{orthanc.studies_count}건</td></tr>
                       </tbody>
                     </table>
                   ) : (
@@ -992,32 +977,30 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </div>
                   )}
                 </Group>
-                <Group title="SCP/SCU 장비 노드 (AE Title · IP · Port)" right={
+                <Group title={tr("SCP/SCU 장비 노드 (AE Title · IP · Port)")} right={
                   isAdmin && (
                     <span style={{ display: "flex", gap: 4 }}>
                       <button style={{ padding: "1px 8px", fontSize: 11 }}
-                              onClick={() => setNodes((p) => [...p, { name: `NODE${p.length + 1}`, role: "scu", ae_title: "", ip: "", port: 104 }])}>
-                        ＋ 추가
-                      </button>
+                              onClick={() => setNodes((p) => [...p, { name: `NODE${p.length + 1}`, role: "scu", ae_title: "", ip: "", port: 104 }])}>{tr("＋ 추가")}</button>
                       <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={async () => {
                         try {
                           await api.putSetting("dicom.nodes", { items: nodes }, "global");
                           setNodeMsg("저장됨");
                         } catch (e) { setNodeMsg(e instanceof Error ? e.message : "저장 실패"); }
-                      }}>저장</button>
+                      }}>{tr("저장")}</button>
                       <button style={{ padding: "1px 8px", fontSize: 11 }}
-                              title="저장된 노드를 Orthanc DicomModalities로 등록 — C-STORE/C-FIND 대상"
+                              title={tr("저장된 노드를 Orthanc DicomModalities로 등록 — C-STORE/C-FIND 대상")}
                               onClick={async () => {
                                 try {
                                   const r = await api.applyDicomNodes();
                                   setNodeMsg(`Orthanc 반영 ${r.applied}건${r.errors.length ? ` · 오류: ${r.errors.join(", ")}` : ""}`);
                                 } catch (e) { setNodeMsg(e instanceof Error ? e.message : "반영 실패"); }
-                              }}>Orthanc 반영</button>
+                              }}>{tr("Orthanc 반영")}</button>
                     </span>
                   )
                 }>
                   <table className="grid-table">
-                    <thead><tr><th>이름</th><th style={{ width: 80 }}>역할</th><th>AE Title</th><th>IP</th><th style={{ width: 70 }}>Port</th><th style={{ width: 30 }}></th></tr></thead>
+                    <thead><tr><th>{tr("이름")}</th><th style={{ width: 80 }}>{tr("역할")}</th><th>AE Title</th><th>IP</th><th style={{ width: 70 }}>Port</th><th style={{ width: 30 }}></th></tr></thead>
                     <tbody>
                       {nodes.map((n, i) => (
                         <tr key={i}>
@@ -1028,7 +1011,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                               <td>
                                 <select value={n.role}
                                         onChange={(e) => setNodes((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as DicomNode["role"] } : x))}>
-                                  <option value="scu">SCU</option><option value="scp">SCP</option><option value="both">양방향</option>
+                                  <option value="scu">SCU</option><option value="scp">SCP</option><option value="both">{tr("양방향")}</option>
                                 </select>
                               </td>
                               <td><input value={n.ae_title} style={{ width: "95%" }}
@@ -1065,17 +1048,16 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
             {page === "servernet" && (
               <>
-                <Group title="로컬 서버 — 폴더 공유">
+                <Group title={tr("로컬 서버 — 폴더 공유")}>
                   <Row label="공유 디렉토리">
                     <input value={snDir} onChange={(e) => setSnDir(e.target.value)} disabled={!isAdmin}
                            placeholder="C:\PACS\share" style={{ width: 320 }} />
                     {isAdmin && (
                       <button onClick={() => setFsPickerOpen(true)}
-                              title="서버 PC의 폴더를 직접 탐색해 선택합니다 (드라이브→하위 폴더)"
+                              title={tr("서버 PC의 폴더를 직접 탐색해 선택합니다 (드라이브→하위 폴더)")}
                               style={{ padding: "2px 10px", fontSize: 12, display: "flex",
                                        alignItems: "center", gap: 5 }}>
-                        <FolderIcon size={13} /> 폴더 찾기
-                      </button>
+                        <FolderIcon size={13} />{tr("폴더 찾기")}</button>
                     )}
                     {snDirExists !== null && (
                       <span style={{
@@ -1087,9 +1069,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       </span>
                     )}
                   </Row>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    워크리스트 우측 [Local Server] 버튼에서 이 폴더의 파일 목록·다운로드가 제공됩니다 (서버 PC 기준 경로).
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("워크리스트 우측 [Local Server] 버튼에서 이 폴더의 파일 목록·다운로드가 제공됩니다 (서버 PC 기준 경로).")}</div>
                 </Group>
                 {fsPickerOpen && (
                   <FolderPickerModal
@@ -1097,7 +1077,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     onPick={(p) => { setSnDir(p); setFsPickerOpen(false); }}
                     onClose={() => setFsPickerOpen(false)} />
                 )}
-                <Group title="웹 서버">
+                <Group title={tr("웹 서버")}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <Row label="IP 주소">
                       <input value={snWeb.ip} disabled={!isAdmin} placeholder="192.168.0.10"
@@ -1110,7 +1090,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     <Row label="DICOM Port">
                       {/* DIMSE(C-ECHO/C-STORE) 통신 포트 — 웹(HTTP) 포트와 다르다. Echo 테스트는 이 포트로 나간다(미입력 시 Port 폴백) */}
                       <input value={snWeb.dicom_port} disabled={!isAdmin} placeholder="4242"
-                             title="DICOM C-ECHO/C-STORE 등 DIMSE 통신 포트 — 웹(HTTP) 포트와 다릅니다 (병원 컨테이너는 4301 등)"
+                             title={tr("DICOM C-ECHO/C-STORE 등 DIMSE 통신 포트 — 웹(HTTP) 포트와 다릅니다 (병원 컨테이너는 4301 등)")}
                              onChange={(e) => setSnWeb((p) => ({ ...p, dicom_port: e.target.value }))} style={{ width: 90 }} />
                     </Row>
                     <Row label="Name">
@@ -1132,11 +1112,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                           }, "global");
                           setSnMsg("서버 네트워크 설정 저장됨 (전역)");
                         } catch (e) { setSnMsg(e instanceof Error ? e.message : "저장 실패"); }
-                      }}>서버 설정 저장</button>
+                      }}>{tr("서버 설정 저장")}</button>
                     </div>
                   )}
                 </Group>
-                <Group title="연결 테스트 (Ping · DICOM Echo · DB)">
+                <Group title={tr("연결 테스트 (Ping · DICOM Echo · DB)")}>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <button onClick={async () => {
                       if (!snWeb.ip) { setSnMsg("IP를 먼저 입력하세요"); return; }
@@ -1145,7 +1125,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         const r = await api.netPing(snWeb.ip, Number(snWeb.port) || undefined);
                         setSnMsg(`Ping: ${r.icmp ? `OK (${r.icmp_ms}ms)` : "실패"}${r.tcp !== null ? ` · TCP ${snWeb.port}: ${r.tcp ? "OK" : "실패"}` : ""}`);
                       } catch (e) { setSnMsg(e instanceof Error ? e.message : "Ping 실패"); }
-                    }}>Ping 테스트</button>
+                    }}>{tr("Ping 테스트")}</button>
                     <button onClick={async () => {
                       // Echo 는 DICOM Port 로 — 웹(HTTP) 포트에 시도하면 연관 수립이 항상 실패한다
                       const dport = Number(snWeb.dicom_port) || Number(snWeb.port);
@@ -1164,12 +1144,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                           ? `DB: ✅ ${r.dialect} (${r.latency_ms}ms) — ${r.target}`
                           : `DB: ❌ ${r.detail}`);
                       } catch (e) { setSnMsg(e instanceof Error ? e.message : "DB 테스트 실패"); }
-                    }}>DB 연동 Test</button>
+                    }}>{tr("DB 연동 Test")}</button>
                   </div>
                   {snMsg && <div style={{ fontSize: 12.5, color: snMsg.includes("❌") || snMsg.includes("실패") ? "var(--stat-emergency)" : "var(--stat-final)" }}>{snMsg}</div>}
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    테스트는 관리자 권한으로 백엔드 서버에서 수행됩니다 (Echo=AE Title 검증 포함, DB=현재 연결 엔진 SELECT 1).
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("테스트는 관리자 권한으로 백엔드 서버에서 수행됩니다 (Echo=AE Title 검증 포함, DB=현재 연결 엔진 SELECT 1).")}</div>
                 </Group>
               </>
             )}
@@ -1191,10 +1169,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
                 {rdTab === "basic" && (
                   <>
-                    <Group title="판독의 등록 — 확정 서명에 기록">
+                    <Group title={tr("판독의 등록 — 확정 서명에 기록")}>
                       <Row label="이름(표시명)">
                         <input value={profName} onChange={(e) => setProfName(e.target.value)}
-                               placeholder="홍길동" style={{ width: 220 }} />
+                               placeholder={tr("홍길동")} style={{ width: 220 }} />
                       </Row>
                       <Row label="면허번호">
                         <input value={profLicense} onChange={(e) => setProfLicense(e.target.value)}
@@ -1203,11 +1181,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         <button className="primary" onClick={async () => {
                           await api.putProfile(profName, profLicense);
-                          setSaved("판독의 정보 저장됨 — 이후 확정(서명)부터 적용");
-                        }}>판독의 정보 저장</button>
+                          setSaved(tr("판독의 정보 저장됨 — 이후 확정(서명)부터 적용"));
+                        }}>{tr("판독의 정보 저장")}</button>
                       </div>
                     </Group>
-                    <Group title="레포트 옵션">
+                    <Group title={tr("레포트 옵션")}>
                       {([
                         ["always_report_window", "판독 창 항상 별도로 열기 — 워크리스트 옆 웹창(검사 선택 연동)"],
                         ["open_next_after_save", "저장(확정) 후 다음 레포트 열기"],
@@ -1225,66 +1203,55 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         <input type="number" min={0} max={1440} style={{ width: 70 }}
                                value={Number(rdOpts.phrase_backup_min ?? 10)}
                                onChange={(e) => setRdOpts((p) => ({ ...p, phrase_backup_min: Number(e.target.value) }))} />
-                        <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
-                          분 — 판독창의 내 단축키·템플릿(계정 로컬)을 주기적으로 서버에 백업 (0=끄기)
-                        </span>
+                        <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>{tr("분 — 판독창의 내 단축키·템플릿(계정 로컬)을 주기적으로 서버에 백업 (0=끄기)")}</span>
                       </Row>
                       <Row label="사이드바 기본 탭">
                         <select value={String(rdOpts.sidebar_tab ?? "history")}
                                 onChange={(e) => setRdOpts((p) => ({ ...p, sidebar_tab: e.target.value }))}>
-                          <option value="history">판독 이력</option>
-                          <option value="read">판독</option>
+                          <option value="history">{tr("판독 이력")}</option>
+                          <option value="read">{tr("판독")}</option>
                         </select>
                       </Row>
                       <Row label="단축키 패널 기본 탭">
                         <select value={String(rdOpts.panel_tab ?? "shortcut")}
                                 onChange={(e) => setRdOpts((p) => ({ ...p, panel_tab: e.target.value }))}>
-                          <option value="shortcut">단축키</option>
-                          <option value="template">템플릿</option>
+                          <option value="shortcut">{tr("단축키")}</option>
+                          <option value="template">{tr("템플릿")}</option>
                         </select>
                       </Row>
                       <Row label="텍스트 삽입 위치">
                         <select value={String(rdOpts.insert_pos ?? "end")}
                                 onChange={(e) => setRdOpts((p) => ({ ...p, insert_pos: e.target.value }))}>
-                          <option value="end">맨 끝에 삽입</option>
-                          <option value="cursor">커서 위치에 삽입</option>
+                          <option value="end">{tr("맨 끝에 삽입")}</option>
+                          <option value="cursor">{tr("커서 위치에 삽입")}</option>
                         </select>
                       </Row>
                     </Group>
-                    <Group title="비교 (Compare) — 과거검사 나란히 보기">
+                    <Group title={tr("비교 (Compare) — 과거검사 나란히 보기")}>
                       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                         <input type="checkbox" checked={cmpCfg.enabled}
-                               onChange={(e) => setCmpCfg((p) => ({ ...p, enabled: e.target.checked }))} />
-                        비교 기능 사용 (⇄ Compare)
-                      </label>
+                               onChange={(e) => setCmpCfg((p) => ({ ...p, enabled: e.target.checked }))} />{tr("비교 기능 사용 (⇄ Compare)")}</label>
                       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, opacity: cmpCfg.enabled ? 1 : 0.5 }}>
                         <input type="checkbox" checked={cmpCfg.multi_monitor} disabled={!cmpCfg.enabled}
-                               onChange={(e) => setCmpCfg((p) => ({ ...p, multi_monitor: e.target.checked }))} />
-                        다중 모니터 배치 — Viewer 모니터가 2개 이상이면 비교검사를 다음 모니터에 (끝번→첫 모니터 순환)
-                      </label>
+                               onChange={(e) => setCmpCfg((p) => ({ ...p, multi_monitor: e.target.checked }))} />{tr("다중 모니터 배치 — Viewer 모니터가 2개 이상이면 비교검사를 다음 모니터에 (끝번→첫 모니터 순환)")}</label>
                       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, opacity: cmpCfg.enabled ? 1 : 0.5 }}>
                         <input type="checkbox" checked={cmpCfg.labels} disabled={!cmpCfg.enabled}
-                               onChange={(e) => setCmpCfg((p) => ({ ...p, labels: e.target.checked }))} />
-                        M/S 라벨 표시 — 기준 검사 <b style={{ color: "var(--stat-final)" }}>Compare M</b>, 비교 검사 <b style={{ color: "var(--stat-final)" }}>Compare S1·S2</b> (녹색·중앙 상단)
-                      </label>
+                               onChange={(e) => setCmpCfg((p) => ({ ...p, labels: e.target.checked }))} />{tr("M/S 라벨 표시 — 기준 검사")}<b style={{ color: "var(--stat-final)" }}>Compare M</b>{tr(", 비교 검사")}<b style={{ color: "var(--stat-final)" }}>Compare S1·S2</b>{tr("(녹색·중앙 상단)")}</label>
                       <Row label="비교 기준">
                         <select value={cmpCfg.basis} disabled={!cmpCfg.enabled}
                                 onChange={(e) => setCmpCfg((p) => ({ ...p, basis: e.target.value as CompareBasis }))}>
-                          <option value="patient">환자 기준 — 이 환자의 과거검사 전부 (기본)</option>
-                          <option value="match">판독 기준 — 같은 Modality·같은 부위만</option>
+                          <option value="patient">{tr("환자 기준 — 이 환자의 과거검사 전부 (기본)")}</option>
+                          <option value="match">{tr("판독 기준 — 같은 Modality·같은 부위만")}</option>
                         </select>
                       </Row>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                        기본은 <b>환자 기준</b>입니다 — 같은 환자(차트번호)의 과거검사를 모두 후보로 봅니다.
-                        <b>판독 기준</b>은 그중 현재 검사와 <b>같은 Modality·같은 검사부위</b>만 남겨,
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.7 }}>{tr("기본은")}<b>{tr("환자 기준")}</b>{tr("입니다 — 같은 환자(차트번호)의 과거검사를 모두 후보로 봅니다.")}<b>{tr("판독 기준")}</b>{tr("은 그중 현재 검사와")}<b>{tr("같은 Modality·같은 검사부위")}</b>만 남겨,
                         직접 비교되는 과거 판독만 보여줍니다(부위가 비어 있으면 검사명 앞머리로 판정).
-                        두 경우 모두 후보는 <b>같은 환자</b>로 제한되며, 다른 환자 비교는 워크리스트 ＋Add 로만 가능합니다.
-                      </div>
+                        두 경우 모두 후보는 <b>{tr("같은 환자")}</b>{tr("로 제한되며, 다른 환자 비교는 워크리스트 ＋Add 로만 가능합니다.")}</div>
                       <Row label="과거검사(History) 비교 표시">
                         <select value={cmpCfg.prior_mode} disabled={!cmpCfg.enabled}
                                 onChange={(e) => setCmpCfg((p) => ({ ...p, prior_mode: e.target.value as "layout" | "monitor" }))}>
-                          <option value="layout">Layout 띄우기 — 한 화면 1:2 분할 (좌=현재, 우=과거)</option>
-                          <option value="monitor">Monitor 띄우기 — 인접 모니터 창 (다음, 끝번이면 이전)</option>
+                          <option value="layout">{tr("Layout 띄우기 — 한 화면 1:2 분할 (좌=현재, 우=과거)")}</option>
+                          <option value="monitor">{tr("Monitor 띄우기 — 인접 모니터 창 (다음, 끝번이면 이전)")}</option>
                         </select>
                       </Row>
                       <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
@@ -1293,11 +1260,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         ⇄ Compare(다중 선택)의 다중 모니터 배치는 위 체크가 담당합니다. 창 관리 권한(HTTPS)·팝업 허용 필요.
                       </div>
                     </Group>
-                    <Group title="시스템 단축키" right={
+                    <Group title={tr("시스템 단축키")} right={
                       <button style={{ padding: "1px 8px", fontSize: 11 }}
-                              onClick={() => setRdOpts((p) => ({ ...p, key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A", key_mic: "Ctrl+M" }))}>
-                        기본값으로 초기화
-                      </button>
+                              onClick={() => setRdOpts((p) => ({ ...p, key_save: "Ctrl+S", key_approve: "Ctrl+Shift+A", key_mic: "Ctrl+M" }))}>{tr("기본값으로 초기화")}</button>
                     }>
                       <Row label="리포트 저장">
                         <KeyCaptureInput value={String(rdOpts.key_save ?? "Ctrl+S")}
@@ -1311,9 +1276,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         <KeyCaptureInput value={String(rdOpts.key_mic ?? "Ctrl+M")}
                                          onChange={(v) => setRdOpts((p) => ({ ...p, key_mic: v }))} />
                       </Row>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        옵션·단축키는 OK(저장) 시 계정에 저장(로밍) — 뷰어 판독 창에 즉시 적용됩니다.
-                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("옵션·단축키는 OK(저장) 시 계정에 저장(로밍) — 뷰어 판독 창에 즉시 적용됩니다.")}</div>
                     </Group>
                   </>
                 )}
@@ -1340,9 +1303,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Group title={vLabel + " 워크리스트 — 뷰어별 그리드 컬럼 (계정별 저장)"}>
                     <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5, marginBottom: 8 }}>
                       <input type="checkbox" checked={!ov}
-                             onChange={(e) => setWlBy((p) => ({ ...p, [vk]: e.target.checked ? null : [...colDefault] }))} />
-                      공통 워크리스트 설정 사용 (기본) — 해제하면 이 뷰어 전용 컬럼 구성을 편집합니다
-                    </label>
+                             onChange={(e) => setWlBy((p) => ({ ...p, [vk]: e.target.checked ? null : [...colDefault] }))} />{tr("공통 워크리스트 설정 사용 (기본) — 해제하면 이 뷰어 전용 컬럼 구성을 편집합니다")}</label>
                     {ov && (
                       <FilterSettingList
                         all={Object.keys(COLUMN_DEFS)}
@@ -1383,42 +1344,36 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                             );
                           })}
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      해제 = 워크리스트에서 숨김. 화면에서 스플리터를 최소까지 드래그하거나 ✕(패널 그립)로 숨긴 상태가 여기와 양방향으로 동기됩니다.
-                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("해제 = 워크리스트에서 숨김. 화면에서 스플리터를 최소까지 드래그하거나 ✕(패널 그립)로 숨긴 상태가 여기와 양방향으로 동기됩니다.")}</div>
                   </Group>
                 </>
               );
             })()}
             {page === "worklist" && (
               <>
-                <Group title="그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)">
+                <Group title={tr("그리드 컬럼 구성 — Filter Setting (USE/NO USE, UBPACS형)")}>
                   <FilterSettingList
                     all={Object.keys(COLUMN_DEFS)}
                     selected={columns}
                     labelOf={(k) => COLUMN_DEFS[k].label}
                     onChange={setColumns}
                   />
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    USE/NO USE 클릭으로 토글, ▲▼로 표시 순서 변경 — OK(저장) 시 적용.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("USE/NO USE 클릭으로 토글, ▲▼로 표시 순서 변경 — OK(저장) 시 적용.")}</div>
                 </Group>
-                <Group title="검색 필드 구성 (Find criteria)">
+                <Group title={tr("검색 필드 구성 (Find criteria)")}>
                   <DualList
                     all={Object.keys(FIND_FIELDS)}
                     selected={findFields}
                     labelOf={(k) => FIND_FIELDS[k]}
                     onChange={setFindFields}
                   />
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("컬럼·검색필드 구성은 서버 저장(로밍) — 어느 PC에서 로그인해도 동일 적용.")}</div>
                 </Group>
-                <Group title="상용구 관리 (DB — Modality×부위 분류 + Alt+단축키)" right={
-                  <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setPhraseModal("new")}>＋ 추가</button>
+                <Group title={tr("상용구 관리 (DB — Modality×부위 분류 + Alt+단축키)")} right={
+                  <button style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setPhraseModal("new")}>{tr("＋ 추가")}</button>
                 }>
                   <table className="grid-table">
-                    <thead><tr><th style={{ width: 90 }}>분류</th><th>NAME</th><th style={{ width: 56 }}>단축키</th><th style={{ width: 76 }}></th></tr></thead>
+                    <thead><tr><th style={{ width: 90 }}>{tr("분류")}</th><th>NAME</th><th style={{ width: 56 }}>{tr("단축키")}</th><th style={{ width: 76 }}></th></tr></thead>
                     <tbody>
                       {phrases.map((p) => (
                         <tr key={p.id}>
@@ -1436,13 +1391,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         </tr>
                       ))}
                       {phrases.length === 0 && (
-                        <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>등록된 상용구 없음 — ＋추가</td></tr>
+                        <tr><td colSpan={4} style={{ color: "var(--text-secondary)" }}>{tr("등록된 상용구 없음 — ＋추가")}</td></tr>
                       )}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    워크리스트 상용구(Std) 패널과 동일 DB — 리포트에서 Alt+단축키로 즉시 삽입.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("워크리스트 상용구(Std) 패널과 동일 DB — 리포트에서 Alt+단축키로 즉시 삽입.")}</div>
                 </Group>
                 {phraseModal !== null && (
                   <PhraseEditModal
@@ -1455,7 +1408,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     onClose={() => setPhraseModal(null)}
                   />
                 )}
-                <Group title="워크리스트 구성요소 (UBPACS-Z p.8 — Study List 제외 추가/삭제)">
+                <Group title={tr("워크리스트 구성요소 (UBPACS-Z p.8 — Study List 제외 추가/삭제)")}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     {([
                       ["orders", "오더/예약 (Order)"],
@@ -1473,58 +1426,54 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       </label>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    체크 해제 시 워크리스트에서 해당 창이 숨겨집니다. 배치 순서는 워크리스트에서 그립(⋮) 드래그로 변경.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("체크 해제 시 워크리스트에서 해당 창이 숨겨집니다. 배치 순서는 워크리스트에서 그립(⋮) 드래그로 변경.")}</div>
                 </Group>
-                <Group title="워크리스트 페이지 탭 (UBPACS-Z — 최대 10)">
+                <Group title={tr("워크리스트 페이지 탭 (UBPACS-Z — 최대 10)")}>
                   <table className="grid-table">
-                    <thead><tr><th style={{ width: 130 }}>이름</th><th>검색 조건</th><th style={{ width: 118 }}></th></tr></thead>
+                    <thead><tr><th style={{ width: 130 }}>{tr("이름")}</th><th>{tr("검색 조건")}</th><th style={{ width: 118 }}></th></tr></thead>
                     <tbody>
                       {wlTabs.map((t, i) => (
                         <tr key={t.id}>
                           <td>{t.label}</td>
                           <td style={{ color: "var(--text-secondary)" }}>{folderSummary(t.filter)}</td>
                           <td style={{ whiteSpace: "nowrap" }}>
-                            <button style={{ padding: "0 6px", fontSize: 11 }} title="이름·검색 조건 수정"
-                                    onClick={() => setTabModal({ index: i })}>수정</button>
-                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title="위로"
+                            <button style={{ padding: "0 6px", fontSize: 11 }} title={tr("이름·검색 조건 수정")}
+                                    onClick={() => setTabModal({ index: i })}>{tr("수정")}</button>
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === 0} title={tr("위로")}
                                     onClick={() => {
                                       const next = [...wlTabs];
                                       [next[i - 1], next[i]] = [next[i], next[i - 1]];
                                       setWlTabs(next);
-                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                      saveTabs(next).then(() => setSaved(tr("페이지 탭 저장됨"))).catch(() => {});
                                     }}>▲</button>
-                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === wlTabs.length - 1} title="아래로"
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={i === wlTabs.length - 1} title={tr("아래로")}
                                     onClick={() => {
                                       const next = [...wlTabs];
                                       [next[i], next[i + 1]] = [next[i + 1], next[i]];
                                       setWlTabs(next);
-                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                      saveTabs(next).then(() => setSaved(tr("페이지 탭 저장됨"))).catch(() => {});
                                     }}>▼</button>
-                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={t.id === "default"} title="삭제"
+                            <button style={{ padding: "0 6px", fontSize: 11 }} disabled={t.id === "default"} title={tr("삭제")}
                                     onClick={() => {
                                       if (!window.confirm(`'${t.label}' 페이지를 삭제할까요?`)) return;
                                       const next = wlTabs.filter((x) => x.id !== t.id);
                                       setWlTabs(next);
-                                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                                      saveTabs(next).then(() => setSaved(tr("페이지 탭 저장됨"))).catch(() => {});
                                     }}>✕</button>
                           </td>
                         </tr>
                       ))}
                       {wlTabs.length === 0 && (
-                        <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>페이지 없음</td></tr>
+                        <tr><td colSpan={3} style={{ color: "var(--text-secondary)" }}>{tr("페이지 없음")}</td></tr>
                       )}
                     </tbody>
                   </table>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <button onClick={() => setTabModal("add")} disabled={wlTabs.length >= 10}>＋ 페이지 추가</button>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      워크리스트 상단 탭과 동일 데이터 — 탭 ＋ 버튼은 현재 검색조건을 스냅샷으로 등록.
-                    </span>
+                    <button onClick={() => setTabModal("add")} disabled={wlTabs.length >= 10}>{tr("＋ 페이지 추가")}</button>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("워크리스트 상단 탭과 동일 데이터 — 탭 ＋ 버튼은 현재 검색조건을 스냅샷으로 등록.")}</span>
                   </div>
                 </Group>
-                <Group title="검색 폴더 트리 (탐색기형 — 예: 응급실 › DR › Chest)">
+                <Group title={tr("검색 폴더 트리 (탐색기형 — 예: 응급실 › DR › Chest)")}>
                   <div style={{
                     height: 190, display: "flex", flexDirection: "column", padding: 4,
                     border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-canvas)",
@@ -1533,11 +1482,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                                       onSelect={(n) => setSelTreeId(n.id)}
                                       onChange={(next) => {
                                         setWlTree(next);
-                                        saveTree(next).then(() => setSaved("검색 폴더 저장됨")).catch(() => {});
+                                        saveTree(next).then(() => setSaved(tr("검색 폴더 저장됨"))).catch(() => {});
                                       }} />
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    각 폴더는 자기 조건만 가지며, 워크리스트에서 폴더 클릭 시 <b>상위 경로 조건이 누적 병합</b>되어 검색됩니다.
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("각 폴더는 자기 조건만 가지며, 워크리스트에서 폴더 클릭 시")}<b>{tr("상위 경로 조건이 누적 병합")}</b>되어 검색됩니다.
                     변경은 즉시 서버 저장(로밍).
                   </div>
                 </Group>
@@ -1550,13 +1498,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     onSave={(label, filter) => {
                       let next: WorklistTab[];
                       if (tabModal === "add") {
-                        if (wlTabs.length >= 10) { alert("워크리스트 페이지는 최대 10개입니다"); return; }
+                        if (wlTabs.length >= 10) { alert(tr("워크리스트 페이지는 최대 10개입니다")); return; }
                         next = [...wlTabs, { id: newId(), label, filter }];
                       } else {
                         next = wlTabs.map((t, i) => (i === tabModal.index ? { ...t, label, filter } : t));
                       }
                       setWlTabs(next);
-                      saveTabs(next).then(() => setSaved("페이지 탭 저장됨")).catch(() => {});
+                      saveTabs(next).then(() => setSaved(tr("페이지 탭 저장됨"))).catch(() => {});
                       setTabModal(null);
                     }}
                     onClose={() => setTabModal(null)}
@@ -1567,42 +1515,31 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
             {page === "report" && (
               <>
-                <Group title="상용구 (Predefined Readings)">
-                  <div style={{ fontSize: 12.5 }}>
-                    등록된 상용구: <b>{phrases.length}건</b> (DB 테이블)
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                    등록·수정·삭제는 <b>워크리스트 탭의 상용구 관리</b> 또는 워크리스트 하단 상용구(Std) 패널에서.
+                <Group title={tr("상용구 (Predefined Readings)")}>
+                  <div style={{ fontSize: 12.5 }}>{tr("등록된 상용구:")}<b>{phrases.length}건</b>{tr("(DB 테이블)")}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("등록·수정·삭제는")}<b>{tr("워크리스트 탭의 상용구 관리")}</b> 또는 워크리스트 하단 상용구(Std) 패널에서.
                     더블클릭 또는 Alt+단축키로 Conclusion에 삽입됩니다.
                   </div>
                 </Group>
-                <Group title="리포트 구성 (Report Composition — UBPACS p.22)">
+                <Group title={tr("리포트 구성 (Report Composition — UBPACS p.22)")}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                    <input type="checkbox" checked={rptAiPanel} onChange={(e) => setRptAiPanel(e.target.checked)} />
-                    AI Structured Report 패널 표시 (해제 시 Report 단독 — AI는 ↗ 별도 창으로만)
-                  </label>
+                    <input type="checkbox" checked={rptAiPanel} onChange={(e) => setRptAiPanel(e.target.checked)} />{tr("AI Structured Report 패널 표시 (해제 시 Report 단독 — AI는 ↗ 별도 창으로만)")}</label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                    <input type="checkbox" checked={rptAutoApply} onChange={(e) => setRptAutoApply(e.target.checked)} />
-                    AI 초안을 Report에 자동 적용 (해제 시 빈 양식에서 시작 — [적용 ▶]로만 가져옴)
-                  </label>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    리포트 패널: ◀▶ 이전/다음 환자 이동 · 이력 콤보(과거 버전 보기) · ↗ AI 별도 창(모니터) — 계정 로밍.
-                  </div>
+                    <input type="checkbox" checked={rptAutoApply} onChange={(e) => setRptAutoApply(e.target.checked)} />{tr("AI 초안을 Report에 자동 적용 (해제 시 빈 양식에서 시작 — [적용 ▶]로만 가져옴)")}</label>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("리포트 패널: ◀▶ 이전/다음 환자 이동 · 이력 콤보(과거 버전 보기) · ↗ AI 별도 창(모니터) — 계정 로밍.")}</div>
                 </Group>
-                <Group title="출력 형식">
-                  <div style={{ fontSize: 12.5 }}>PDF · DICOM SR(확정 후 전송) · FHIR DiagnosticReport</div>
+                <Group title={tr("출력 형식")}>
+                  <div style={{ fontSize: 12.5 }}>{tr("PDF · DICOM SR(확정 후 전송) · FHIR DiagnosticReport")}</div>
                 </Group>
               </>
             )}
 
             {page === "viewer" && (
-              <Group title="OHIF (고급 웹뷰어)">
+              <Group title={tr("OHIF (고급 웹뷰어)")}>
                 <Row label="OHIF 사용">
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <input type="checkbox" checked={ohifOn}
-                           onChange={(e) => setOhifOn(e.target.checked)} />
-                    OHIF 아이콘 표시·동작 허용 (기본 꺼짐)
-                  </label>
+                           onChange={(e) => setOhifOn(e.target.checked)} />{tr("OHIF 아이콘 표시·동작 허용 (기본 꺼짐)")}</label>
                 </Row>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                   끄면 워크리스트(⌂ Adv·🌐·우클릭 메뉴)와 뷰어의 OHIF 버튼이 숨겨지고 동작하지 않습니다.
@@ -1611,7 +1548,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
               </Group>
             )}
             {page === "viewer" && (
-              <Group title="Tools 아이콘 크기 (TY · In 뷰어)">
+              <Group title={tr("Tools 아이콘 크기 (TY · In 뷰어)")}>
                 <Row label="TY Viewer">
                   <input type="range" min={13} max={64} step={1} value={tyToolSize}
                          onChange={(e) => setTyToolSize(Number(e.target.value))} />
@@ -1626,29 +1563,23 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                          onChange={(e) => setInfToolSize(Math.min(64, Math.max(13, Number(e.target.value) || 34)))} />
                   <span style={{ fontSize: 12, marginLeft: 4 }}>px</span>
                 </Row>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  두 뷰어의 도구 팔레트 아이콘 크기를 한 곳에서 조정합니다 (각 뷰어 전용 탭에서도 동일하게 조정 가능).
-                  <b> OK(저장)</b> 후 열려 있는 뷰어를 새로고침하면 반영됩니다.
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("두 뷰어의 도구 팔레트 아이콘 크기를 한 곳에서 조정합니다 (각 뷰어 전용 탭에서도 동일하게 조정 가능).")}<b>{tr("OK(저장)")}</b>{tr("후 열려 있는 뷰어를 새로고침하면 반영됩니다.")}</div>
               </Group>
             )}
             {page === "viewerIn" && (
               <>
               <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                <b>In Viewer 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.
-              </div>
-              <Group title="2D 행잉 (이 뷰어 전용 — 모달리티 → Series / Image)">
-                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>
-                  이 뷰어 전용 2D 행잉. 뷰어 공통의 <b>'공통 우선 적용'</b>이 켜져 있으면 공통 설정이 우선합니다.
-                </div>
+                <b>{tr("In Viewer 전용")}</b>{tr("— 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 두 뷰어 동일합니다.")}</div>
+              <Group title={tr("2D-inviewer layout (모달리티 → Series / Image)")}>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>{tr("이 뷰어 전용 2D 행잉. 뷰어 공통의")}<b>{tr("'공통 우선 적용'")}</b>{tr("이 켜져 있으면 공통 설정이 우선합니다.")}</div>
                 <Hanging2dEditor map={h2dByViewer.infi ?? {}} onChange={(m, next) =>
                   setH2dByViewer((p) => ({ ...p, infi: { ...(p.infi ?? {}), [m]: next } }))} />
               </Group>
-              <Group title="In Viewer 표시 (계정별 저장)">
+              <Group title={tr("In Viewer 표시 (계정별 저장)")}>
                 <Row label="툴 배열 (열)">
                   <select value={infToolCols} onChange={(e) => setInfToolCols(Number(e.target.value))}>
-                    <option value={1}>1X1 (한 줄 1개)</option>
-                    <option value={2}>2X2 (기본)</option>
+                    <option value={1}>{tr("1X1 (한 줄 1개)")}</option>
+                    <option value={2}>{tr("2X2 (기본)")}</option>
                     <option value={3}>3X3</option>
                     <option value={4}>4X4</option>
                   </select>
@@ -1656,63 +1587,49 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <Row label="멀티선택 색">
                   <input type="color" value={infSelColor}
                          onChange={(e) => setInfSelColor(e.target.value)}
-                         title="Crosslink 멀티 선택 페인 테두리 색" />
-                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
-                    Shift/Ctrl/A 로 선택된 페인 테두리 (기본 자주색)
-                  </span>
+                         title={tr("Crosslink 멀티 선택 페인 테두리 색")} />
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>{tr("Shift/Ctrl/A 로 선택된 페인 테두리 (기본 자주색)")}</span>
                 </Row>
                 <Row label="오버레이 글자">
                   <input type="range" min={6} max={24} step={0.5} value={infOvlFont}
                          onChange={(e) => setInfOvlFont(Number(e.target.value))} /> {infOvlFont}px
                   <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12, marginLeft: 12 }}>
                     <input type="checkbox" checked={infOvlVisible}
-                           onChange={(e) => setInfOvlVisible(e.target.checked)} />
-                    표시
-                  </label>
+                           onChange={(e) => setInfOvlVisible(e.target.checked)} />{tr("표시")}</label>
                 </Row>
                 <Row label="판독 도크">
                   <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
                     <input type="checkbox" checked={infRptDock}
-                           onChange={(e) => setInfRptDock(e.target.checked)} />
-                    뷰어를 열 때 판독(Report) 도크를 기본으로 열기 — 도크 열림 상태를 계정에 기억
-                  </label>
+                           onChange={(e) => setInfRptDock(e.target.checked)} />{tr("뷰어를 열 때 판독(Report) 도크를 기본으로 열기 — 도크 열림 상태를 계정에 기억")}</label>
                 </Row>
                 <Row label="위치 인디케이터">
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <input type="checkbox" checked={infScrollBar}
-                           onChange={(e) => setInfScrollBar(e.target.checked)} />
-                    페인 우측 이미지 위치 인디케이터(초록 바) 표시 — Scout line 과 무관한 현재 이미지 위치 표시(기본 꺼짐)
-                  </label>
+                           onChange={(e) => setInfScrollBar(e.target.checked)} />{tr("페인 우측 이미지 위치 인디케이터(초록 바) 표시 — Scout line 과 무관한 현재 이미지 위치 표시(기본 꺼짐)")}</label>
                 </Row>
                 <Row label="닫기 동작">
                   <select value={infCloseMode}
                           onChange={(e) => setInfCloseMode(e.target.value as typeof infCloseMode)}>
-                    <option value="ask">항상 묻기 (닫기 다이얼로그)</option>
-                    <option value="save_current">현재 저장하고 닫기 (주석)</option>
-                    <option value="save_all">전체 저장하고 닫기 (주석+GSPS)</option>
-                    <option value="none">저장하지 않고 닫기</option>
+                    <option value="ask">{tr("항상 묻기 (닫기 다이얼로그)")}</option>
+                    <option value="save_current">{tr("현재 저장하고 닫기 (주석)")}</option>
+                    <option value="save_all">{tr("전체 저장하고 닫기 (주석+GSPS)")}</option>
+                    <option value="none">{tr("저장하지 않고 닫기")}</option>
                   </select>
-                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
-                    닫기 다이얼로그의 "기본으로" 체크 시 이 설정이 자동 변경됩니다 (viewer.prefs.infi_close_mode)
-                  </span>
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>{tr("닫기 다이얼로그의 \"기본으로\" 체크 시 이 설정이 자동 변경됩니다 (viewer.prefs.infi_close_mode)")}</span>
                 </Row>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  단축키(뷰어): <b>T + 마우스 스크롤</b> = 글자 크기 조절 · <b>T + Del</b> = 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("단축키(뷰어):")}<b>{tr("T + 마우스 스크롤")}</b>{tr("= 글자 크기 조절 ·")}<b>T + Del</b>{tr("= 숨김/표시 토글 — 변경 즉시 계정에 저장됩니다.")}</div>
               </Group>
               </>
             )}
             {page === "viewerIn" && (
-              <Group title="툴 팔레트 표시 (In Viewer)">
+              <Group title={tr("툴 팔레트 표시 (In Viewer)")}>
                 <Row label="열 수">
                   <select value={infToolCols} onChange={(e) => setInfToolCols(Number(e.target.value))}>
-                    <option value={1}>1열</option><option value={2}>2열</option><option value={3}>3열</option>
+                    <option value={1}>{tr("1열")}</option><option value={2}>{tr("2열")}</option><option value={3}>{tr("3열")}</option>
                   </select>
                   <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12, marginLeft: 14 }}>
                     <input type="checkbox" checked={infToolLabels}
-                           onChange={(e) => setInfToolLabels(e.target.checked)} />
-                    아이콘 아래 이름 표시
-                  </label>
+                           onChange={(e) => setInfToolLabels(e.target.checked)} />{tr("아이콘 아래 이름 표시")}</label>
                 </Row>
                 <Row label="아이콘 크기">
                   <input type="range" min={13} max={64} step={1} value={infToolSize}
@@ -1725,18 +1642,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <input type="number" min={0.1} max={10} step={0.1} value={infCineSec}
                          onChange={(e) => setInfCineSec(Math.min(10, Math.max(0.1, Number(e.target.value) || 0.5)))}
                          style={{ width: 70 }} />
-                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
-                    초 — Play(▶) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능
-                  </span>
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>{tr("초 — Play(▶) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능")}</span>
                 </Row>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  팔레트는 기능별 구획(영상 조정 · 측정 · 주석 · 셔터 · 선택·연동 · 기타)으로 표시됩니다.
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("팔레트는 기능별 구획(영상 조정 · 측정 · 주석 · 셔터 · 선택·연동 · 기타)으로 표시됩니다.")}</div>
               </Group>
             )}
             {page === "viewerIn" && (
               <>
-              <Group title="툴바 사용자화 (In Viewer — 표시할 툴 선택)">
+              <Group title={tr("툴바 사용자화 (In Viewer — 표시할 툴 선택)")}>
                 <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)",
                               borderRadius: 4, padding: 6 }}>
                   {IN_PALETTE.map((t) => (
@@ -1750,63 +1663,48 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </label>
                   ))}
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  체크 해제한 툴은 뷰어 팔레트에서 숨겨집니다. 흐린 항목은 개발 예정 툴입니다.
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("체크 해제한 툴은 뷰어 팔레트에서 숨겨집니다. 흐린 항목은 개발 예정 툴입니다.")}</div>
               </Group>
-              <Group title="사용 패턴 · ★Quick 행 (In Viewer)">
+              <Group title={tr("사용 패턴 · ★Quick 행 (In Viewer)")}>
                 <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                   <input type="checkbox" checked={infQuickRow}
-                         onChange={(e) => setInfQuickRow(e.target.checked)} />
-                  ★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)
-                </label>
+                         onChange={(e) => setInfQuickRow(e.target.checked)} />{tr("★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)")}</label>
                 <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                   <input type="checkbox" checked={infUsageRec}
-                         onChange={(e) => setInfUsageRec(e.target.checked)} />
-                  사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)
-                </label>
+                         onChange={(e) => setInfUsageRec(e.target.checked)} />{tr("사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)")}</label>
                 <UsageTop usage={infUsage} labelOf={(id) => IN_TOOL_LABEL[id] ?? id}
                           onReset={() => {
                             setInfUsage({}); setInfUsageReset(true);
-                            setSaved("In Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영");
+                            setSaved(tr("In Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영"));
                           }} />
               </Group>
               </>
             )}
             {page === "viewer" && (
-              <Group title="2D 행잉 (모달리티 → Series / Image 분할) — 공통">
+              <Group title={tr("2D-common layout (모달리티 → Series / Image 분할)")}>
                 <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>
-                  <input type="checkbox" checked={h2dCommonOn} onChange={(e) => setH2dCommonOn(e.target.checked)} />
-                  이 공통 설정을 모든 뷰어에 우선 적용
-                </label>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>
-                  체크 시 SaintView/I-View/T-View 각 뷰어의 개별 2D 행잉보다 <b>이 공통 설정이 우선</b>합니다.
-                  해제하면 각 뷰어(뷰어 공통 &gt; SaintView/I-View/T-View)의 개별 설정을 사용합니다.<br />
-                  검사를 열 때 모달리티별 기본 분할 — <b>Series</b>(뷰포트 개수) + <b>Image</b>(페인 내 이미지 타일). 그리드에서 선택.<br />
-                  <b>기타*</b> 행은 자기 행이 없는 모든 모달리티에 적용되는 기본값입니다.<br />
-                  <span style={{ color: "var(--text-primary)" }}>
-                    적용 순서 — ① 이 <b>공통 Layout</b>(기본) → ② 위 체크를 해제하면 <b>뷰어별 Layout</b> →
-                    ③ <b>행잉(HP)</b> 은 이와 별도로, 뷰어의 HP 메뉴에서 <b>직접 고를 때만</b> 적용됩니다
-                    (행잉의 기본은 <b>적용되지 않음</b> — 규칙의 &lsquo;Exam 열 때 HP 사용&rsquo; 을 켜야 자동 적용).
-                  </span>
+                  <input type="checkbox" checked={h2dCommonOn} onChange={(e) => setH2dCommonOn(e.target.checked)} />{tr("이 공통 설정을 모든 뷰어에 우선 적용")}</label>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>{tr("체크 시 SaintView/I-View/T-View 각 뷰어의 개별 2D 행잉보다")}<b>{tr("이 공통 설정이 우선")}</b>합니다.
+                  해제하면 각 뷰어(뷰어 공통 &gt; SaintView/I-View/T-View)의 개별 설정을 사용합니다.<br />{tr("검사를 열 때 모달리티별 기본 분할 —")}<b>Series</b>{tr("(뷰포트 개수) +")}<b>Image</b>{tr("(페인 내 이미지 타일). 그리드에서 선택.")}<br />
+                  <b>{tr("기타*")}</b>{tr("행은 자기 행이 없는 모든 모달리티에 적용되는 기본값입니다.")}<br />
+                  <span style={{ color: "var(--text-primary)" }}>{tr("적용 순서 — ① 이")}<b>{tr("공통 Layout")}</b>{tr("(기본) → ② 위 체크를 해제하면")}<b>{tr("뷰어별 Layout")}</b> →
+                    ③ <b>{tr("행잉(HP)")}</b>{tr("은 이와 별도로, 뷰어의 HP 메뉴에서")}<b>{tr("직접 고를 때만")}</b> 적용됩니다
+                    (행잉의 기본은 <b>{tr("적용되지 않음")}</b>{tr("— 규칙의 &lsquo;Exam 열 때 HP 사용&rsquo; 을 켜야 자동 적용).")}</span>
                 </div>
                 <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))} />
               </Group>
             )}
             {page === "viewer" && (
-              <Group title="MG — 유방 사이 여백 제거 (2D-MG)">
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 6 }}>
-                  MG 검사를 열면 뷰어 우측 상단에 <b style={{ color: "#a78bfa" }}>2D-MG</b> 체크박스가 나타납니다.
-                  체크하면 좌·우 유방 사이의 빈 공간(공기)을 잘라내고 <b>흉벽을 바깥쪽 가장자리</b>에 붙여
+              <Group title={tr("MG — 유방 사이 여백 제거 (2D-MG)")}>
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 6 }}>{tr("MG 검사를 열면 뷰어 우측 상단에")}<b style={{ color: "#a78bfa" }}>2D-MG</b> 체크박스가 나타납니다.
+                  체크하면 좌·우 유방 사이의 빈 공간(공기)을 잘라내고 <b>{tr("흉벽을 바깥쪽 가장자리")}</b>에 붙여
                   두 영상이 가운데에서 맞닿게 배치합니다. 해제하면 원본 그대로 표시합니다.
                   (SaintView·I-View·T-View 공통 적용)
                 </div>
                 <Row label="기본 사용">
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="checkbox" checked={mgJoin.on_default}
-                           onChange={(e) => setMgJoin({ ...mgJoin, on_default: e.target.checked })} />
-                    MG 검사를 열 때 2D-MG 를 켠 상태로 시작
-                  </label>
+                           onChange={(e) => setMgJoin({ ...mgJoin, on_default: e.target.checked })} />{tr("MG 검사를 열 때 2D-MG 를 켠 상태로 시작")}</label>
                 </Row>
                 <Row label="Image layout">
                   <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -1816,26 +1714,21 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         <option key={k} value={k}>{MG_LAYOUT_DESC[k] ?? mgLayoutLabel(k)}</option>
                       ))}
                     </select>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      4뷰가 한 시리즈에 들어 있는 검사에 이 분할로 겁니다(행:열).
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("4뷰가 한 시리즈에 들어 있는 검사에 이 분할로 겁니다(행:열).")}</span>
                   </span>
                 </Row>
                 <Row label="분할 방식">
                   <span style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                       <input type="checkbox" checked={mgJoin.series}
-                             onChange={(e) => setMgJoin({ ...mgJoin, series: e.target.checked })} />
-                      위 값을 <b>Series Layout</b> 으로 적용 (해제 시 <b>Image Layout</b>)
+                             onChange={(e) => setMgJoin({ ...mgJoin, series: e.target.checked })} />{tr("위 값을")}<b>Series Layout</b>{tr("으로 적용 (해제 시")}<b>Image Layout</b>)
                     </label>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      기본 켜짐 — 뷰 하나당 페인 하나(W/L·확대·계측이 뷰마다 따로).
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("기본 켜짐 — 뷰 하나당 페인 하나(W/L·확대·계측이 뷰마다 따로).")}</span>
                   </span>
                 </Row>
                 <Row label="">
                   <div style={{ fontSize: 11, color: "var(--stat-emergency)", lineHeight: 1.7 }}>
-                    ⚠ <b>해제하면 좌우 맞붙임(2D-MG)이 걸리지 않습니다.</b> 타일 페인은 변환이 페인당 하나뿐이라
+                    ⚠ <b>{tr("해제하면 좌우 맞붙임(2D-MG)이 걸리지 않습니다.")}</b> 타일 페인은 변환이 페인당 하나뿐이라
                     좌우를 따로 밀어 붙일 수 없어, 적용기가 타일 페인을 건너뜁니다 —
                     해제는 &lsquo;4뷰를 한 페인에 타일로 늘어놓기만&rsquo; 하는 표시 모드입니다.
                     또한 T-View·SaintView 는 타일 페인에 계측·주석·오버레이를 표시하지 않습니다(I-View 는 표시).
@@ -1844,16 +1737,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <Row label="흉벽 판정">
                   <select value={mgJoin.detect} style={{ width: 320 }}
                           onChange={(e) => setMgJoin({ ...mgJoin, detect: e.target.value === "ratio" ? "ratio" : "auto" })}>
-                    <option value="auto">자동 — 영상에서 조직 경계를 찾아 잘라냄 (권장)</option>
-                    <option value="ratio">고정 비율 — 아래 비율만큼 안쪽에서 잘라냄</option>
+                    <option value="auto">{tr("자동 — 영상에서 조직 경계를 찾아 잘라냄 (권장)")}</option>
+                    <option value="ratio">{tr("고정 비율 — 아래 비율만큼 안쪽에서 잘라냄")}</option>
                   </select>
                 </Row>
                 <Row label="배경 임계값">
                   <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
                     <input type="number" min={0} max={255} value={mgJoin.thresh} style={{ width: 80 }}
                            onChange={(e) => setMgJoin({ ...mgJoin, thresh: Math.max(0, Math.min(255, Number(e.target.value) || 0)) })} />
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      (0~255) 프레임 네 모서리에서 잰 <b>배경 밝기와의 차이</b>가 이 값을 넘으면 조직으로 봅니다.
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("(0~255) 프레임 네 모서리에서 잰")}<b>{tr("배경 밝기와의 차이")}</b>가 이 값을 넘으면 조직으로 봅니다.
                       조직이 잘리면 낮추고, 여백이 남으면 높입니다.
                     </span>
                   </span>
@@ -1861,37 +1753,28 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <Row label="탐지 불가 시">
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
                     <input type="checkbox" checked={mgJoin.blind_ratio}
-                           onChange={(e) => setMgJoin({ ...mgJoin, blind_ratio: e.target.checked })} />
-                    픽셀을 읽을 수 없을 때 아래 고정 비율로 잘라냄
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 6 }}>
-                      꺼 두면(권장) 근거가 없을 때 원본을 그대로 표시합니다 — 추정 크롭은 조직을 가릴 수 있습니다.
-                    </span>
+                           onChange={(e) => setMgJoin({ ...mgJoin, blind_ratio: e.target.checked })} />{tr("픽셀을 읽을 수 없을 때 아래 고정 비율로 잘라냄")}<span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 6 }}>{tr("꺼 두면(권장) 근거가 없을 때 원본을 그대로 표시합니다 — 추정 크롭은 조직을 가릴 수 있습니다.")}</span>
                   </label>
                 </Row>
                 <Row label="고정 비율">
                   <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
                     <input type="number" min={0} max={60} value={mgJoin.ratio} style={{ width: 80 }}
                            onChange={(e) => setMgJoin({ ...mgJoin, ratio: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })} />
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      % — 자동 판정이 불가능할 때(외부 서버 영상 등) 안쪽에서 잘라낼 폭.
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("% — 자동 판정이 불가능할 때(외부 서버 영상 등) 안쪽에서 잘라낼 폭.")}</span>
                   </span>
                 </Row>
                 <Row label="여백">
                   <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
                     <input type="number" min={0} max={10} value={mgJoin.margin} style={{ width: 80 }}
                            onChange={(e) => setMgJoin({ ...mgJoin, margin: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })} />
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      % — 조직이 가장자리에 딱 붙지 않도록 남기는 여백.
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("% — 조직이 가장자리에 딱 붙지 않도록 남기는 여백.")}</span>
                   </span>
                 </Row>
               </Group>
             )}
             {page === "viewer" && (
-              <Group title="영상 정보 표시 (오버레이) — 모달리티별 귀퉁이 배치">
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                  DICOM 헤더의 환자·검사·이미지 정보를 <b>상자의 네 귀퉁이</b> 중 어디에 띄울지 정합니다.
+              <Group title={tr("영상 정보 표시 (오버레이) — 모달리티별 귀퉁이 배치")}>
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7 }}>{tr("DICOM 헤더의 환자·검사·이미지 정보를")}<b>{tr("상자의 네 귀퉁이")}</b> 중 어디에 띄울지 정합니다.
                   아래 미리보기에서 위치가 바로 확인됩니다.
                 </div>
                 <OverlayLayoutEditor cfg={ovCfg} onChange={setOvCfg} />
@@ -1906,26 +1789,23 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </div>
                 )}
                 <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                  <b>T-View 전용</b> — 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 세 뷰어 동일합니다.
-                </div>
+                  <b>{tr("T-View 전용")}</b>{tr("— 표시·아이콘·사용 패턴 설정은 뷰어별로 적용되고, 판독·측정 등 기능은 세 뷰어 동일합니다.")}</div>
                 {(() => {
                   const vk = page === "viewerSv" ? "sv" : "ty";
                   const vmap = h2dByViewer[vk] ?? {};
                   return (
-                    <Group title="2D 행잉 (이 뷰어 전용 — 모달리티 → Series / Image)">
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>
-                        이 뷰어 전용 2D 행잉. 뷰어 공통의 <b>'공통 우선 적용'</b>이 켜져 있으면 공통 설정이 우선합니다.
-                      </div>
+                    <Group title={`${page === "viewerSv" ? "2D-Saintviewer layout" : "2D-Tviewer Layout"} (모달리티 → Series / Image)`}>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>{tr("이 뷰어 전용 2D 행잉. 뷰어 공통의")}<b>{tr("'공통 우선 적용'")}</b>{tr("이 켜져 있으면 공통 설정이 우선합니다.")}</div>
                       <Hanging2dEditor map={vmap} onChange={(m, next) =>
                         setH2dByViewer((p) => ({ ...p, [vk]: { ...(p[vk] ?? {}), [m]: next } }))} />
                     </Group>
                   );
                 })()}
-                <Group title="툴 아이콘·팔레트 (TY Viewer)">
+                <Group title={tr("툴 아이콘·팔레트 (TY Viewer)")}>
                   <Row label="툴 배열 (열)">
                     <select value={tyToolCols} onChange={(e) => setTyToolCols(Number(e.target.value))}>
-                      <option value={1}>1X1 (한 줄 1개)</option>
-                      <option value={2}>2X2 (기본)</option>
+                      <option value={1}>{tr("1X1 (한 줄 1개)")}</option>
+                      <option value={2}>{tr("2X2 (기본)")}</option>
                       <option value={3}>3X3</option>
                       <option value={4}>4X4</option>
                     </select>
@@ -1941,16 +1821,12 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Row label="라벨 표시">
                     <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
                       <input type="checkbox" checked={tyToolLabels}
-                             onChange={(e) => setTyToolLabels(e.target.checked)} />
-                      아이콘 아래 이름 표시
-                    </label>
+                             onChange={(e) => setTyToolLabels(e.target.checked)} />{tr("아이콘 아래 이름 표시")}</label>
                   </Row>
                   <Row label="3D 아이콘 효과">
                     <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
                       <input type="checkbox" checked={tyIcon3d}
-                             onChange={(e) => setTyIcon3d(e.target.checked)} />
-                      입체(3D) 렌더 — 해제 시 플랫(평면) 아이콘
-                    </label>
+                             onChange={(e) => setTyIcon3d(e.target.checked)} />{tr("입체(3D) 렌더 — 해제 시 플랫(평면) 아이콘")}</label>
                   </Row>
                   <Row label="오버레이 글자">
                     <input type="range" min={6} max={24} step={0.5} value={tyOvlFont}
@@ -1959,48 +1835,40 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <Row label="멀티선택 색">
                     <input type="color" value={tySelColor}
                            onChange={(e) => setTySelColor(e.target.value)}
-                           title="멀티 선택·활성 페인 테두리 색 (viewer.prefs.ty_sel_color)" />
-                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>
-                      Shift/Ctrl 로 선택된 페인 테두리 2px · 활성 페인 1px (기본 자주색 #d946ef)
-                    </span>
+                           title={tr("멀티 선택·활성 페인 테두리 색 (viewer.prefs.ty_sel_color)")} />
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 8 }}>{tr("Shift/Ctrl 로 선택된 페인 테두리 2px · 활성 페인 1px (기본 자주색 #d946ef)")}</span>
                   </Row>
                   <Row label="시네 기본 간격">
                     <input type="number" min={0.05} max={5} step={0.05} value={tyCineSec}
                            onChange={(e) => setTyCineSec(Math.min(5, Math.max(0.05, Number(e.target.value) || 0.15)))}
                            style={{ width: 70 }} />
-                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>
-                      초 — 시네(▶)·페인별 시네(▶p) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능
-                    </span>
+                    <span style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 6 }}>{tr("초 — 시네(▶)·페인별 시네(▶p) 자동 넘김의 초기 간격. 뷰어에서 페인별로 개별 조정 가능")}</span>
                   </Row>
                 </Group>
-                <Group title="사용 패턴 · ★Quick 행 (TY Viewer)">
+                <Group title={tr("사용 패턴 · ★Quick 행 (TY Viewer)")}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <input type="checkbox" checked={tyQuickRow}
-                           onChange={(e) => setTyQuickRow(e.target.checked)} />
-                    ★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)
-                  </label>
+                           onChange={(e) => setTyQuickRow(e.target.checked)} />{tr("★ Quick 행 표시 — 사용 상위 6개 툴을 팔레트 최상단에 (3회 미만 사용 시 비표시)")}</label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
                     <input type="checkbox" checked={tyUsageRec}
-                           onChange={(e) => setTyUsageRec(e.target.checked)} />
-                    사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)
-                  </label>
+                           onChange={(e) => setTyUsageRec(e.target.checked)} />{tr("사용 패턴 기록 — 툴 활성화 횟수 집계 (상위 50개, 계정 로밍)")}</label>
                   <UsageTop usage={tyUsage} labelOf={(id) => TY_TOOL_LABEL[id] ?? id}
                             onReset={() => {
                               setTyUsage({}); setTyUsageReset(true);
-                              setSaved("TY Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영");
+                              setSaved(tr("TY Viewer 사용 기록을 비웠습니다 — OK(저장) 시 반영"));
                             }} />
                 </Group>
-                <Group title="자체 2D 뷰어 레이아웃 (요청: 방향·크기 전환)">
+                <Group title={tr("자체 2D 뷰어 레이아웃 (요청: 방향·크기 전환)")}>
                   <Row label="툴 팔레트 위치">
                     <select value={paletteSide} onChange={(e) => setPaletteSide(e.target.value as "left" | "top" | "right")}>
-                      <option value="left">세로 (좌측)</option><option value="top">가로 (상단)</option>
-                      <option value="right">세로 (우측)</option><option value="bottom">가로 (하단)</option>
+                      <option value="left">{tr("세로 (좌측)")}</option><option value="top">{tr("가로 (상단)")}</option>
+                      <option value="right">{tr("세로 (우측)")}</option><option value="bottom">{tr("가로 (하단)")}</option>
                     </select>
                   </Row>
                   <Row label="썸네일 위치">
                     <select value={thumbSide} onChange={(e) => setThumbSide(e.target.value as "left" | "bottom" | "right")}>
-                      <option value="left">세로 (좌측)</option><option value="bottom">가로 (하단)</option>
-                      <option value="right">세로 (우측)</option><option value="top">가로 (상단)</option>
+                      <option value="left">{tr("세로 (좌측)")}</option><option value="bottom">{tr("가로 (하단)")}</option>
+                      <option value="right">{tr("세로 (우측)")}</option><option value="top">{tr("가로 (상단)")}</option>
                     </select>
                   </Row>
                   <Row label="썸네일 크기">
@@ -2009,30 +1877,26 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   </Row>
                   <Row label="썸네일 모드">
                     <select value={thumbMode} onChange={(e) => setThumbMode(e.target.value as "series" | "all")}>
-                      <option value="series">시리즈 (선택 시 개별 전개)</option>
-                      <option value="all">전체 이미지 나열</option>
+                      <option value="series">{tr("시리즈 (선택 시 개별 전개)")}</option>
+                      <option value="all">{tr("전체 이미지 나열")}</option>
                     </select>
                   </Row>
                   <Row label="판독창 도크">
                     <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12 }}>
-                      <input type="checkbox" checked={reportDock} onChange={(e) => setReportDock(e.target.checked)} />
-                      뷰어 우측에 리포트·과거검사 표시
-                    </label>
+                      <input type="checkbox" checked={reportDock} onChange={(e) => setReportDock(e.target.checked)} />{tr("뷰어 우측에 리포트·과거검사 표시")}</label>
                   </Row>
                   <Row label="닫기 동작">
                     <select value={closeMode}
                             onChange={(e) => setCloseMode(e.target.value as typeof closeMode)}>
-                      <option value="ask">항상 묻기 (닫기 다이얼로그)</option>
-                      <option value="save_current">현재 화면 저장하고 닫기</option>
-                      <option value="save_all">전체 변경사항 저장하고 닫기 (주석+GSPS)</option>
-                      <option value="discard">저장하지 않고 닫기</option>
+                      <option value="ask">{tr("항상 묻기 (닫기 다이얼로그)")}</option>
+                      <option value="save_current">{tr("현재 화면 저장하고 닫기")}</option>
+                      <option value="save_all">{tr("전체 변경사항 저장하고 닫기 (주석+GSPS)")}</option>
+                      <option value="discard">{tr("저장하지 않고 닫기")}</option>
                     </select>
                   </Row>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    닫기 다이얼로그에서 "기본으로" 체크 시 이 설정이 자동 변경됩니다. Exam 탭은 ✕/전체닫기 전까지 유지.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("닫기 다이얼로그에서 \"기본으로\" 체크 시 이 설정이 자동 변경됩니다. Exam 탭은 ✕/전체닫기 전까지 유지.")}</div>
                 </Group>
-                <Group title="Tools bar 구성 (UBPACS p.18~21 — 계정 로밍)">
+                <Group title={tr("Tools bar 구성 (UBPACS p.18~21 — 계정 로밍)")}>
                   {TOOLBAR_DEFS.map((sec) => (
                     <div key={sec.section}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 3 }}>
@@ -2053,18 +1917,14 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       </div>
                     </div>
                   ))}
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    체크 해제 시 뷰어 툴바에서 해당 버튼이 숨겨집니다 — 로그인 계정별 저장(로밍).
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("체크 해제 시 뷰어 툴바에서 해당 버튼이 숨겨집니다 — 로그인 계정별 저장(로밍).")}</div>
                 </Group>
-                <Group title="W/L 프리셋 (Presetting — 2D 섹션 버튼)" right={
+                <Group title={tr("W/L 프리셋 (Presetting — 2D 섹션 버튼)")} right={
                   <button style={{ padding: "1px 8px", fontSize: 11 }}
-                          onClick={() => setWlPresets((p) => [...p, { key: `p${Date.now() % 1e5}`, label: "새 프리셋", q: "40,400" }])}>
-                    ＋ 추가
-                  </button>
+                          onClick={() => setWlPresets((p) => [...p, { key: `p${Date.now() % 1e5}`, label: "새 프리셋", q: "40,400" }])}>{tr("＋ 추가")}</button>
                 }>
                   <table className="grid-table">
-                    <thead><tr><th>이름</th><th style={{ width: 90 }}>Center</th><th style={{ width: 90 }}>Width</th><th style={{ width: 32 }}></th></tr></thead>
+                    <thead><tr><th>{tr("이름")}</th><th style={{ width: 90 }}>Center</th><th style={{ width: 90 }}>Width</th><th style={{ width: 32 }}></th></tr></thead>
                     <tbody>
                       {wlPresets.map((p, i) => {
                         const [c, w] = p.q ? p.q.split(",") : ["", ""];
@@ -2074,7 +1934,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                           <tr key={p.key}>
                             <td><input value={p.label} style={{ width: "95%" }}
                                        onChange={(e) => setWlPresets((arr) => arr.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} /></td>
-                            <td><input value={c} placeholder="(기본)" style={{ width: 70 }}
+                            <td><input value={c} placeholder={tr("(기본)")} style={{ width: 70 }}
                                        onChange={(e) => setQ(e.target.value, w)} /></td>
                             <td><input value={w} style={{ width: 70 }}
                                        onChange={(e) => setQ(c, e.target.value)} /></td>
@@ -2085,48 +1945,40 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       })}
                     </tbody>
                   </table>
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    뷰어 2D 섹션에 프리셋 버튼으로 표시 — All 토글 시 전체 페인 적용. OK(저장) 시 반영.
-                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("뷰어 2D 섹션에 프리셋 버튼으로 표시 — All 토글 시 전체 페인 적용. OK(저장) 시 반영.")}</div>
                 </Group>
               </>
             )}
 
             {page === "shortcuts" && (
-              <Group title="단축키 (Mouse·Key) — 계정별 저장">
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  뷰어 마우스/키 동작을 계정별로 설정합니다(모든 뷰어 공통). 하단 OK(저장) 시 내 계정에만 적용.
-                </div>
+              <Group title={tr("단축키 (Mouse·Key) — 계정별 저장")}>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("뷰어 마우스/키 동작을 계정별로 설정합니다(모든 뷰어 공통). 하단 OK(저장) 시 내 계정에만 적용.")}</div>
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
-                  <span style={{ width: 170, color: "var(--text-secondary)" }}>우클릭 드래그 도구</span>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>{tr("우클릭 드래그 도구")}</span>
                   <select value={scRdrag} onChange={(e) => setScRdrag(e.target.value as "wl" | "zoom" | "pan")}>
-                    <option value="wl">W/L 조정 (기본)</option>
+                    <option value="wl">{tr("W/L 조정 (기본)")}</option>
                     <option value="zoom">Zoom</option>
                     <option value="pan">Pan</option>
                   </select>
                 </label>
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
-                  <span style={{ width: 170, color: "var(--text-secondary)" }}>시리즈 드롭 동작 메뉴</span>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>{tr("시리즈 드롭 동작 메뉴")}</span>
                   <input type="checkbox" checked={dropMenu} onChange={(e) => setDropMenu(e.target.checked)} />
-                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    체크 시 드롭할 때 Open/Combine/Combine all 메뉴 표시 — 해제(기본)는 바로 Open(교체)
-                  </span>
+                  <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("체크 시 드롭할 때 Open/Combine/Combine all 메뉴 표시 — 해제(기본)는 바로 Open(교체)")}</span>
                 </label>
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
-                  <span style={{ width: 170, color: "var(--text-secondary)" }}>Shift + 우클릭</span>
+                  <span style={{ width: 170, color: "var(--text-secondary)" }}>{tr("Shift + 우클릭")}</span>
                   <select value={scShiftR} onChange={(e) => setScShiftR(e.target.value as "zoomout" | "none")}>
-                    <option value="zoomout">Zoom Out 한 단계 (기본)</option>
-                    <option value="none">동작 없음</option>
+                    <option value="zoomout">{tr("Zoom Out 한 단계 (기본)")}</option>
+                    <option value="none">{tr("동작 없음")}</option>
                   </select>
                 </label>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                  · 우클릭(클릭만)=컨텍스트 메뉴 · 중클릭 드래그=Pan 고정 · 고정 키: Esc(계층 취소) · 1~9(시리즈 선택) · T 홀드(오버레이) · Backspace(주석 삭제 보조)
-                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("· 우클릭(클릭만)=컨텍스트 메뉴 · 중클릭 드래그=Pan 고정 · 고정 키: Esc(계층 취소) · 1~9(시리즈 선택) · T 홀드(오버레이) · Backspace(주석 삭제 보조)")}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                  <b style={{ fontSize: 12.5 }}>키 바인딩 (전체 기능)</b>
-                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>칸 클릭 후 키 입력 — Backspace=해제. 중복 키는 빨간 표시.</span>
+                  <b style={{ fontSize: 12.5 }}>{tr("키 바인딩 (전체 기능)")}</b>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("칸 클릭 후 키 입력 — Backspace=해제. 중복 키는 빨간 표시.")}</span>
                   <button style={{ marginLeft: "auto", fontSize: 11, padding: "1px 10px" }}
-                          onClick={() => setScKeys({ ...SC_DEFAULTS })}>↺ 전체 기본값</button>
+                          onClick={() => setScKeys({ ...SC_DEFAULTS })}>{tr("↺ 전체 기본값")}</button>
                 </div>
                 {(() => {
                   const dup = new Set(Object.values(scKeys).filter((v, _, arr) => v && arr.filter((x) => x === v).length > 1));
@@ -2138,7 +1990,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                         {SC_ACTIONS.filter((x) => x.group === g).map((x) => (
                           <label key={x.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
                             <span style={{ flex: 1, color: "var(--text-primary)" }}>{x.label}</span>
-                            <input readOnly value={displayKey(scKeys[x.id] ?? x.def)} placeholder="키 입력"
+                            <input readOnly value={displayKey(scKeys[x.id] ?? x.def)} placeholder={tr("키 입력")}
                                    title={`기본값: ${displayKey(x.def)} — 클릭 후 원하는 키 입력 (Backspace=해제)`}
                                    onKeyDown={(e) => {
                                      e.preventDefault();
@@ -2160,10 +2012,10 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             )}
             {page === "monitor" && (
               <>
-                <Group title="모니터 감지 · 뷰어 배치" right={
+                <Group title={tr("모니터 감지 · 뷰어 배치")} right={
                   <span style={{ display: "flex", gap: 4 }}>
                   <button style={{ padding: "1px 10px", fontSize: 11.5 }}
-                          title="각 모니터 중앙에 번호(1,2,3…)를 3초간 표시 — 어떤 모니터가 어떤 모델인지 확인"
+                          title={tr("각 모니터 중앙에 번호(1,2,3…)를 3초간 표시 — 어떤 모니터가 어떤 모델인지 확인")}
                           onClick={async () => {
                             const w = window as unknown as {
                               getScreenDetails?: () => Promise<{
@@ -2195,9 +2047,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                                 ? `일부 창이 팝업 차단됨(${blocked}) — 주소창에서 팝업 허용 후 다시 시도`
                                 : "각 모니터 중앙에 번호를 3초간 표시했습니다 — 목록의 번호와 대조하세요");
                             } catch { setMonitorMsg("모니터 권한이 거부되었습니다"); }
-                          }}>
-                    🔢 모니터 확인
-                  </button>
+                          }}>{tr("🔢 모니터 확인")}</button>
                   <button className="primary" style={{ padding: "1px 10px", fontSize: 11.5 }} onClick={async () => {
                     const w = window as unknown as {
                       getScreenDetails?: () => Promise<{
@@ -2214,7 +2064,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       })));
                       setMonitorMsg(`${det.screens.length}대 감지됨 — 🔢 모니터 확인으로 번호를 대조하고 창별로 지정하세요`);
                     } catch { setMonitorMsg("모니터 권한이 거부되었습니다 — 주소창 권한 아이콘에서 허용 후 다시 시도"); }
-                  }}>① 모니터 감지</button>
+                  }}>{tr("① 모니터 감지")}</button>
                   </span>
                 }>
                   {monitorMsg && <div style={{ fontSize: 12, color: "var(--stat-final)" }}>{monitorMsg}</div>}
@@ -2228,8 +2078,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </div>
                   )}
                   {monitors.length === 0 ? (
-                    <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
-                      아직 감지된 모니터가 없습니다 — 우측 상단 <b>① 모니터 감지</b>를 누르세요
+                    <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{tr("아직 감지된 모니터가 없습니다 — 우측 상단")}<b>{tr("① 모니터 감지")}</b>를 누르세요
                       (최초 1회 브라우저 권한 허용 필요).
                       {(monitorSel.length > 0 || wlMon != null || rptMon != null) && (
                         <div style={{ marginTop: 4 }}>
@@ -2244,11 +2093,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     <table className="grid-table">
                       <thead>
                         <tr>
-                          <th>② 모니터</th>
-                          <th style={{ width: 96 }} title="다중 선택=스팬">뷰어 ☑</th>
-                          <th style={{ width: 96 }} title="다시 클릭=해제">워크리스트 ◉</th>
-                          <th style={{ width: 96 }} title="다시 클릭=해제">판독 ◉</th>
-                          <th style={{ width: 150 }} title="이 모니터의 뷰어에서 ◀▶(다음/이전 환자)가 훑는 워크리스트 탭(필터)">◀▶ 탐색 탭</th>
+                          <th>{tr("② 모니터")}</th>
+                          <th style={{ width: 96 }} title={tr("다중 선택=스팬")}>{tr("뷰어 ☑")}</th>
+                          <th style={{ width: 96 }} title={tr("다시 클릭=해제")}>{tr("워크리스트 ◉")}</th>
+                          <th style={{ width: 96 }} title={tr("다시 클릭=해제")}>{tr("판독 ◉")}</th>
+                          <th style={{ width: 150 }} title={tr("이 모니터의 뷰어에서 ◀▶(다음/이전 환자)가 훑는 워크리스트 탭(필터)")}>{tr("◀▶ 탐색 탭")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2276,7 +2125,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                             <td style={{ textAlign: "center" }}>
                               <select value={tabBinding[i] ?? ""} style={{ maxWidth: 142 }}
                                       onChange={(e) => setTabBinding((p) => ({ ...p, [i]: e.target.value }))}>
-                                <option value="">전체 (필터 없음)</option>
+                                <option value="">{tr("전체 (필터 없음)")}</option>
                                 {availTabs.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                               </select>
                             </td>
@@ -2286,9 +2135,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </table>
                   )}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 12.5 }}>최대 열 영상 수 (라운드로빈 슬롯)</span>
+                    <span style={{ fontSize: 12.5 }}>{tr("최대 열 영상 수 (라운드로빈 슬롯)")}</span>
                     <input type="number" min={0} max={monitorSel.length || 8} value={maxOpen}
-                           title="검사를 열 때 순환할 모니터(영상) 개수 — 0=선택한 뷰어 모니터 전부. 예: 3이면 1·2·3 모니터를 1,2,3,1,2,3… 순환"
+                           title={tr("검사를 열 때 순환할 모니터(영상) 개수 — 0=선택한 뷰어 모니터 전부. 예: 3이면 1·2·3 모니터를 1,2,3,1,2,3… 순환")}
                            onChange={(e) => setMaxOpen(Math.max(0, Number(e.target.value) || 0))}
                            style={{ width: 64 }} />
                     <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
@@ -2296,15 +2145,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 12.5 }}>All Close(전체 닫기) 범위</span>
+                    <span style={{ fontSize: 12.5 }}>{tr("All Close(전체 닫기) 범위")}</span>
                     <select value={closeScope} onChange={(e) => setCloseScope(e.target.value as "all" | "current")}
-                            title="뷰어의 All Close 버튼을 눌렀을 때 닫을 범위">
-                      <option value="all">전체 모니터 뷰어 닫기</option>
-                      <option value="current">현재 모니터 뷰어만 닫기</option>
+                            title={tr("뷰어의 All Close 버튼을 눌렀을 때 닫을 범위")}>
+                      <option value="all">{tr("전체 모니터 뷰어 닫기")}</option>
+                      <option value="current">{tr("현재 모니터 뷰어만 닫기")}</option>
                     </select>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      뷰어의 <b>All Close ✕</b> 클릭 시
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("뷰어의")}<b>All Close ✕</b>{tr("클릭 시")}</span>
                   </div>
                   {(() => {
                     // 상호 배타: 모니터별 '◀▶ 탐색 탭'(tab_binding)이 하나라도 설정되면 이 기능은 비활성.
@@ -2312,90 +2159,72 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     const navTabOn = Object.values(tabBinding).some((v) => !!v);
                     return (
                   <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, opacity: navTabOn ? 0.5 : 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
-                      워크리스트 탭 → 모니터 배치 (라운드로빈 대신 지정 모니터로 오픈)
-                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>{tr("워크리스트 탭 → 모니터 배치 (라운드로빈 대신 지정 모니터로 오픈)")}</div>
                     {navTabOn ? (
-                      <div style={{ fontSize: 11.5, color: "var(--stat-emergency,#f87171)", marginBottom: 6 }}>
-                        ⚠ 위 표의 <b>◀▶ 탐색 탭</b>이 설정되어 있어 이 기능은 비활성화됩니다. 탐색 탭을 모두 <b>'전체 (필터 없음)'</b>로 두면 설정할 수 있습니다.
-                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--stat-emergency,#f87171)", marginBottom: 6 }}>{tr("⚠ 위 표의")}<b>{tr("◀▶ 탐색 탭")}</b>{tr("이 설정되어 있어 이 기능은 비활성화됩니다. 탐색 탭을 모두")}<b>{tr("'전체 (필터 없음)'")}</b>{tr("로 두면 설정할 수 있습니다.")}</div>
                     ) : (
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6 }}>
-                        기본은 번호순 순환(1,2,3…)이지만, 여기에 지정한 <b>워크리스트 탭</b>에서 연 검사는 항상 지정 모니터에 열립니다 (예: WORKLIST 2 → 3번).
-                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6 }}>{tr("기본은 번호순 순환(1,2,3…)이지만, 여기에 지정한")}<b>{tr("워크리스트 탭")}</b>{tr("에서 연 검사는 항상 지정 모니터에 열립니다 (예: WORKLIST 2 → 3번).")}</div>
                     )}
                     {tabMonMap.map((rule, ri) => (
                       <div key={ri} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
                         <select value={rule.tab} disabled={navTabOn}
                                 onChange={(e) => setTabMonMap((p) => p.map((r, k) => k === ri ? { ...r, tab: e.target.value } : r))}
                                 style={{ maxWidth: 160 }}>
-                          <option value="">— 탭 선택 —</option>
+                          <option value="">{tr("— 탭 선택 —")}</option>
                           {availTabs.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                         </select>
-                        <span>→ 모니터</span>
+                        <span>{tr("→ 모니터")}</span>
                         <input type="number" min={1} max={monitors.length || 8} value={rule.monitor + 1} disabled={navTabOn}
                                onChange={(e) => setTabMonMap((p) => p.map((r, k) => k === ri ? { ...r, monitor: Math.max(0, (Number(e.target.value) || 1) - 1) } : r))}
                                style={{ width: 56 }} />
                         <button disabled={navTabOn} onClick={() => setTabMonMap((p) => p.filter((_, k) => k !== ri))}
-                                style={{ fontSize: 11 }}>삭제</button>
+                                style={{ fontSize: 11 }}>{tr("삭제")}</button>
                       </div>
                     ))}
                     <button disabled={navTabOn} onClick={() => setTabMonMap((p) => [...p, { tab: "", monitor: 0 }])}
-                            style={{ fontSize: 11.5 }}>+ 예외 추가</button>
+                            style={{ fontSize: 11.5 }}>{tr("+ 예외 추가")}</button>
                   </div>
                     );
                   })()}
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <button disabled={wlMon == null}
-                            title="워크리스트를 선택한 모니터의 새 창으로 열기 (기존 탭은 닫아도 됨)"
+                            title={tr("워크리스트를 선택한 모니터의 새 창으로 열기 (기존 탭은 닫아도 됨)")}
                             onClick={async () => {
                               const { screenFeatures } = await import("../lib/screens");
                               const features = await screenFeatures(wlMon != null ? [wlMon] : null);
                               window.open(`${window.location.origin}${window.location.pathname}`, "sv_worklist", features)?.focus();
-                            }}>
-                      워크리스트를 해당 모니터로 열기
-                    </button>
-                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      (브라우저 보안상 현재 창은 이동 불가 — 새 창으로 엽니다)
-                    </span>
+                            }}>{tr("워크리스트를 해당 모니터로 열기")}</button>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("(브라우저 보안상 현재 창은 이동 불가 — 새 창으로 엽니다)")}</span>
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border)", paddingTop: 6 }}>
-                    <b>사용 방법:</b> ① 모니터 감지 → 🔢 모니터 확인(각 화면에 번호 표시·목록 번호와 대조)
-                    → ② 창별 모니터 지정 → ③ 하단 <b>OK(저장)</b> → ④ 다음 오픈부터 적용.<br />
-                    · <b>뷰어 ☑</b>: 1대=해당 모니터 / <b>2대 이상=검사를 열 때마다 모니터 번호순으로 순환 배치</b>(1,2,3,1,2,3…) / 0대=기본 크기<br />
-                    &nbsp;&nbsp;&nbsp;검사가 열리는 그 모니터만 새로 로드되고, 나머지 모니터 뷰어는 <b>깜빡임 없이 Exam 탭만 추가</b>됩니다.<br />
-                    &nbsp;&nbsp;&nbsp;순환할 모니터 수는 위 <b>최대 열 영상 수</b>로 조절(0=선택 전부).
-                    최초 오픈 시 팝업이 차단되면 주소창 팝업 아이콘에서 이 사이트 <b>항상 허용</b>으로 설정하세요.<br />
-                    · <b>워크리스트 ◉</b>: 위 버튼으로 해당 모니터에 새 창 오픈 (라디오 재클릭=해제)<br />
-                    · <b>판독 ◉</b>: 뷰어의 [Reading] 버튼이 해당 모니터에 판독 창을 띄움
-                  </div>
+                    <b>{tr("사용 방법:")}</b> ① 모니터 감지 → 🔢 모니터 확인(각 화면에 번호 표시·목록 번호와 대조)
+                    → ② 창별 모니터 지정 → ③ 하단 <b>{tr("OK(저장)")}</b>{tr("→ ④ 다음 오픈부터 적용.")}<br />
+                    · <b>{tr("뷰어 ☑")}</b>{tr(": 1대=해당 모니터 /")}<b>{tr("2대 이상=검사를 열 때마다 모니터 번호순으로 순환 배치")}</b>{tr("(1,2,3,1,2,3…) / 0대=기본 크기")}<br />{tr("&nbsp;&nbsp;&nbsp;검사가 열리는 그 모니터만 새로 로드되고, 나머지 모니터 뷰어는")}<b>{tr("깜빡임 없이 Exam 탭만 추가")}</b>{tr("됩니다.")}<br />{tr("&nbsp;&nbsp;&nbsp;순환할 모니터 수는 위")}<b>{tr("최대 열 영상 수")}</b>로 조절(0=선택 전부).
+                    최초 오픈 시 팝업이 차단되면 주소창 팝업 아이콘에서 이 사이트 <b>{tr("항상 허용")}</b>{tr("으로 설정하세요.")}<br />
+                    · <b>{tr("워크리스트 ◉")}</b>{tr(": 위 버튼으로 해당 모니터에 새 창 오픈 (라디오 재클릭=해제)")}<br />
+                    · <b>{tr("판독 ◉")}</b>{tr(": 뷰어의 [Reading] 버튼이 해당 모니터에 판독 창을 띄움")}</div>
                 </Group>
-                <Group title="뷰어 창 정보 (별도 포트)">
-                  <div style={{ fontSize: 12.5 }}>
-                    현재 뷰어 창 출처: <code>{VIEWER_BASE || "워크리스트와 동일 (같은 포트)"}</code>
+                <Group title={tr("뷰어 창 정보 (별도 포트)")}>
+                  <div style={{ fontSize: 12.5 }}>{tr("현재 뷰어 창 출처:")}<code>{VIEWER_BASE || "워크리스트와 동일 (같은 포트)"}</code>
                   </div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    뷰어를 별도 포트로 분리하려면 <code>frontend/.env</code>에
-                    <code> VITE_VIEWER_BASE=https://localhost:5176</code> 추가 후
-                    <code> npm run dev:viewer</code>를 함께 실행하세요 (재기동 필요).
-                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("뷰어를 별도 포트로 분리하려면")}<code>frontend/.env</code>{tr("에")}<code> VITE_VIEWER_BASE=https://localhost:5176</code>{tr("추가 후")}<code> npm run dev:viewer</code>{tr("를 함께 실행하세요 (재기동 필요).")}</div>
                 </Group>
               </>
             )}
 
             {page === "policy" && (
-              <Group title="탐색 방향 정책 — ◀▶ 환자 이동 (뷰어·판독 창·워크리스트 공통)">
+              <Group title={tr("탐색 방향 정책 — ◀▶ 환자 이동 (뷰어·판독 창·워크리스트 공통)")}>
                 <Row label="◀ (왼쪽) 버튼">
                   <select value={polNavLeft} onChange={(e) => setPolNavLeft(e.target.value as "past" | "recent")}>
-                    <option value="past">시간상 과거로 (워크리스트 아래 행 방향)</option>
-                    <option value="recent">시간상 최신으로 (워크리스트 위 행 방향)</option>
+                    <option value="past">{tr("시간상 과거로 (워크리스트 아래 행 방향)")}</option>
+                    <option value="recent">{tr("시간상 최신으로 (워크리스트 위 행 방향)")}</option>
                   </select>
                 </Row>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7 }}>
                   워크리스트는 최신 검사가 위에 정렬됩니다. ◀▶는 열려 있는 환자(현재 보고 있는 검사)를
-                  기준으로 <b>시간대별 한 단계씩</b> 이동하며, ▶(오른쪽)는 항상 ◀의 반대 방향입니다.<br />
-                  · <b>과거로(기본)</b>: ◀=한 단계 과거(아래 행) / ▶=한 단계 최신(위 행)<br />
-                  · <b>최신으로</b>: ◀=한 단계 최신(위 행) / ▶=한 단계 과거(아래 행)<br />
+                  기준으로 <b>{tr("시간대별 한 단계씩")}</b>{tr("이동하며, ▶(오른쪽)는 항상 ◀의 반대 방향입니다.")}<br />
+                  · <b>{tr("과거로(기본)")}</b>{tr(": ◀=한 단계 과거(아래 행) / ▶=한 단계 최신(위 행)")}<br />
+                  · <b>{tr("최신으로")}</b>{tr(": ◀=한 단계 최신(위 행) / ▶=한 단계 과거(아래 행)")}<br />
                   이동 대상 환자가 이미 Exam 탭으로 열려 있으면 그 탭으로 전환되고, 아니면 열면서 이동합니다.
                   Worklist·Image Viewer·Reading Viewer는 열린 환자를 서로 따라갑니다(연동). OK(저장) 시 적용.
                 </div>
@@ -2403,14 +2232,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             )}
 
             {page === "about" && (
-              <Group title="정보 (Information)">
+              <Group title={tr("정보 (Information)")}>
                 <Row label="제품명"><b>{APP_NAME}</b></Row>
                 <Row label="현재 Version"><b style={{ fontSize: 14, letterSpacing: 0.3 }}>{VERSION_LABEL}</b></Row>
                 <Row label="배포 커밋">{BUILD_SHA || "— (개발 서버)"}</Row>
                 <Row label="버전 적용일자">{APP_RELEASE_DATE}</Row>
                 <Row label="제조사"><b>{APP_VENDOR}</b></Row>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 6 }}>
-                  버전 표기는 <b>major.minor.patch</b> — minor 는 개발 차수, patch 는 차수 내 보정 릴리스입니다.
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 6 }}>{tr("버전 표기는")}<b>major.minor.patch</b> — minor 는 개발 차수, patch 는 차수 내 보정 릴리스입니다.
                   설정 창 상단의 버전 칩을 클릭하면 이 화면으로 옵니다.
                 </div>
                 <CrashLogPanel />
@@ -2432,13 +2260,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   const merged = [...next, ...live.filter((r) => !ids.has(r.id))];
                   setHpRules(merged);
                   await api.putSetting("viewer.hp", { rules: merged }, "user");
-                  setSaved("행잉 프로토콜 저장됨 — 왼쪽 ⟳ Refresh 후 뷰어 재오픈 시 적용");
+                  setSaved(tr("행잉 프로토콜 저장됨 — 왼쪽 ⟳ Refresh 후 뷰어 재오픈 시 적용"));
                 }}
               />
             )}
 
             {page === "pdf" && isAdmin && (
-              <Group title="판독서 템플릿 (기관)">
+              <Group title={tr("판독서 템플릿 (기관)")}>
                 <Row label="병원명"><input value={hospital} onChange={(e) => setHospital(e.target.value)} style={{ width: 280 }} /></Row>
                 <Row label="부서"><input value={department} onChange={(e) => setDepartment(e.target.value)} style={{ width: 280 }} /></Row>
                 <Row label="푸터"><input value={footer} onChange={(e) => setFooter(e.target.value)} style={{ width: 280 }} /></Row>
@@ -2447,11 +2275,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
 
             {page === "ai" && isAdmin && (
               <>
-                <Group title="AI 정책">
+                <Group title={tr("AI 정책")}>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, fontWeight: 700 }}>
-                    <input type="checkbox" checked={draftEnabled} onChange={(e) => setDraftEnabled(e.target.checked)} />
-                    AI 판독 초안 생성 (Structured Report) — 마스터 스위치
-                  </label>
+                    <input type="checkbox" checked={draftEnabled} onChange={(e) => setDraftEnabled(e.target.checked)} />{tr("AI 판독 초안 생성 (Structured Report) — 마스터 스위치")}</label>
                   <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginLeft: 22 }}>
                     {draftEnabled
                       ? "활성 — 자동/수동 초안 생성이 동작합니다."
@@ -2460,20 +2286,17 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5,
                                   opacity: draftEnabled ? 1 : 0.5 }}>
                     <input type="checkbox" checked={autoGenerate} disabled={!draftEnabled}
-                           onChange={(e) => setAutoGenerate(e.target.checked)} />
-                    검사 도착 시 초안 자동 생성
-                  </label>
+                           onChange={(e) => setAutoGenerate(e.target.checked)} />{tr("검사 도착 시 초안 자동 생성")}</label>
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
-                    <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />
-                    키이미지 vision 분석 (F-11) — <span style={{ color: "var(--ai)" }}>[영상 참고 관찰]로만 표기</span>
+                    <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />{tr("키이미지 vision 분석 (F-11) —")}<span style={{ color: "var(--ai)" }}>{tr("[영상 참고 관찰]로만 표기")}</span>
                   </label>
                 </Group>
-                <Group title="음성 판독 STT 엔진 (Whisper 오픈소스 / 상용 API)">
+                <Group title={tr("음성 판독 STT 엔진 (Whisper 오픈소스 / 상용 API)")}>
                   <Row label="엔진">
                     <select value={sttEngine} onChange={(e) => setSttEngine(e.target.value)}>
-                      <option value="browser">브라우저 내장 (Web Speech — 기본)</option>
-                      <option value="whisper_local">Whisper 로컬 (오픈소스 — 온프레미스, PHI 안전)</option>
-                      <option value="openai_api">OpenAI API (상용 — whisper-1)</option>
+                      <option value="browser">{tr("브라우저 내장 (Web Speech — 기본)")}</option>
+                      <option value="whisper_local">{tr("Whisper 로컬 (오픈소스 — 온프레미스, PHI 안전)")}</option>
+                      <option value="openai_api">{tr("OpenAI API (상용 — whisper-1)")}</option>
                     </select>
                   </Row>
                   <Row label="모델">
@@ -2487,28 +2310,24 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                       <div style={{ fontWeight: 700, color: sttStat.ready ? "var(--stat-final)" : "var(--stat-emergency)" }}>
                         {sttStat.ready ? "● 현재 엔진 구동 가능" : "○ 현재 엔진 구동 불가 — 설치/키 확인 필요"}
                       </div>
-                      <div style={{ color: "var(--text-secondary)" }}>
-                        서버 설치 상태 — faster-whisper: <b>{sttStat.available.faster_whisper ? "설치됨" : "미설치"}</b> ·
+                      <div style={{ color: "var(--text-secondary)" }}>{tr("서버 설치 상태 — faster-whisper:")}<b>{sttStat.available.faster_whisper ? "설치됨" : "미설치"}</b> ·
                         openai-whisper: <b>{sttStat.available.openai_whisper ? "설치됨" : "미설치"}</b> ·
                         OPENAI_API_KEY: <b>{sttStat.available.openai_api_key ? "설정됨" : "없음"}</b>
                       </div>
                     </div>
                   )}
-                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                    Whisper 로컬: <code>pip install faster-whisper</code> 필요(미설치 시 안내 응답).
-                    <b style={{ color: "var(--stat-emergency)" }}> OpenAI API는 음성이 외부로 전송됩니다</b> —
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("Whisper 로컬:")}<code>pip install faster-whisper</code>{tr("필요(미설치 시 안내 응답).")}<b style={{ color: "var(--stat-emergency)" }}>{tr("OpenAI API는 음성이 외부로 전송됩니다")}</b> —
                     API 키는 서버 환경변수 <code>OPENAI_API_KEY</code>로만 설정(코드/설정 저장 금지).
-                    이 설정은 <b>전역(모든 병원·Client 공통)</b>으로 적용됩니다.
-                  </div>
+                    이 설정은 <b>{tr("전역(모든 병원·Client 공통)")}</b>{tr("으로 적용됩니다.")}</div>
                 </Group>
                 {quality && quality.with_ai_draft > 0 && (
-                  <Group title="AI 품질 지표 (F-20)">
+                  <Group title={tr("AI 품질 지표 (F-20)")}>
                     <table className="grid-table">
                       <tbody>
-                        <tr><th style={{ width: 140 }}>AI 초안 기반 확정</th><td>{quality.with_ai_draft} / {quality.finalized_total}건</td></tr>
-                        <tr><th>무수정 수용률</th><td>{((quality.acceptance_rate ?? 0) * 100).toFixed(1)}%</td></tr>
-                        <tr><th>평균 수정률</th><td>{((quality.avg_modified_ratio ?? 0) * 100).toFixed(1)}%</td></tr>
-                        <tr><th>critical 변경</th>
+                        <tr><th style={{ width: 140 }}>{tr("AI 초안 기반 확정")}</th><td>{quality.with_ai_draft} / {quality.finalized_total}건</td></tr>
+                        <tr><th>{tr("무수정 수용률")}</th><td>{((quality.acceptance_rate ?? 0) * 100).toFixed(1)}%</td></tr>
+                        <tr><th>{tr("평균 수정률")}</th><td>{((quality.avg_modified_ratio ?? 0) * 100).toFixed(1)}%</td></tr>
+                        <tr><th>{tr("critical 변경")}</th>
                           <td style={{ color: (quality.critical_dropped || quality.critical_added) ? "var(--stat-emergency)" : undefined }}>
                             탈락 {quality.critical_dropped ?? 0} / 추가 {quality.critical_added ?? 0}
                           </td></tr>
@@ -2523,7 +2342,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         <div style={{ padding: "9px 14px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", background: "var(--bg-elevated)" }}>
           {saved && <span style={{ color: "var(--stat-final)", fontSize: 12 }}>{saved}</span>}
           <div style={{ flex: 1 }} />
-          <button className="primary" onClick={save}>OK (저장)</button>
+          <button className="primary" onClick={save}>{tr("OK (저장)")}</button>
           <button onClick={onClose} title={savedOnce ? "설정 창을 닫습니다" : "저장하지 않고 닫습니다"}>
             {savedOnce ? "닫기" : "Cancel"}
           </button>
@@ -2540,7 +2359,7 @@ function KeyCaptureInput({ value, onChange }: { value: string; onChange: (v: str
   const ref = useRef<HTMLInputElement | null>(null);
   return (
     <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <input ref={ref} value={value} readOnly placeholder="키를 입력하세요"
+      <input ref={ref} value={value} readOnly placeholder={tr("키를 입력하세요")}
              style={{ width: 140, background: cap ? "var(--accent-subtle)" : undefined }}
              onKeyDown={(e) => {
                if (!cap) return;
@@ -2555,7 +2374,7 @@ function KeyCaptureInput({ value, onChange }: { value: string; onChange: (v: str
               onClick={() => { setCap((c) => !c); ref.current?.focus(); }}>
         {cap ? "입력 중…" : "입력"}
       </button>
-      <button style={{ padding: "1px 9px", fontSize: 11 }} onClick={() => onChange("")}>지우기</button>
+      <button style={{ padding: "1px 9px", fontSize: 11 }} onClick={() => onChange("")}>{tr("지우기")}</button>
     </span>
   );
 }
@@ -2626,16 +2445,16 @@ function ReadingItemEditor({ kind, items, reload }: {
       {/* 우: 추가/수정 폼 (레퍼런스 폼 구성) */}
       <div style={{ flex: 1.1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
         <b style={{ fontSize: 12.5 }}>{sel ? `${label} 수정 — ${sel.name}` : `새 ${label} 추가`}</b>
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>모달리티</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("모달리티")}</div>
         <select value={f.modality} onChange={(e) => setF((p) => ({ ...p, modality: e.target.value }))}>
-          <option value="">공통 (모든 장비)</option>
+          <option value="">{tr("공통 (모든 장비)")}</option>
           {["CR", "DX", "CT", "MR", "US", "MG", "XA", "NM"].map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
         {kind === "phrase" && (
           <>
-            <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>단축키 코드 (Alt+키)</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("단축키 코드 (Alt+키)")}</div>
             <div style={{ display: "flex", gap: 4 }}>
-              <input value={f.shortcut} readOnly placeholder="단축키를 입력하세요"
+              <input value={f.shortcut} readOnly placeholder={tr("단축키를 입력하세요")}
                      style={{ flex: 1, background: cap ? "var(--accent-subtle)" : undefined }}
                      onKeyDown={(e) => {
                        if (!cap) return;
@@ -2643,20 +2462,18 @@ function ReadingItemEditor({ kind, items, reload }: {
                        if (/^[a-zA-Z0-9]$/.test(e.key)) { setF((p) => ({ ...p, shortcut: e.key.toUpperCase() })); setCap(false); }
                      }} />
               <button className={cap ? "primary" : ""} style={{ padding: "2px 10px", fontSize: 11.5 }}
-                      onClick={(e) => { setCap((c) => !c); (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}>
-                입력
-              </button>
+                      onClick={(e) => { setCap((c) => !c); (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}>{tr("입력")}</button>
             </div>
           </>
         )}
         <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{label} 이름</div>
         <input value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))} />
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>판독 (Reading)</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("판독 (Reading)")}</div>
         <textarea value={f.reading_text} rows={5}
                   onChange={(e) => setF((p) => ({ ...p, reading_text: e.target.value }))}
                   style={{ background: "var(--bg-canvas)", color: "var(--text-primary)", border: "1px solid var(--border)",
                            borderRadius: 3, padding: 6, fontFamily: "inherit", fontSize: 12, resize: "vertical" }} />
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>결론 (Conclusion)</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{tr("결론 (Conclusion)")}</div>
         <textarea value={f.text} rows={4}
                   onChange={(e) => setF((p) => ({ ...p, text: e.target.value }))}
                   style={{ background: "var(--bg-canvas)", color: "var(--text-primary)", border: "1px solid var(--border)",
@@ -2664,7 +2481,7 @@ function ReadingItemEditor({ kind, items, reload }: {
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button className="primary" style={{ padding: "4px 18px" }}
                   disabled={!f.name.trim() || !(f.text.trim() || f.reading_text.trim())}
-                  onClick={() => void save()}>저장</button>
+                  onClick={() => void save()}>{tr("저장")}</button>
         </div>
       </div>
     </div>
@@ -2726,8 +2543,8 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
   };
   const save = () => {
     if (!draft) return;
-    if (!draft.name.trim()) { window.alert("프로토콜명을 입력하세요"); return; }
-    if (!draft.modality) { window.alert("장비를 선택하세요"); return; }
+    if (!draft.name.trim()) { window.alert(tr("프로토콜명을 입력하세요")); return; }
+    if (!draft.modality) { window.alert(tr("장비를 선택하세요")); return; }
     // viewer 디스플레이 그리드를 하위호환 s(Series 분할)로 반영 → 기존 applyHp 적용
     const vd = (draft.displays ?? []).find((d) => d.role === "viewer");
     // 뷰어는 하위호환 s/i 를 읽으므로 첫 viewer 디스플레이의 분할을 함께 반영한다
@@ -2755,8 +2572,8 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
       <div style={{ width: 250, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8,
                     border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "var(--bg-canvas)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <b style={{ fontSize: 14 }}>행잉 프로토콜</b>
-          <button className="primary" title="새 프로토콜 추가" onClick={addNew}
+          <b style={{ fontSize: 14 }}>{tr("행잉 프로토콜")}</b>
+          <button className="primary" title={tr("새 프로토콜 추가")} onClick={addNew}
                   style={{ width: 30, height: 30, fontSize: 17, padding: 0, borderRadius: 6 }}>＋</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
@@ -2770,9 +2587,9 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
                   {r.id === selId && dirty ? `${draft?.name || r.name} *` : r.name}
                 </b>
                 <span style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-                  <button title="복제" onClick={(e) => { e.stopPropagation(); dup(r); }}
+                  <button title={tr("복제")} onClick={(e) => { e.stopPropagation(); dup(r); }}
                           style={{ padding: "2px 6px", fontSize: 12 }}>⧉</button>
-                  <button title="삭제" onClick={(e) => { e.stopPropagation(); del(r.id); }}
+                  <button title={tr("삭제")} onClick={(e) => { e.stopPropagation(); del(r.id); }}
                           style={{ padding: "2px 6px", fontSize: 12 }}>🗑</button>
                 </span>
               </div>
@@ -2783,9 +2600,7 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
             </div>
           ))}
           {rules.length === 0 && (
-            <div style={{ color: "var(--text-secondary)", fontSize: 12, padding: "12px 4px", textAlign: "center" }}>
-              프로토콜이 없습니다.<br />＋ 로 추가하세요.
-            </div>
+            <div style={{ color: "var(--text-secondary)", fontSize: 12, padding: "12px 4px", textAlign: "center" }}>{tr("프로토콜이 없습니다.")}<br />{tr("＋ 로 추가하세요.")}</div>
           )}
         </div>
       </div>
@@ -2793,38 +2608,35 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
       {/* 우측 — 기본 정보 + 옵션 + 디스플레이 레이아웃 */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {!draft ? (
-          <div style={{ display: "grid", placeItems: "center", flex: 1, color: "var(--text-secondary)" }}>
-            좌측에서 프로토콜을 선택하거나 ＋ 로 추가하세요.
-          </div>
+          <div style={{ display: "grid", placeItems: "center", flex: 1, color: "var(--text-secondary)" }}>{tr("좌측에서 프로토콜을 선택하거나 ＋ 로 추가하세요.")}</div>
         ) : (
           <>
             <div style={{ flex: 1, overflow: "auto", paddingRight: 4 }}>
               {secHead("기본 정보")}
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <label style={{ fontSize: 12.5 }}>
-                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>프로토콜명 <span style={{ color: "var(--stat-emergency)" }}>*</span></div>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>{tr("프로토콜명")}<span style={{ color: "var(--stat-emergency)" }}>*</span></div>
                   <input value={draft.name} onChange={(e) => upd({ name: e.target.value })}
-                         placeholder="프로토콜 이름을 입력하세요" style={{ width: "100%" }} />
+                         placeholder={tr("프로토콜 이름을 입력하세요")} style={{ width: "100%" }} />
                 </label>
                 <label style={{ fontSize: 12.5 }}>
-                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>장비 <span style={{ color: "var(--stat-emergency)" }}>*</span></div>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>{tr("장비")}<span style={{ color: "var(--stat-emergency)" }}>*</span></div>
                   {/* 표준 목록을 제안하되 자유 입력 — 현장에서 쓰는 장비를 그대로 추가할 수 있다 */}
                   <input list="sv-hp-mods" value={draft.modality}
                          onChange={(e) => upd({ modality: e.target.value.toUpperCase().trim() })}
-                         placeholder="장비를 선택하거나 직접 입력 (예: DX, MG, 또는 새 장비명)" style={{ width: "100%" }} />
+                         placeholder={tr("장비를 선택하거나 직접 입력 (예: DX, MG, 또는 새 장비명)")} style={{ width: "100%" }} />
                   <datalist id="sv-hp-mods">
                     {HP_MODALITIES.map((m) => <option key={m} value={m} />)}
                   </datalist>
                 </label>
                 <label style={{ fontSize: 12.5 }}>
-                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>부위</div>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>{tr("부위")}</div>
                   <input value={draft.body_part} onChange={(e) => upd({ body_part: e.target.value.toUpperCase() })}
-                         placeholder="부위를 입력하세요 (예: CHEST, SKULL, BRAIN — 빈칸=무관)" style={{ width: "100%" }} />
+                         placeholder={tr("부위를 입력하세요 (예: CHEST, SKULL, BRAIN — 빈칸=무관)")} style={{ width: "100%" }} />
                   {/* 부위 값이 어느 DICOM 필드에 들어오는지는 장비·기관마다 다르다 → 찾을 자리를 고른다 */}
                   <div style={{ marginTop: 6, padding: "7px 9px", border: "1px solid var(--border)",
                                 borderRadius: 6, background: "var(--bg-canvas)" }}>
-                    <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 5 }}>
-                      부위를 찾을 DICOM 필드 <span style={{ opacity: 0.7 }}>— 고른 필드들의 값에서 위 부위 문자열을 포함 검색합니다</span>
+                    <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 5 }}>{tr("부위를 찾을 DICOM 필드")}<span style={{ opacity: 0.7 }}>{tr("— 고른 필드들의 값에서 위 부위 문자열을 포함 검색합니다")}</span>
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
                       {HP_BP_SOURCES.map((f) => {
@@ -2844,9 +2656,9 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
                   </div>
                 </label>
                 <label style={{ fontSize: 12.5 }}>
-                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>설명</div>
+                  <div style={{ color: "var(--text-secondary)", marginBottom: 4 }}>{tr("설명")}</div>
                   <textarea value={draft.description ?? ""} onChange={(e) => upd({ description: e.target.value })}
-                            placeholder="설명을 입력하세요" rows={3} style={{ width: "100%", resize: "vertical" }} />
+                            placeholder={tr("설명을 입력하세요")} rows={3} style={{ width: "100%", resize: "vertical" }} />
                 </label>
               </div>
 
@@ -2879,8 +2691,8 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
             {/* 하단 — 취소/저장 */}
             <div style={{ display: "flex", gap: 8, justifyContent: "center", padding: "12px 0 2px",
                           borderTop: "1px solid var(--border)", marginTop: 8 }}>
-              <button onClick={() => select(selId)} disabled={!dirty} style={{ minWidth: 84 }}>취소</button>
-              <button className="primary" onClick={save} style={{ minWidth: 84 }}>저장</button>
+              <button onClick={() => select(selId)} disabled={!dirty} style={{ minWidth: 84 }}>{tr("취소")}</button>
+              <button className="primary" onClick={save} style={{ minWidth: 84 }}>{tr("저장")}</button>
             </div>
           </>
         )}
@@ -2901,7 +2713,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
   const importFromMonitors = () => {
     const cfg = monitorCfg;
     if (!cfg || (!cfg.screens.length && cfg.worklist == null && cfg.report == null)) {
-      window.alert("설정 ▸ 모니터(Display) 에서 모니터를 먼저 감지·지정하세요.");
+      window.alert(tr("설정 ▸ 모니터(Display) 에서 모니터를 먼저 감지·지정하세요."));
       return;
     }
     const resOf = (i: number) => {
@@ -2928,7 +2740,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
     };
     addRole(cfg.worklist);
     addRole(cfg.report);
-    if (!next.length) { window.alert("가져올 모니터가 없습니다."); return; }
+    if (!next.length) { window.alert(tr("가져올 모니터가 없습니다.")); return; }
     onChange(next);
   };
 
@@ -2962,9 +2774,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-canvas)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={importFromMonitors}
-                title="설정 ▸ 모니터(Display) 에서 지정한 모니터 구성을 그대로 가져옵니다(분할·셀 배정은 유지)">
-          ⬇ 모니터 설정에서 가져오기
-        </button>
+                title={tr("설정 ▸ 모니터(Display) 에서 지정한 모니터 구성을 그대로 가져옵니다(분할·셀 배정은 유지)")}>{tr("⬇ 모니터 설정에서 가져오기")}</button>
         <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
           {monitorCfg?.screens.length
             ? `현재 지정 — 뷰어 ${monitorCfg.screens.map((i) => i + 1).join(",")}번`
@@ -2983,31 +2793,29 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
                             padding: "6px 10px", background: viewer ? "#8b5cf6" : "#22c55e", color: "#fff", fontSize: 12, fontWeight: 700 }}>
                 <span>{viewer ? "viewer" : "workList + report"} Display:{d.label}</span>
                 <span style={{ display: "flex", gap: 4 }}>
-                  <button title="역할 전환 (viewer ↔ workList+report)"
+                  <button title={tr("역할 전환 (viewer ↔ workList+report)")}
                           onClick={() => patch(d.id, { role: viewer ? "worklist_report" : "viewer" })}
                           style={{ padding: "0 6px", fontSize: 11, color: "#fff", background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 3 }}>⇄</button>
                   {displays.length > 1 && (
-                    <button title="이 디스플레이 제거" onClick={() => onChange(displays.filter((x) => x.id !== d.id))}
+                    <button title={tr("이 디스플레이 제거")} onClick={() => onChange(displays.filter((x) => x.id !== d.id))}
                             style={{ padding: "0 6px", fontSize: 11, color: "#fff", background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 3 }}>✕</button>
                   )}
                 </span>
               </div>
               <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "var(--bg-panel)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: "var(--text-secondary)", flexShrink: 0 }}>해상도</span>
+                  <span style={{ fontSize: 11, color: "var(--text-secondary)", flexShrink: 0 }}>{tr("해상도")}</span>
                   <input value={d.resolution} onChange={(e) => patch(d.id, { resolution: e.target.value })}
                          style={{ flex: 1, minWidth: 0, fontSize: 11 }} />
                 </div>
                 {viewer ? (
                   <>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>분할</span>
+                      <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("분할")}</span>
                       <GridPicker label="Series" max={10} value={d.grid} onPick={(g) => setGrid(d, g)} />
                       <GridPicker label="Image" max={10} value={d.image ?? { r: 1, c: 1 }} onPick={(g) => setImage(d, g)} />
                     </div>
-                    <div style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
-                      칸 클릭 = 시리즈 순번 지정(순번↔자동) · 아래 콤보 = 그 칸에 띄울 영상의 시점
-                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{tr("칸 클릭 = 시리즈 순번 지정(순번↔자동) · 아래 콤보 = 그 칸에 띄울 영상의 시점")}</div>
                     <div style={{ display: "grid", gridTemplateColumns: `repeat(${d.grid.c}, 1fr)`, gap: 4,
                                   background: "var(--bg-elevated)", padding: 6, borderRadius: 4 }}>
                       {d.cells.map((c, i) => {
@@ -3015,7 +2823,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
                         return (
                           <div key={i} style={{ border: "1px solid var(--border)", borderRadius: 3, overflow: "hidden",
                                                 background: "var(--bg-canvas)" }}>
-                            <div onClick={() => cycleCell(d, i)} title="클릭=시리즈 순번 지정 / 자동"
+                            <div onClick={() => cycleCell(d, i)} title={tr("클릭=시리즈 순번 지정 / 자동")}
                                  style={{ height: 34, display: "grid", placeItems: "center", cursor: "pointer",
                                           background: c == null ? "transparent" : "rgba(139,92,246,0.18)",
                                           color: c == null ? "var(--text-secondary)" : "var(--text-primary)",
@@ -3024,7 +2832,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
                             </div>
                             {/* 이 칸에 띄울 영상 — 현재 검사 / 과거검사 시점 / 3D */}
                             <select value={src} onChange={(e) => setSource(d, i, e.target.value as HpSlotSource)}
-                                    title="이 칸에 띄울 영상"
+                                    title={tr("이 칸에 띄울 영상")}
                                     style={{ width: "100%", fontSize: 10.5, border: "none", borderTop: "1px solid var(--border)",
                                              borderRadius: 0, padding: "2px 3px",
                                              color: src === "current" ? "var(--text-secondary)" : "#7dd3fc" }}>
@@ -3037,7 +2845,7 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
                     {/* 기간 지정 칸이 하나라도 있으면 기간 입력 */}
                     {(d.sources ?? []).includes("range") && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                        <span style={{ color: "var(--text-secondary)" }}>기간 지정</span>
+                        <span style={{ color: "var(--text-secondary)" }}>{tr("기간 지정")}</span>
                         <input type="number" min={0} value={d.range?.from ?? 0}
                                onChange={(e) => patch(d.id, { range: { from: Number(e.target.value) || 0, to: d.range?.to ?? 3650 } })}
                                style={{ width: 60, fontSize: 11 }} />
@@ -3045,15 +2853,13 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
                         <input type="number" min={0} value={d.range?.to ?? 3650}
                                onChange={(e) => patch(d.id, { range: { from: d.range?.from ?? 0, to: Number(e.target.value) || 0 } })}
                                style={{ width: 60, fontSize: 11 }} />
-                        <span style={{ color: "var(--text-secondary)" }}>일 전 사이의 검사</span>
+                        <span style={{ color: "var(--text-secondary)" }}>{tr("일 전 사이의 검사")}</span>
                       </div>
                     )}
                   </>
                 ) : (
                   <div style={{ height: 90, display: "grid", placeItems: "center", color: "var(--text-secondary)",
-                                background: "var(--bg-elevated)", borderRadius: 4, fontSize: 12 }}>
-                    뷰어 사용 안함 (워크리스트 + 판독)
-                  </div>
+                                background: "var(--bg-elevated)", borderRadius: 4, fontSize: 12 }}>{tr("뷰어 사용 안함 (워크리스트 + 판독)")}</div>
                 )}
               </div>
             </div>
@@ -3061,11 +2867,9 @@ function HpDisplayEditor({ displays, onChange, monitors, monitorCfg }: {
         })}
       </div>
       <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-        <button onClick={addDisplay} style={{ fontSize: 11.5 }}>＋ 디스플레이 추가</button>
+        <button onClick={addDisplay} style={{ fontSize: 11.5 }}>{tr("＋ 디스플레이 추가")}</button>
       </div>
-      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", textAlign: "center", marginTop: 6 }}>
-        viewer 디스플레이 분할이 뷰어의 Series 레이아웃으로 적용됩니다. 물리적 모니터 배치는 설정만 저장됩니다(추후 지원).
-      </div>
+      <div style={{ fontSize: 10.5, color: "var(--text-secondary)", textAlign: "center", marginTop: 6 }}>{tr("viewer 디스플레이 분할이 뷰어의 Series 레이아웃으로 적용됩니다. 물리적 모니터 배치는 설정만 저장됩니다(추후 지원).")}</div>
     </div>
   );
 }
@@ -3089,7 +2893,7 @@ export function FilterSettingList({ all, selected, labelOf, onChange }: {
   return (
     <div style={{ maxHeight: 250, overflow: "auto", border: "1px solid var(--border)", borderRadius: 4 }}>
       <table className="grid-table">
-        <thead><tr><th>ITEM</th><th style={{ width: 78 }}>사용</th><th style={{ width: 64 }}>순서</th></tr></thead>
+        <thead><tr><th>ITEM</th><th style={{ width: 78 }}>{tr("사용")}</th><th style={{ width: 64 }}>{tr("순서")}</th></tr></thead>
         <tbody>
           {rows.map((k) => {
             const used = selected.includes(k);
@@ -3099,7 +2903,7 @@ export function FilterSettingList({ all, selected, labelOf, onChange }: {
                 <td style={{ color: used ? "var(--text-primary)" : "var(--text-secondary)" }}>{labelOf(k)}</td>
                 <td>
                   <span onClick={() => onChange(used ? selected.filter((x) => x !== k) : [...selected, k])}
-                        title="클릭=토글"
+                        title={tr("클릭=토글")}
                         style={{
                           cursor: "pointer", fontWeight: 700, fontSize: 10.5, padding: "1px 7px",
                           border: "1px solid var(--border)", borderRadius: 3,
@@ -3178,7 +2982,7 @@ export function DualList({ all, selected, labelOf, onChange }: {
                 onClick={() => { if (pickSel) { onChange(selected.filter((k) => k !== pickSel)); setPickSel(null); } }}>←</button>
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <ListBox title="Selected Columns (순서 = 표시 순서)" items={selected} pick={pickSel} setPick={setPickSel} />
+        <ListBox title={tr("Selected Columns (순서 = 표시 순서)")} items={selected} pick={pickSel} setPick={setPickSel} />
         <div style={{ display: "flex", gap: 5, marginTop: 5, justifyContent: "flex-end" }}>
           <button disabled={!pickSel} onClick={() => move(-1)}>Up</button>
           <button disabled={!pickSel} onClick={() => move(1)}>Down</button>
@@ -3238,12 +3042,11 @@ function FolderPickerModal({ initial, onPick, onClose }: {
                     width: "min(480px, 92vw)", height: "min(440px, 80vh)", display: "flex",
                     flexDirection: "column", padding: 12, gap: 8 }}>
         <b style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-          <FolderIcon size={15} /> 서버 폴더 선택
-        </b>
+          <FolderIcon size={15} />{tr("서버 폴더 선택")}</b>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <button onClick={() => nav(parent ?? "")} disabled={!path}
                   title={parent ? "상위 폴더로" : "드라이브 목록으로"}
-                  style={{ padding: "2px 8px", fontSize: 12 }}>⬆ 상위</button>
+                  style={{ padding: "2px 8px", fontSize: 12 }}>{tr("⬆ 상위")}</button>
           <code title={path}
                 style={{ flex: 1, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis",
                          whiteSpace: "nowrap" }}>
@@ -3254,9 +3057,9 @@ function FolderPickerModal({ initial, onPick, onClose }: {
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto",
                       border: "1px solid var(--border)", borderRadius: 4 }}>
           {loading ? (
-            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>불러오는 중…</div>
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>{tr("불러오는 중…")}</div>
           ) : dirs.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>하위 폴더 없음</div>
+            <div style={{ padding: 10, fontSize: 12, color: "var(--text-secondary)" }}>{tr("하위 폴더 없음")}</div>
           ) : dirs.map((d) => (
             <div key={d.path} onClick={() => nav(d.path)} className="sv-fav-row"
                  title={d.path}
@@ -3270,14 +3073,10 @@ function FolderPickerModal({ initial, onPick, onClose }: {
           ))}
         </div>
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>
-            선택 후 저장(OK/Refresh)해야 반영됩니다
-          </span>
-          <button onClick={onClose} style={{ fontSize: 12 }}>취소</button>
+          <span style={{ marginRight: "auto", fontSize: 10.5, color: "var(--text-secondary)" }}>{tr("선택 후 저장(OK/Refresh)해야 반영됩니다")}</span>
+          <button onClick={onClose} style={{ fontSize: 12 }}>{tr("취소")}</button>
           <button className="primary" disabled={!path} onClick={() => onPick(path)}
-                  title="현재 표시된 경로를 공유 디렉토리 입력에 반영" style={{ fontSize: 12 }}>
-            이 폴더 선택
-          </button>
+                  title={tr("현재 표시된 경로를 공유 디렉토리 입력에 반영")} style={{ fontSize: 12 }}>{tr("이 폴더 선택")}</button>
         </div>
       </div>
     </div>

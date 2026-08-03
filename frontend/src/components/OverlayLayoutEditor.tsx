@@ -6,6 +6,7 @@ import {
   OV_CORNERS, OV_FIELDS, OV_FIELD_LABEL, OV_MODALITIES, fieldsAt, overlayFor, ovModalityLabel,
   type OvCorner, type OvPlace, type OvScope, type OverlayCfg,
 } from "../lib/overlayFields";
+import { t as tr } from "../lib/i18n";
 
 const CORNER_POS: Record<Exclude<OvCorner, "off">, React.CSSProperties> = {
   tl: { top: 6, left: 8, textAlign: "left" },
@@ -46,7 +47,7 @@ export function OverlayLayoutEditor({ cfg, onChange }: {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* 모달리티 선택 — 공통 + 장비별 */}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)", marginRight: 2 }}>모달리티</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)", marginRight: 2 }}>{tr("모달리티")}</span>
         {OV_MODALITIES.map((m) => (
           <button key={m} onClick={() => setMod(m)}
                   title={m === "*" ? "모달리티별 설정이 없을 때 쓰이는 공통 배치" : `${m} 검사에만 적용`}
@@ -69,12 +70,8 @@ export function OverlayLayoutEditor({ cfg, onChange }: {
             <Corner c="bl" scope="image" /><Corner c="br" scope="image" />
           </div>
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.8, maxWidth: 300 }}>
-          · 바깥 상자 = <b style={{ color: "var(--text-primary)" }}>시리즈(페인)</b> — 페인당 한 번 표시<br />
-          · 안쪽 점선 = <b style={{ color: "#7dd3fc" }}>이미지 칸</b> — Image Layout 으로 나눈 칸마다 표시<br />
-          · 분할이 1×1 이면 두 상자가 같은 영역이라 <b>시리즈</b> 것만 그립니다(중복 방지).<br />
-          · <b>공통</b>은 모달리티별 설정이 없을 때 쓰입니다. 장비 탭에서 바꾸면 그 모달리티만 달라집니다.
-        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.8, maxWidth: 300 }}>{tr("· 바깥 상자 =")}<b style={{ color: "var(--text-primary)" }}>{tr("시리즈(페인)")}</b>{tr("— 페인당 한 번 표시")}<br />{tr("· 안쪽 점선 =")}<b style={{ color: "#7dd3fc" }}>{tr("이미지 칸")}</b>{tr("— Image Layout 으로 나눈 칸마다 표시")}<br />{tr("· 분할이 1×1 이면 두 상자가 같은 영역이라")}<b>{tr("시리즈")}</b>{tr("것만 그립니다(중복 방지).")}<br />
+          · <b>{tr("공통")}</b>{tr("은 모달리티별 설정이 없을 때 쓰입니다. 장비 탭에서 바꾸면 그 모달리티만 달라집니다.")}</div>
       </div>
 
       {/* 필드별 배치 */}
@@ -82,7 +79,7 @@ export function OverlayLayoutEditor({ cfg, onChange }: {
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 0,
                       background: "var(--bg-elevated)", fontSize: 11.5, fontWeight: 700,
                       padding: "5px 9px", borderBottom: "1px solid var(--border)" }}>
-          <span>정보</span><span style={{ padding: "0 8px" }}>위치</span><span>범위</span>
+          <span>{tr("정보")}</span><span style={{ padding: "0 8px" }}>{tr("위치")}</span><span>{tr("범위")}</span>
         </div>
         <div style={{ maxHeight: 300, overflowY: "auto" }}>
           {OV_FIELDS.map((f) => {
@@ -103,17 +100,15 @@ export function OverlayLayoutEditor({ cfg, onChange }: {
                 </span>
                 <select value={p.s} onChange={(e) => set(f.key, { s: e.target.value as OvScope })}
                         disabled={p.c === "off"} style={{ fontSize: 11.5, width: 78 }}>
-                  <option value="series">시리즈</option>
-                  <option value="image">이미지</option>
+                  <option value="series">{tr("시리즈")}</option>
+                  <option value="image">{tr("이미지")}</option>
                 </select>
               </div>
             );
           })}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-        뷰어의 INFO 버튼(오버레이 토글)이 꺼져 있으면 아무것도 표시되지 않습니다. 이미 열려 있는 뷰어에는 다음에 검사를 열 때 반영됩니다.
-      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{tr("뷰어의 INFO 버튼(오버레이 토글)이 꺼져 있으면 아무것도 표시되지 않습니다. 이미 열려 있는 뷰어에는 다음에 검사를 열 때 반영됩니다.")}</div>
     </div>
   );
 }

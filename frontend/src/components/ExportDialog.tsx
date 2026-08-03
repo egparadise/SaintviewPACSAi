@@ -16,6 +16,7 @@
 //    한 장이 실패해도 나머지는 계속 간다.
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { t as tr } from "../lib/i18n";
 
 export interface ExportTarget { id: number; label: string }
 
@@ -139,11 +140,10 @@ export function ExportDialog({ targets, onClose, onStatus }: {
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10,
                     width: 520, maxWidth: "94vw", maxHeight: "88vh", overflow: "auto", padding: 20,
                     display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 800 }}>영상 내보내기 (DICOM)</div>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>{tr("영상 내보내기 (DICOM)")}</div>
 
-        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          선택한 검사 <b style={{ color: "var(--text-primary)" }}>{targets.length}건</b>의 DICOM 영상을 내보냅니다.
-          {man && <> · 영상 <b style={{ color: "var(--text-primary)" }}>{man.total_files}장</b></>}
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("선택한 검사")}<b style={{ color: "var(--text-primary)" }}>{targets.length}건</b>의 DICOM 영상을 내보냅니다.
+          {man && <>{tr("· 영상")}<b style={{ color: "var(--text-primary)" }}>{man.total_files}장</b></>}
           {targets.length > 1 && " (Shift/Ctrl 다중선택)"}
         </div>
         <div style={{ maxHeight: 108, overflow: "auto", border: "1px solid var(--border)", borderRadius: 6,
@@ -153,13 +153,13 @@ export function ExportDialog({ targets, onClose, onStatus }: {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           <Opt v="folder" disabled={!canPickDir}
-               title="USB·폴더에 저장"
+               title={tr("USB·폴더에 저장")}
                desc={canPickDir
                  ? "저장할 폴더(USB 드라이브 등)를 고르면 환자·검사별 폴더로 갈라 DICOM 을 그대로 씁니다. 한 장씩 기록하므로 진행률이 보이고, 큰 검사도 메모리를 먹지 않습니다."
                  : "이 브라우저는 폴더 선택을 지원하지 않습니다(Chrome·Edge + HTTPS 필요). 아래 '파일로 저장'을 이용하세요."} />
-          <Opt v="file" title="파일로 저장 (ZIP)"
+          <Opt v="file" title={tr("파일로 저장 (ZIP)")}
                desc="ZIP 한 개로 내려받습니다. 저장 위치는 브라우저 다운로드 창에서 고릅니다." />
-          <Opt v="cd" title="CD/DVD 굽기 (ISO 이미지)"
+          <Opt v="cd" title={tr("CD/DVD 굽기 (ISO 이미지)")}
                desc="굽기용 ISO 이미지를 만들어 내려받습니다. 탐색기에서 ISO 우클릭 → [디스크 이미지 굽기] 로 구우세요. (웹 브라우저는 CD 를 직접 구울 수 없습니다)" />
         </div>
 
@@ -168,11 +168,9 @@ export function ExportDialog({ targets, onClose, onStatus }: {
         {done && <div style={{ fontSize: 12, color: "var(--stat-final, #4ade80)", lineHeight: 1.7 }}>✔ {done}</div>}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
-          <button onClick={onClose} disabled={!!busy}>닫기</button>
+          <button onClick={onClose} disabled={!!busy}>{tr("닫기")}</button>
           <button className="primary" onClick={() => void run()}
-                  disabled={!!busy || !targets.length || man?.total_files === 0}>
-            내보내기
-          </button>
+                  disabled={!!busy || !targets.length || man?.total_files === 0}>{tr("내보내기")}</button>
         </div>
       </div>
     </div>

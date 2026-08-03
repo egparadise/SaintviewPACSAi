@@ -2,6 +2,7 @@
 // 다른 곳에서 인계(force) 로그인이 발생하면 revoked 신호를 받아 카운트다운 배너 후 자동 로그아웃.
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { t as tr } from "../lib/i18n";
 
 export function SessionGuard({ onLogout }: { onLogout: () => void }) {
   const [kick, setKick] = useState<{ reason: string; left: number } | null>(null);
@@ -41,11 +42,11 @@ export function SessionGuard({ onLogout }: { onLogout: () => void }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "grid", placeItems: "center", zIndex: 3000 }}>
       <div style={{ background: "var(--bg-panel)", border: "1px solid var(--stat-emergency,#f87171)", borderRadius: 12,
                     padding: 28, width: 420, maxWidth: "90vw", textAlign: "center", display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--stat-emergency,#f87171)" }}>다른 곳에서 로그인됨</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--stat-emergency,#f87171)" }}>{tr("다른 곳에서 로그인됨")}</div>
         <div style={{ fontSize: 14, lineHeight: 1.7 }}>{kick.reason}</div>
         <div style={{ fontSize: 42, fontWeight: 800, lineHeight: 1 }}>{kick.left}</div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>초 뒤 자동으로 로그아웃됩니다.</div>
-        <button className="primary" onClick={onLogout} style={{ padding: "8px 0" }}>지금 로그아웃</button>
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{tr("초 뒤 자동으로 로그아웃됩니다.")}</div>
+        <button className="primary" onClick={onLogout} style={{ padding: "8px 0" }}>{tr("지금 로그아웃")}</button>
       </div>
     </div>
   );
