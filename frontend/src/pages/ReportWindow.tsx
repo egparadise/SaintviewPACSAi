@@ -6,6 +6,7 @@ import { onStudySync, postStudySync } from "../lib/sync";
 import { dictationLabel, useDictation } from "../lib/useDictation";
 import { MicIcon } from "../components/MicIcon";
 import { t as tr } from "../lib/i18n";
+import { PatientBar } from "../components/PatientBar";
 
 type Tab = "read" | "hist" | "std" | "tpl";
 
@@ -624,11 +625,11 @@ export function ReportWindow() {
 
         {/* 중앙: 판독 본문 */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {/* 지금 판독하는 검사의 환자 — ◀▶·Exam 전환으로 대상이 바뀌므로 항상 상단에 고정 표시.
+              안 보이면 다른 환자의 판독문을 쓰는 사고로 이어진다. */}
+          <PatientBar study={detail} />
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 12px",
                         borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
-            <b>(/)</b>
-            <span>ID: <b>{detail.patient_key}</b></span>
-            <span style={{ color: "var(--text-secondary)" }}>{detail.modality}/{detail.study_date}</span>
             {msg && <span style={{ color: "var(--stat-final)" }}>{msg}</span>}
             <span style={{ flex: 1 }} />
             <label title={tr("CVR Notice — critical 소견 경고")} style={{ display: "flex", gap: 4, alignItems: "center" }}>

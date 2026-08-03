@@ -6,6 +6,7 @@ import { PERM_DENIED_TIP, api, hasPerm, loadPermMe, type PermMe, type PhraseRow,
 import { dictationLabel, useDictation } from "../lib/useDictation";
 import { MicIcon } from "./MicIcon";
 import { t as tr } from "../lib/i18n";
+import { PatientBar } from "./PatientBar";
 
 export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   detail: StudyDetail;
@@ -276,6 +277,8 @@ export function ReportDock({ detail, width, onLoadPrior, onStatus }: {
   return (
     <div style={{ width, borderLeft: "1px solid var(--border)", background: "var(--bg-panel)",
                   display: "flex", flexDirection: "column", flexShrink: 0, minHeight: 0 }}>
+      {/* 지금 판독하는 검사의 환자 — 도크는 Exam 탭·◀▶ 로 대상이 바뀌므로 상단에 고정 표시 */}
+      <PatientBar study={detail} compact />
       {/* 탭 */}
       <div style={{ display: "flex", background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)" }}>
         {([["read", "Report"], ["hist", "History"], ["std", "Shortcuts"], ["tpl", "Templates"]] as const).map(([k, label]) => (
