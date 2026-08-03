@@ -14,6 +14,7 @@
 | **어느 저장소인가** — 본체 `C:\Project\SaintviewPACSai` / 스위트 `C:\Project\SaintviewViewerSuite` | 코드·원격·Obsidian 볼트가 전부 다르다. `sv70.cloudcare.life` 는 **스위트**. 두 저장소는 기능을 **따로** 개발한다(이식·통합 금지) |
 | **백엔드가 어느 DB로 떠 있나** | `SAINTVIEW_DATABASE_URL` 없이 띄우면 기본값 SQLite `dev.db` 로 붙어 "데이터가 없다"는 오진을 부른다. 반드시 런처(`start_saintview.bat` 55행) 방식으로 기동 |
 | **설정 키를 검증에 쓸 것인가** | `app_setting` 은 **이력이 없다**. GET → 백업 → 복원 없이 PUT 하면 사용자 설정이 영구 소실된다(실제로 admin 의 HP 규칙을 날린 적 있음) |
+| **작업 트리에 남의 변경이 있나** | 이 저장소는 여러 세션이 같은 트리를 공유한다. `git add -A` 는 **다른 세션의 진행 중 변경까지 커밋**한다 — 커밋 전 `git status` 로 확인하고, 있으면 게이트(build+pytest)를 먼저 돌린 뒤 커밋 메시지에 그 사실을 남긴다 |
 
 ```bash
 # 정상 기동 (컨테이너 → 백엔드 → 프론트 3포털)

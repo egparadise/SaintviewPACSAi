@@ -222,6 +222,13 @@ python harness/eval_rag.py                 # RAG 품질 회귀 평가 (릴리스
   - **⚠ CRITICAL 재발견(3회차 감사 완료분)** — Image 분할 타일에서 렌더는 고쳤지만 **입력 좌표가 여전히 페인 전체 기준**이었다. 4번 칸을 클릭해도 좌표가 페인 기준으로 정규화되고 소속 이미지는 **첫 칸**으로 기록돼 **틀린 mm 가 틀린 SOP 에 저장**된다(임상 위험). `screenToImage` 가 [0,1] 로 클램프해 '유효하지만 틀린' 값이 나오므로 예외도 안 난다 → `tileAt(pid,e)` 로 커서 아래 실제 칸의 이미지·사각형을 해석해 4개 핸들러(draw/marquee/edit/point)에 적용. **1×1 은 동작 불변**(node 12케이스 검증)
   - **HU ROI 버튼이 `detail.id` 고정**이라 Compare/＋Add 로 불러온 과거검사 페인의 ROI 는 항상 404 → ROI 가 놓인 페인의 검사로 해석(같은 파일 2178행 패턴 재사용)
   - **키이미지 마크가 `/instances` 로 Orthanc 전수 열거 + `alive()` 왕복**을 하고 탭마다 반복돼 O(n²) → **DB 전용 `GET /studies/{id}/key-images`** 신설. 실측 **0.187s/288KB → 0.025s/18B**(7.6배)
+- [x] **58차(2026-08-03) — 협진(Co-Reading)·DICOM 내보내기 재구성·워커 가드** (`3c45f6b`, **pytest 384**·build green):
+  - ⚠ **이 차수는 다른 세션이 작성**했다. 아래는 커밋 시점에 코드에서 확인한 범위이며, 설계 의도·검증 내역은 해당 세션 로그를 따른다.
+  - **협진(Co-Reading)** — `services/collab_service.py`(친구·메신저·세션·제어권·임시 열람권 도메인 규칙, 전부 동기 SQLAlchemy — WS 경로는 호출부가 `run_in_threadpool` 로 감싼다) + `services/collab_hub.py`(WebSocket 팬아웃) + `api/collab.py`·`api/collab_ws.py`. 마이그레이션 `b2c3d4e5f6a7_collab_tables`. 프론트 `components/Collab{Dock,Global,SessionPanel}.tsx` · `lib/{collab,collabState,useCollab,webrtcMesh}.ts`
+  - **DICOM 내보내기 재구성** — `services/export_service.py` 제거 → `api/export_dicom.py` 신설. 폴더/USB 는 **manifest + file 단위 스트리밍**(진행률 표시 가능), ZIP 은 서버가 묶어 스트리밍
+  - **워커 가드** — `services/worker_guard.py`: 단일 워커 배포 계약의 **런타임 백스톱**(감지만 하고 기동은 거부하지 않음). `config.detect_worker_plan()` 이 argv+env 만 봐서 못 잡던 두 경로(gunicorn conf 의 `workers=2`, 프로그램적 `uvicorn.run(workers=2)`) 대응
+  - 그 밖 htj2k 스트리밍·DB 풀 사이징·세션/보안 서비스·크래시 사유 수집. 신규 테스트 11파일 + 프론트 rule 테스트 3종(`frontend/tests/*.test.mjs`)
+  - ⚠ **동시 세션 주의** — 이 저장소는 여러 세션이 같은 작업 트리를 공유한다. `git add -A` 는 **다른 세션의 진행 중 변경까지 커밋**한다. 커밋 전 `git status` 로 내가 만들지 않은 변경이 있는지 보고, 있으면 **게이트(build+pytest)를 먼저 돌린 뒤** 그 사실을 커밋 메시지에 남길 것
 - [ ] 남은 것(차기): **AI 판독 재활성(RAG SR 개편 시 설정>AI 마스터 스위치 ON)** · **워크리스트 백지 재발 시 ErrorBoundary 표시 오류 수집**(근본 원인 미확정) · 잘못된 DB(dev.db) 로 기동된 3시간 동안의 쓰기 여부 확인 · **실 MG 데이터로 2D-MG 검증**(이 환경엔 MG 검사가 없어 mm 배율 경로 미검증) · **In-View 오버레이 기본 배치가 종전과 다름**(통일 의도 — 현장 확인 필요) · **54~55차 기능 육안 검증**(자체서명 인증서로 내장 브라우저 접근 불가 — 오버레이 배치·Export 대화상자·2D-MG 배율) · **스위트 반영 여부 결정**(본체와 구현이 갈라져 있음)
 - [x] **53차 타일 기능 적대검증 확정 7건 — 전량 수정**(3렌즈+3반박 워크플로, 42 에이전트. build green):
   - **타일 렌더 구조를 In-View 로 통일(핵심)** — Viewer2D 다중 타일 분기에서 transform 을 그리드 래퍼가 아니라 **각 타일 `<img>`** 에 걸고, 칸을 `position:relative; overflow:hidden` 로 만들어 **라벨·구분선을 칸 안**에 둔다. 이걸로 ①라벨 오배치(flip/회전 시 이미지가 칸을 바꿔 다른 이미지에 붙던 것) ②확대 시 이미지가 옆 칸으로 번지던 것 ③조밀 분할에서 라벨이 칸 밖으로 밀려 겹치던 것이 한꺼번에 해소. 단일 이미지 분기는 종전대로 페인 래퍼 변환(주석 SVG 정합 유지)
