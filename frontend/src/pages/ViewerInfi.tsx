@@ -32,7 +32,7 @@ import { alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
          type CompareBasis, type HpRule, type HpCapture, type HpSlotSource,
          type Hang2dPrefs } from "../lib/viewerConfig";
 import { HpSaveDialog } from "../components/HpSaveDialog";
-import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgGridLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 
@@ -3402,17 +3402,25 @@ void applyHpSources(rule);
                        }} />
                 2D-MG
               </label>
-              {MG_LAYOUTS.map((k) => {
-                const [kr, kc] = k.split("x").map(Number);
+              {/* 분할은 콤보 하나로(T-View·SaintView 와 동일) */}
+              {(() => {
+                const curKey = `${sLayout.r}x${sLayout.c}`;
+                const known = (MG_LAYOUTS as readonly string[]).includes(curKey);
                 return (
-                  <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`} onClick={() => applyMgLayout(kr, kc)}
-                          style={{ padding: "1px 6px", fontSize: 11,
-                                   ...(sLayout.r === kr && sLayout.c === kc
-                                       ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
-                    {mgLayoutLabel(k)}
-                  </button>
+                  <select value={known ? curKey : ""}
+                          title="2D-MG 분할 — 기본값은 설정 ▸ 뷰어 공통 ▸ MG(2D-MG) 에서 정합니다"
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!(MG_LAYOUTS as readonly string[]).includes(v)) return;
+                            const [kr, kc] = v.split("x").map(Number);
+                            applyMgLayout(kr, kc);
+                          }}
+                          style={{ fontSize: 11, padding: "1px 4px" }}>
+                    {!known && <option value="">{mgGridLabel(curKey)}</option>}
+                    {MG_LAYOUTS.map((k) => <option key={k} value={k}>{mgGridLabel(k)}</option>)}
+                  </select>
                 );
-              })}
+              })()}
             </>
           )}
           {IN_CROSSLINK_MODES.map((m) => (

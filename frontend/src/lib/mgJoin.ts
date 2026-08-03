@@ -28,24 +28,61 @@ export type MgLayoutKey = "1x2" | "2x2" | "2x3";
 /** 2D-MG 모드에서 제공하는 분할 프리셋 (1:2 / 2:2 / 2:3) */
 export const MG_LAYOUTS: MgLayoutKey[] = [...MG_LAYOUT_KEYS] as MgLayoutKey[];
 export const mgLayoutLabel = (k: string) => k.replace("x", ":");
+/** 뷰어 콤보 표기 — "2x2" → "2×2" (설정 화면은 뷰 구성을 덧붙인 MG_LAYOUT_DESC 를 쓴다) */
+export const mgGridLabel = (k: string) => k.replace("x", "×");
 
 export interface MgJoinPrefs {
   /** 뷰어를 열 때 2D-MG 체크 기본값 */
   on_default: boolean;
-  /** MG 기본 분할 (Series 분할) */
+  /** MG 기본 분할 */
   layout: MgLayoutKey;
   /** 조직/배경 판정 임계값 — 프레임 네 모서리에서 잰 배경 밝기와의 차이(0~255) */
   thresh: number;
+  /** 위 layout 을 **Series 분할**(뷰 하나당 페인 하나)로 적용할지. 기본 켜짐.
+   *  ⚠ 해제하면 페인 하나 안의 **Image 분할**(타일)이 되는데, 타일 페인은 변환이 페인당
+   *     하나뿐이라 **좌우 맞붙임(2D-MG)이 적용되지 않는다**(Viewer2D 의 적용기가 타일 페인을
+   *     건너뛴다). 즉 해제 = 4뷰를 한 페인에 타일로 늘어놓기만 하는 표시 모드다. */
+  series: boolean;
+  /** 흉벽 판정 — auto=영상에서 조직 경계를 찾아 잘라냄(권장) / ratio=아래 고정 비율 */
+  detect: "auto" | "ratio";
+  /** 픽셀을 읽을 수 없을 때(타 출처 canvas 오염 등) 고정 비율로 **추정 크롭**을 할지.
+   *  기본 꺼짐 — 근거 없이 맘모를 자르면 조직을 가릴 수 있어 원본 유지가 안전하다. */
+  blind_ratio: boolean;
+  /** detect=ratio 또는 blind_ratio 일 때 안쪽에서 잘라낼 폭 %(0~60) */
+  ratio: number;
+  /** 조직 주위로 남길 여백 %(0~10) — 조직이 가장자리에 딱 붙지 않게 */
+  margin: number;
 }
-export const DEFAULT_MG_JOIN: MgJoinPrefs = { on_default: false, layout: "2x2", thresh: 12 };
+// 기본값은 lib/mgHang.DEFAULT_MG_CFG 와 같은 값을 쓴다(두 모듈이 어긋나지 않도록).
+export const DEFAULT_MG_JOIN: MgJoinPrefs = {
+  on_default: false, layout: "2x2", thresh: 12,
+  series: true,   // 기본 = Series 분할(현행 동작). 해제하면 맞붙임이 걸리지 않는다
+  detect: "auto", blind_ratio: false, ratio: 38, margin: 2,
+};
 
 export function normMgJoin(v: unknown): MgJoinPrefs {
   const o = (v ?? {}) as Partial<MgJoinPrefs>;
   const lay = MG_LAYOUTS.includes(o.layout as MgLayoutKey) ? (o.layout as MgLayoutKey) : DEFAULT_MG_JOIN.layout;
-  const th = typeof o.thresh === "number" && isFinite(o.thresh)
-    ? Math.max(0, Math.min(255, o.thresh)) : DEFAULT_MG_JOIN.thresh;
-  return { on_default: !!o.on_default, layout: lay, thresh: th };
+  const num = (x: unknown, d: number, lo: number, hi: number) =>
+    Math.max(lo, Math.min(hi, typeof x === "number" && isFinite(x) ? x : d));
+  return {
+    on_default: !!o.on_default,
+    layout: lay,
+    thresh: num(o.thresh, DEFAULT_MG_JOIN.thresh, 0, 255),
+    series: typeof o.series === "boolean" ? o.series : DEFAULT_MG_JOIN.series,
+    detect: o.detect === "ratio" ? "ratio" : "auto",
+    blind_ratio: typeof o.blind_ratio === "boolean" ? o.blind_ratio : DEFAULT_MG_JOIN.blind_ratio,
+    ratio: num(o.ratio, DEFAULT_MG_JOIN.ratio, 0, 60),
+    margin: num(o.margin, DEFAULT_MG_JOIN.margin, 0, 10),
+  };
 }
+
+/** 설정 화면·뷰어 콤보에 쓰는 분할 라벨 — 무엇을 고르는지 알 수 있게 뷰 구성을 함께 적는다 */
+export const MG_LAYOUT_DESC: Record<string, string> = {
+  "1x2": "1 : 2 (좌·우 2뷰)",
+  "2x2": "2 : 2 (CC/MLO 4뷰)",
+  "2x3": "2 : 3 (4뷰 + 여분 2)",
+};
 
 /** 조직 영역의 가로 범위 (0~1 정규화, 이미지 좌표) */
 export interface MgBBox { x0: number; x1: number }

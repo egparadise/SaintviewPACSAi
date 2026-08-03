@@ -6,7 +6,8 @@ import {
   INFI_COLUMNS, SV_COLUMNS, SVINFI_PANELS, SVINFI_PANEL_LABEL, type ViewerKey,
 } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
-import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, normMgJoin, type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, MG_LAYOUT_DESC, mgLayoutLabel, normMgJoin,
+         type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
 import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, BUILD_SHA, VERSION_LABEL } from "../lib/version";
 import { clearCrashLog, readCrashLog, type CrashEntry } from "../components/ErrorBoundary";
 import { normOverlayCfg, type OverlayCfg } from "../lib/overlayFields";
@@ -144,12 +145,12 @@ interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: stri
 // ⚠ 여기 없는 모달리티는 **설정 자체가 불가능**하다(실제로 DX·OT 가 빠져 있어 그 검사들은
 //   공통 레이아웃이 영영 적용되지 않았다). 마지막 "*" 는 **행이 없는 모달리티 전체**에
 //   적용되는 기본값 — pickHang2d 가 이미 폴백으로 읽고 있었지만 UI 가 만들 길이 없었다.
-const HANG2D_MODS = ["CR", "DR", "DX", "MG", "US", "CT", "MR", "XA", "NM", "PT", "OT", HANG2D_ANY];
-function Hanging2dEditor({ map, onChange, mg, onMg }: {
+// ⚠ MG 는 여기 없다 — 맘모는 2D 행잉 표 밖(pickHang2d 가 MG 에 null 을 준다)이고
+//   분할·맞붙임을 아래 'MG — 유방 사이 여백 제거(2D-MG)' 전용 그룹에서 정한다.
+const HANG2D_MODS = ["CR", "DR", "DX", "US", "CT", "MR", "XA", "NM", "PT", "OT", HANG2D_ANY];
+function Hanging2dEditor({ map, onChange }: {
   map: Record<string, { s: string; i: string }>;
   onChange: (m: string, next: { s: string; i: string }) => void;
-  /** MG 행 전용 — 2D-MG(좌우 맞붙임) 설정. 뷰어 공통 페이지에서만 전달한다 */
-  mg?: MgJoinPrefs; onMg?: (next: MgJoinPrefs) => void;
 }) {
   const parseG = (s: string) => { const [r, c] = s.split("x").map(Number); return { r: r || 1, c: c || 1 }; };
   const gStr = (g: { r: number; c: number }) => `${g.r}x${g.c}`;
@@ -167,35 +168,9 @@ function Hanging2dEditor({ map, onChange, mg, onMg }: {
             </b>
             <GridPicker label="Series" max={10} value={parseG(cur.s)} onPick={(g) => onChange(m, { ...cur, s: gStr(g) })} />
             <GridPicker label="Image" max={10} value={parseG(cur.i)} onPick={(g) => onChange(m, { ...cur, i: gStr(g) })} />
-            {m === "MG" && mg && onMg && (
-              <>
-                <label title="좌우 유방 사이의 빈 공간(공기)을 제거해 가운데에서 맞붙여 표시합니다. 뷰어 우측 상단 2D-MG 체크박스로 켜고 끕니다."
-                       style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, marginLeft: 10, whiteSpace: "nowrap" }}>
-                  <input type="checkbox" checked={mg.on_default}
-                         onChange={(e) => onMg({ ...mg, on_default: e.target.checked })} />
-                  2D-MG 기본 ON
-                </label>
-                <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, whiteSpace: "nowrap" }}>
-                  분할
-                  <select value={mg.layout} onChange={(e) => onMg({ ...mg, layout: e.target.value as MgLayoutKey })}
-                          style={{ fontSize: 12 }}>
-                    {MG_LAYOUTS.map((k) => <option key={k} value={k}>{mgLayoutLabel(k)}</option>)}
-                  </select>
-                </label>
-                <label title="조직과 배경(공기)을 가르는 밝기 임계값. 배경에 잡음이 많아 맞붙임이 과하면 값을 올립니다(0~255)."
-                       style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 12, whiteSpace: "nowrap" }}>
-                  임계
-                  <input type="number" min={0} max={255} value={mg.thresh} style={{ width: 52, fontSize: 12 }}
-                         onChange={(e) => onMg({ ...mg, thresh: Math.max(0, Math.min(255, Number(e.target.value) || 0)) })} />
-                </label>
-              </>
-            )}
           </div>
         );
       })}
-      {mg && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
-        · MG 행의 Series/Image 분할 대신 <b>2D-MG 분할</b>이 적용됩니다(맘모는 페인당 1장 고정). 이미 열려 있는 뷰어에는 다음에 검사를 열 때 반영됩니다.
-      </div>}
     </>
   );
 }
@@ -1775,8 +1750,102 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                     (행잉의 기본은 <b>적용되지 않음</b> — 규칙의 &lsquo;Exam 열 때 HP 사용&rsquo; 을 켜야 자동 적용).
                   </span>
                 </div>
-                <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))}
-                                 mg={mgJoin} onMg={setMgJoin} />
+                <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))} />
+              </Group>
+            )}
+            {page === "viewer" && (
+              <Group title="MG — 유방 사이 여백 제거 (2D-MG)">
+                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 6 }}>
+                  MG 검사를 열면 뷰어 우측 상단에 <b style={{ color: "#a78bfa" }}>2D-MG</b> 체크박스가 나타납니다.
+                  체크하면 좌·우 유방 사이의 빈 공간(공기)을 잘라내고 <b>흉벽을 바깥쪽 가장자리</b>에 붙여
+                  두 영상이 가운데에서 맞닿게 배치합니다. 해제하면 원본 그대로 표시합니다.
+                  (SaintView·I-View·T-View 공통 적용)
+                </div>
+                <Row label="기본 사용">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                    <input type="checkbox" checked={mgJoin.on_default}
+                           onChange={(e) => setMgJoin({ ...mgJoin, on_default: e.target.checked })} />
+                    MG 검사를 열 때 2D-MG 를 켠 상태로 시작
+                  </label>
+                </Row>
+                <Row label="Image layout">
+                  <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <select value={mgJoin.layout} style={{ width: 190 }}
+                            onChange={(e) => setMgJoin({ ...mgJoin, layout: e.target.value as MgLayoutKey })}>
+                      {MG_LAYOUTS.map((k) => (
+                        <option key={k} value={k}>{MG_LAYOUT_DESC[k] ?? mgLayoutLabel(k)}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      4뷰가 한 시리즈에 들어 있는 검사에 이 분할로 겁니다(행:열).
+                    </span>
+                  </span>
+                </Row>
+                <Row label="분할 방식">
+                  <span style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                      <input type="checkbox" checked={mgJoin.series}
+                             onChange={(e) => setMgJoin({ ...mgJoin, series: e.target.checked })} />
+                      위 값을 <b>Series Layout</b> 으로 적용 (해제 시 <b>Image Layout</b>)
+                    </label>
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      기본 켜짐 — 뷰 하나당 페인 하나(W/L·확대·계측이 뷰마다 따로).
+                    </span>
+                  </span>
+                </Row>
+                <Row label="">
+                  <div style={{ fontSize: 11, color: "var(--stat-emergency)", lineHeight: 1.7 }}>
+                    ⚠ <b>해제하면 좌우 맞붙임(2D-MG)이 걸리지 않습니다.</b> 타일 페인은 변환이 페인당 하나뿐이라
+                    좌우를 따로 밀어 붙일 수 없어, 적용기가 타일 페인을 건너뜁니다 —
+                    해제는 &lsquo;4뷰를 한 페인에 타일로 늘어놓기만&rsquo; 하는 표시 모드입니다.
+                    또한 T-View·SaintView 는 타일 페인에 계측·주석·오버레이를 표시하지 않습니다(I-View 는 표시).
+                  </div>
+                </Row>
+                <Row label="흉벽 판정">
+                  <select value={mgJoin.detect} style={{ width: 320 }}
+                          onChange={(e) => setMgJoin({ ...mgJoin, detect: e.target.value === "ratio" ? "ratio" : "auto" })}>
+                    <option value="auto">자동 — 영상에서 조직 경계를 찾아 잘라냄 (권장)</option>
+                    <option value="ratio">고정 비율 — 아래 비율만큼 안쪽에서 잘라냄</option>
+                  </select>
+                </Row>
+                <Row label="배경 임계값">
+                  <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <input type="number" min={0} max={255} value={mgJoin.thresh} style={{ width: 80 }}
+                           onChange={(e) => setMgJoin({ ...mgJoin, thresh: Math.max(0, Math.min(255, Number(e.target.value) || 0)) })} />
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      (0~255) 프레임 네 모서리에서 잰 <b>배경 밝기와의 차이</b>가 이 값을 넘으면 조직으로 봅니다.
+                      조직이 잘리면 낮추고, 여백이 남으면 높입니다.
+                    </span>
+                  </span>
+                </Row>
+                <Row label="탐지 불가 시">
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, cursor: "pointer" }}>
+                    <input type="checkbox" checked={mgJoin.blind_ratio}
+                           onChange={(e) => setMgJoin({ ...mgJoin, blind_ratio: e.target.checked })} />
+                    픽셀을 읽을 수 없을 때 아래 고정 비율로 잘라냄
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 6 }}>
+                      꺼 두면(권장) 근거가 없을 때 원본을 그대로 표시합니다 — 추정 크롭은 조직을 가릴 수 있습니다.
+                    </span>
+                  </label>
+                </Row>
+                <Row label="고정 비율">
+                  <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <input type="number" min={0} max={60} value={mgJoin.ratio} style={{ width: 80 }}
+                           onChange={(e) => setMgJoin({ ...mgJoin, ratio: Math.max(0, Math.min(60, Number(e.target.value) || 0)) })} />
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      % — 자동 판정이 불가능할 때(외부 서버 영상 등) 안쪽에서 잘라낼 폭.
+                    </span>
+                  </span>
+                </Row>
+                <Row label="여백">
+                  <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <input type="number" min={0} max={10} value={mgJoin.margin} style={{ width: 80 }}
+                           onChange={(e) => setMgJoin({ ...mgJoin, margin: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })} />
+                    <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      % — 조직이 가장자리에 딱 붙지 않도록 남기는 여백.
+                    </span>
+                  </span>
+                </Row>
               </Group>
             )}
             {page === "viewer" && (

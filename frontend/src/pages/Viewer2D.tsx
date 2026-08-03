@@ -11,7 +11,8 @@ import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
          type CompareBasis, type HpRule, type HpCapture, type HpSlotSource, type Hang2dPrefs,
          hang2dViewerKey, hpPickRule, hpPickPrior, paneCountOf, pickHang2d, resolveHang2d } from "../lib/viewerConfig";
-import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
+import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgGridLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
+         type MgLayoutKey,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 import { HpSaveDialog } from "../components/HpSaveDialog";
@@ -1627,7 +1628,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     //   hpActive 를 인자로도 받는 이유: 검사 전환에서 재매칭 직후에는 setHpName 이 아직
     //   반영되기 전이라 ref 가 옛값이다 — 호출부가 방금 판정한 결과를 그대로 넘긴다.
     const r = resolveHang2d(hang2dSrcRef.current, hang2dViewerKey(skin), modality,
-                            mgOnRef.current ? mgCfgRef.current.layout : null,
+                            // 분할 방식 설정 반영 — series=false 면 Series 1×1 + 페인 안 타일
+                            mgOnRef.current
+                              ? { layout: mgCfgRef.current.layout, series: mgCfgRef.current.series }
+                              : null,
                             hpActive ?? hpAppliedRef.current);
     if (r.s && LAYOUTS[r.s]) setLayout(r.s as keyof typeof LAYOUTS);
     hang2dImgRef.current = r.i;
@@ -4759,14 +4763,21 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
                      }} />
               2D-MG
             </label>
-            {MG_LAYOUTS.map((k) => (
-              <button key={k} title={`MG 분할 ${mgLayoutLabel(k)}`}
-                      onClick={() => { mgCfgRef.current = { ...mgCfgRef.current, layout: k }; applyMgLayout(k); }}
-                      style={{ padding: "2px 7px", fontSize: 11,
-                               ...(layout === k ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}) }}>
-                {mgLayoutLabel(k)}
-              </button>
-            ))}
+            {/* 분할은 콤보 하나로 — 프리셋 버튼 3개는 폭만 차지하고 현재 값도 한눈에 안 들어왔다 */}
+            <select value={MG_LAYOUTS.includes(layout as MgLayoutKey) ? layout : ""}
+                    title="2D-MG 분할 — 기본값은 설정 ▸ 뷰어 공통 ▸ MG(2D-MG) 에서 정합니다"
+                    onChange={(e) => {
+                      const k = e.target.value as MgLayoutKey;
+                      if (!MG_LAYOUTS.includes(k)) return;
+                      mgCfgRef.current = { ...mgCfgRef.current, layout: k };
+                      applyMgLayout(k);
+                    }}
+                    style={{ fontSize: 11, padding: "1px 4px" }}>
+              {!MG_LAYOUTS.includes(layout as MgLayoutKey) && (
+                <option value="">{mgGridLabel(layout)}</option>   /* 현재 분할이 MG 프리셋 밖일 때 표시 */
+              )}
+              {MG_LAYOUTS.map((k) => <option key={k} value={k}>{mgGridLabel(k)}</option>)}
+            </select>
           </span>
         )}
         {/* 다학제 협진 — 이 검사를 다른 사용자와 실시간으로 함께 본다(같은 병원·타 병원 모두).
