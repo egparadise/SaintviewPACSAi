@@ -116,6 +116,14 @@ const CATALOG: Record<string, Row> = {
   "표시 언어": { en: "Display Language", ru: "Язык интерфейса", zh: "显示语言", ja: "表示言語", es: "Idioma de la interfaz", de: "Anzeigesprache", fr: "Langue d'affichage", vi: "Ngôn ngữ hiển thị", ar: "لغة العرض" },
 };
 
+/**
+ * 생성된 번역본 — `backend/harness/i18n_translate.py` 가 소스에서 `tr("...")` 키를 뽑아
+ * Claude API 로 9개 언어를 만들어 넣는다. 손으로 고친 값은 위 CATALOG 가 우선한다
+ * (즉 CATALOG = 검수·수정본, 이 파일 = 대량 생성본).
+ */
+import GENERATED from "./i18n.messages.json";
+const GEN = GENERATED as Record<string, Record<string, string>>;
+
 let current = DEFAULT_LOCALE;
 try {
   const v = localStorage.getItem(LS_KEY);
@@ -155,12 +163,16 @@ export function onLocaleChange(fn: (code: string) => void): () => void {
  */
 export function t(ko: string): string {
   if (current === DEFAULT_LOCALE) return ko;
-  return CATALOG[ko]?.[current] ?? ko;
+  // 손으로 검수한 CATALOG 가 우선, 없으면 생성본, 그것도 없으면 한국어 원문
+  return CATALOG[ko]?.[current] ?? GEN[ko]?.[current] ?? ko;
 }
 
 /** 지금 카탈로그가 덮는 범위 — 설정 화면에 진행률을 정직하게 보여주기 위함 */
 export function coverage(code = current): { done: number; total: number } {
-  const keys = Object.keys(CATALOG);
-  if (code === DEFAULT_LOCALE) return { done: keys.length, total: keys.length };
-  return { done: keys.filter((k) => CATALOG[k][code]).length, total: keys.length };
+  const keys = new Set([...Object.keys(CATALOG), ...Object.keys(GEN)]);
+  const total = keys.size;
+  if (code === DEFAULT_LOCALE) return { done: total, total };
+  let done = 0;
+  keys.forEach((k) => { if (CATALOG[k]?.[code] || GEN[k]?.[code]) done++; });
+  return { done, total };
 }
