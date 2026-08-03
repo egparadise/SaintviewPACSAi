@@ -8,7 +8,8 @@
     "dev:viewer": "vite --port 5176",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test --experimental-strip-types \"tests/*.test.mjs\""
   },
   "dependencies": {
     "@cornerstonejs/core": "^5.0.0",

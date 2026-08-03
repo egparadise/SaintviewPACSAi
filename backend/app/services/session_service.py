@@ -5,6 +5,7 @@ poll 기반 자발적 로그아웃(하드 revoke 아님) — Client 뷰어 UX �
 - find_live: 같은 (병원, 사용자)의 살아있는 세션(비인계, TTL 내) 1건.
 - revoke: 인계 예약 — 기존 세션에 카운트다운(revoke_deadline) 설정.
 - status: /auth/session-status poll — 종료 예고 상태 반환 + last_seen 갱신(하트비트).
+- end: 로그아웃 — 세션 행 삭제(그 sid 를 쥔 자격이 즉시 무효가 된다).
 """
 from __future__ import annotations
 
@@ -59,6 +60,20 @@ def revoke(db: Session, sess: ActiveSession, reason: str) -> None:
     """기존 세션 인계 예약 — 카운트다운 시작(커밋은 호출부)."""
     sess.revoke_deadline = _now() + timedelta(seconds=REVOKE_COUNTDOWN)
     sess.revoke_reason = reason[:200]
+
+
+def end(db: Session, sid: str) -> bool:
+    """로그아웃 — 세션 행 삭제(커밋은 호출부). 반환: 실제로 지웠는가.
+
+    왜 필요한가: 지금까지 프론트 로그아웃은 저장소의 JWT 만 지웠다. 서버 쪽 행은 남아 있어
+    같은 계정으로 다시 로그인하면 find_live(30초 창)가 그 유령 세션을 보고 **없어야 할
+    '다른 곳에서 로그인 중입니다' 인계 프롬프트**를 띄웠다. 로그아웃은 자기 세션을
+    스스로 끊는 것이므로 남의 세션에는 영향이 없다(sid 를 아는 주체만 부를 수 있다).
+    """
+    if not sid:
+        return False
+    n = db.execute(delete(ActiveSession).where(ActiveSession.session_id == sid)).rowcount
+    return bool(n)
 
 
 def status(db: Session, sid: str) -> dict:

@@ -6,15 +6,19 @@ import { annoLabel, contentRect, measureAnno, refLineOn, screenToImage } from ".
 import { SC_DEFAULTS } from "../lib/shortcutDefs";
 import { GridPicker } from "../lib/GridPicker";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
-import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
+import { onStudySync, onViewerAddTab, onViewerCloseAll, onViewerDelTab, postStudySync, postViewerAddTab, postViewerCloseAll, postViewerDelTab } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
 import { DEFAULT_WL_PRESETS, alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
-         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource,
-         hpPickRule, hpPickPrior } from "../lib/viewerConfig";
+         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource, type Hang2dPrefs,
+         hang2dViewerKey, hpPickRule, hpPickPrior, paneCountOf, pickHang2d, resolveHang2d } from "../lib/viewerConfig";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
 import { HpSaveDialog } from "../components/HpSaveDialog";
+import { CollabDock } from "../components/CollabDock";
+import { CollabInviteBanner, CollabSessionPanel } from "../components/CollabSessionPanel";
+import { useCollab } from "../lib/useCollab";
+import { applyPane, type CollabSnapshot } from "../lib/collabState";
 import { ToolIconTy } from "../components/ToolIconTy";
 import { AnatomyIcon } from "../lib/anatomyIcons";
 import { ReportDock } from "../components/ReportDock";
@@ -534,6 +538,10 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   const [imgLay, setImgLay] = useState({ r: 1, c: 1 });   // 콤보 표시용 — 실제 적용은 페인별 il
   // 2D 행잉(모달리티→Image 분할) 기본 il — 검사 열 때 페인에 적용(prefs 로드에서 해석)
   const hang2dImgRef = useRef<{ r: number; c: number } | null>(null);
+  /** 2D 행잉 규정 원본 — 검사가 바뀔 때마다 **다시 계산**하려면 이 조각이 있어야 한다.
+   *  예전엔 prefs 로드 effect 안에서 주 검사 modality 로 한 번만 계산하고 버렸다
+   *  (그래서 탭으로 CT→DR 을 열면 CT 의 2×2 격자가 그대로 남았다). */
+  const hang2dSrcRef = useRef<Hang2dPrefs>({});
   /* 사용자가 화면에서 직접 바꾼 분할 — Setting 저장과 무관하게 **뷰어 창이 닫힐 때까지** 기억한다.
      Exam 전환·검사 재행잉에서도 모달리티 기본값보다 우선 적용(요구: 즉흥 화면 구성 지속). */
   // 오버레이 배치(모달리티별 귀퉁이) — 설정>뷰어 공통>영상 정보 표시
@@ -587,6 +595,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     });
   // HP(행잉 프로토콜) + W/L 프리셋(All 적용) + 타이틀바 드롭다운
   const [hpRules, setHpRules] = useState<HpRule[]>([]);
+  // 검사 전환(콜백)에서 최신 규칙 목록을 봐야 한다 — deps 로 끌어오면 그 effect 가 매번 재등록된다
+  const hpRulesRef = useRef<HpRule[]>([]);
+  useEffect(() => { hpRulesRef.current = hpRules; }, [hpRules]);
   const [hpName, setHpName] = useState("기본");
   // 직접설정 — 켜면 화면을 자유롭게 구성한 뒤 [현재 화면을 프로토콜로 저장] 으로 규칙을 만든다
   const [hpDirect, setHpDirect] = useState(false);
@@ -664,6 +675,13 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   };
   // 다른 창(Worklist/Reading)에서 환자가 바뀌면 — 열린 탭이면 그 탭으로 전환
   const loadIntoActiveRef = useRef<(id: number) => Promise<void>>(async () => {});
+  // 다른 창의 Exam 탭 ✕ 방송을 처리할 때 최신 클로저를 쓰기 위한 참조(구독은 마운트 1회)
+  const dropTabLocalRef = useRef<(id: number) => void>(() => {});
+  // 다학제 협진 읽기전용 게이트 — 값은 아래 useCollab 이 채운다(훅은 thumbSeries 이후에 불러야
+  // 해서 순서가 뒤집힌다). ref 로 두는 이유: 키보드 핸들러가 effect 안에 갇혀 있어 최신 값을
+  // dep 로 끌어오려면 그 effect 를 매번 재등록해야 하는데, 그건 뷰어 단축키 전체를 흔든다.
+  const collabRO = useRef(false);
+  const [collabDockOpen, setCollabDockOpen] = useState(false);
   const openTabsRef = useRef<{ id: number; uid: string; label: string }[]>([]);
   useEffect(() => {
     const off = onStudySync("viewer", (id) => {
@@ -683,6 +701,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     });
     return off;
   }, []);
+  // 다른 모니터 창에서 Exam 탭 ✕ — 이 창 목록에서도 뺀다(되살아나지 않게). 재방송은 하지 않는다.
+  useEffect(() => onViewerDelTab((id) => dropTabLocalRef.current?.(id)), []);
   const [activePane, setActivePane] = useState("p0");
   // 분할이 줄어 활성 페인이 화면 밖으로 나가면 마지막 보이는 페인으로 보정.
   // (panes 는 p0~p99 를 상시 보유하므로 보정하지 않으면 안 보이는 페인이 Scout·스크롤 기준이 된다)
@@ -1144,14 +1164,15 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       // 2D 행잉 — 모달리티별 Series 분할(setLayout) + Image 분할(페인 il). 구 형식(문자열=Series만) 호환.
       // 공통 우선(hanging2d_common_on, 기본 on)이면 공통이 뷰어별보다 우선. 아니면 뷰어별(sv/ty) 우선.
       // MG(mammo)는 전용 2×2 4-view 행잉이 우선(결정적) — 2D 행잉 설정 무시(경합·타일 분할 방지).
-      const vk = skin === "saint" ? "sv" : "ty";
-      const perVMap = v.hanging2d_by_viewer?.[vk] ?? {};
-      const commonMap = merged.hanging2d ?? {};
-      const commonOn = v.hanging2d_common_on ?? true;
-      const pickHang = (m: string) => commonOn ? (commonMap[m] ?? perVMap[m]) : (perVMap[m] ?? commonMap[m]);
-      const hv = detail.modality === "MG" ? undefined : pickHang(detail.modality);
-      const sKey = typeof hv === "string" ? hv : hv?.s;
-      const iKey = typeof hv === "string" ? undefined : hv?.i;
+      // ⚠ 우선순위 규정은 lib/viewerConfig.pickHang2d **한 곳에만** 있다
+      //   (공통 체크 on=공통만 / off=이 뷰어만, 폴백 없음. MG 는 언제나 제외 — mg_join 규정이 결정적).
+      //   여기서 다시 삼항으로 폴백을 넣으면 I-View 와 또 갈린다. 규정 변경은 pickHang2d 에서.
+      hang2dSrcRef.current = { hanging2d: merged.hanging2d,
+                               hanging2d_common_on: v.hanging2d_common_on,
+                               hanging2d_by_viewer: v.hanging2d_by_viewer };
+      const hv = pickHang2d(hang2dSrcRef.current, hang2dViewerKey(skin), detail.modality);
+      const sKey = hv?.s;
+      const iKey = hv?.i;
       // HP 가 이미 분할을 정했으면 2D 행잉이 덮지 않는다(두 설정 GET 의 도착 순서와 무관)
       if (sKey && LAYOUTS[sKey] && !hpAppliedRef.current) setLayout(sKey as keyof typeof LAYOUTS);
       const ig = iKey && LAYOUTS[iKey] ? { r: LAYOUTS[iKey].rows, c: LAYOUTS[iKey].cols } : null;
@@ -1174,7 +1195,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       if (!mgTouchedRef.current) { const on = v.mg_join_on ?? mj.on_default; mgOnRef.current = on; setMgOn(on); }
       // 시리즈 로드가 먼저 끝났다면 그때는 기본 열 수(2)로 배치됐으므로 다시 건다 —
       // 좌우 쌍이 같은 행의 인접 열에 있어야 맞붙임이 성립한다(2:3 에서 특히 중요)
-      if (detail.modality === "MG" && LAYOUTS[mj.layout]) {
+      // ⚠ HP 가 걸려 있으면 물러난다(우선순위 ①) — 두 경로가 서로 덮으면 화면이 엉망이 된다
+      if (detail.modality === "MG" && LAYOUTS[mj.layout] && !hpAppliedRef.current) {
         if (mgSrcRef.current.uid === detail.study_uid) applyMgLayout(mj.layout);
         else setLayout(mj.layout);
       }
@@ -1251,7 +1273,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       const mammoSeries = ma;   // 매칭 0이면 순서대로 폴백(빈 페인 방지)
       // 분할은 2D-MG 설정값(기본 2x2 = 종전과 동일). prefs 로드가 늦으면 기본값으로 걸고, 로드 시 재적용된다
       // Mammo 도 4코너 정보(환자·시리즈·W/L·배율)는 유지한다 — 판독에 필요. 표시 여부는 INFO 토글로만 제어
-      if (mammo) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); }
+      // ⚠ 우선순위 ① — 행잉 프로토콜이 **선택**돼 있으면 분할은 HP 가 정한다. 여기서 걸면
+      //   두 경로가 서로 덮어써 화면이 엉망이 된다(실제 증상: "HP:새 프로토콜 + MG 행잉 동시").
+      if (mammo && !hpAppliedRef.current) { const lk = mgCfgRef.current.layout; setLayout(LAYOUTS[lk] ? lk : "2x2"); }
       // 사용자가 이 창에서 직접 바꾼 분할이 있으면 모달리티 기본값보다 우선(창 닫힐 때까지 유지).
       // ⚠ Mammo 는 제외 — 세션 기억이 1×1 이면 좌우 열이 없어져 2D-MG 맞붙임이 성립하지 않는다
       //   (il 기억은 아래에서 이미 제외 중. Series 분할에도 같은 규칙을 적용).
@@ -1592,15 +1616,43 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
    *  match 는 그중 같은 Modality·부위만. 두 경우 모두 같은 환자로 제한(환자 혼합 차단). */
   const cmpList = compareCandidates(detail.related_exams ?? [], detail, prefs.compare?.basis ?? "patient");
 
-  const hangAll = (uid: string, list: SeriesNode[], mgTarget = false) => {
-    const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
+  /** 이 modality 를 열 때 걸 분할을 **다시 계산**해 적용하고, 새 페인 수를 돌려준다.
+   *
+   *  ⚠ setLayout 은 비동기라 직후에 state 를 읽으면 옛값이다 — 그래서 페인 수를 반환값으로 준다.
+   *    (그 혼동이 "DR 을 열었는데 CT 의 2×2 격자에 빈 칸이 남는" 사고의 절반이었다.)
+   *  ⚠ 행잉 프로토콜이 걸려 있으면 분할은 **HP 가 정한다** — 여기서 덮으면 규정 ① 위반이다. */
+  const applyHangFor = (modality: string, hpActive?: boolean,
+                        fallback: "keep" | "1x1" = "keep"): number => {
+    // ⚠ 행잉 프로토콜이 걸려 있으면 분할은 **HP 가 정한다** — 여기서 덮으면 규정 ① 위반이다.
+    //   hpActive 를 인자로도 받는 이유: 검사 전환에서 재매칭 직후에는 setHpName 이 아직
+    //   반영되기 전이라 ref 가 옛값이다 — 호출부가 방금 판정한 결과를 그대로 넘긴다.
+    const r = resolveHang2d(hang2dSrcRef.current, hang2dViewerKey(skin), modality,
+                            mgOnRef.current ? mgCfgRef.current.layout : null,
+                            hpActive ?? hpAppliedRef.current);
+    if (r.s && LAYOUTS[r.s]) setLayout(r.s as keyof typeof LAYOUTS);
+    hang2dImgRef.current = r.i;
+    setImgLay(r.i ?? { r: 1, c: 1 });
+    if (r.s && LAYOUTS[r.s]) return paneCountOf(r.s, 1);
+    // ⚠ 분할을 못 구한 경우(설정 미로드 레이스·모달리티 공백·2D-MG 꺼짐).
+    //   검사 전환에서는 **이전 검사의 격자를 물려주면 안 된다** — 실제 증상: MR(2×3)을 보다
+    //   DX 로 가면 그 6칸 격자에 DX 한 장 + 빈 칸 5개가 남아 "MR 처럼 나온다".
+    //   fallback="1x1" 이면 1×1 로 리셋한다(어느 모달리티든 이전 구조 상속보다 안전하다).
+    if (fallback === "1x1") { setLayout("1x1"); return 1; }
+    return LAYOUTS[layout].count;
+  };
+
+  /** 화면 전체를 이 검사로 채운다. count 를 주면 **그 분할**로 채운다(검사 전환에서 새 분할을 넘긴다).
+   *  안 주면 현재 분할 — 예전에는 이것뿐이라 새 검사가 옛 격자에 그대로 들어갔다. */
+  const hangAll = (uid: string, list: SeriesNode[], mgTarget = false, count?: number) => {
+    const vis = PANE_IDS.slice(0, count ?? LAYOUTS[layout].count);
     setPanes((prev) => {
       const next = { ...prev };
       for (const pid2 of PANE_IDS) {
         const i = vis.indexOf(pid2);
         const s = i >= 0 ? list[i] : undefined;
-        // 사용자가 바꾼 Image 분할은 검사 전환에도 유지 — 단 맘모는 페인당 1장(맞붙임 성립 조건)
-        const uil = mgTarget ? null : userIlRef.current;
+        // 사용자가 바꾼 Image 분할은 검사 전환에도 유지 — 단 맘모는 페인당 1장(맞붙임 성립 조건).
+        // 사용자 지정이 없으면 그 모달리티의 2D 행잉 Image 분할(hang2dImgRef)을 쓴다.
+        const uil = mgTarget ? null : (userIlRef.current ?? hang2dImgRef.current);
         next[pid2] = s
           ? { ...initPane(uid), series: s, il: uil ?? undefined,
               index: alignTileIndex(Math.floor(s.instances.length / 2),
@@ -1626,46 +1678,94 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     try {
       const tree = isMain ? { uid: detail.study_uid, series } : await getTree(id);
       if (!tree.series[0]) { setStatus("이 검사에 표시할 영상 시리즈가 없습니다"); return; }
-      // 대상 검사의 환자 확인(메타 미로드 시 1회 조회) — 탭 전환은 암묵 동선이므로 환자 혼합 금지
-      // 대상 검사의 모달리티 — 맘모면 타일 분할 금지 + MG 분할로 건다(창의 주 검사가 아니라 '여는 검사' 기준)
-      const tgtMg = (isMain ? detail.modality : (studyMeta[tree.uid]?.modality ?? "")) === "MG";
+      // 대상 검사의 환자·모달리티 확인 — **둘 다** 필요하다.
+      // 환자: 탭 전환은 암묵 동선이라 환자 혼합을 막아야 한다.
+      // 모달리티: 분할은 이 값으로 다시 계산한다. 못 읽으면 규정을 적용할 수 없으므로
+      //           메타가 없으면 **반드시 1회 조회**한다(예전엔 빈 값이면 그냥 넘어가
+      //           이전 검사의 분할이 그대로 남았다 — 사용자가 지적한 그 증상이다).
       let targetKey = isMain ? detail.patient_key : studyMeta[tree.uid]?.patient_key;
-      if (!targetKey && !isMain) {
+      let targetMod = String((isMain ? detail.modality : studyMeta[tree.uid]?.modality) ?? "");
+      if ((!targetKey || !targetMod) && !isMain) {
         try {
           const d = await api.study(id);
-          targetKey = d.patient_key;
+          targetKey = targetKey || d.patient_key;
+          targetMod = targetMod || d.modality;
           setStudyMeta((m) => ({ ...m, [tree.uid]: metaOf(d) }));
-          if (d.modality === "MG") tgtMgRef.current = true;
-        } catch { /* 메타 실패 시 아래 혼합 판정은 보수적으로 통과 */ }
+        } catch { /* 메타 실패 — 혼합 판정은 보수적으로 통과, 분할은 강제하지 않는다 */ }
       }
+      targetMod = targetMod.trim().toUpperCase();
+      tgtMgRef.current = targetMod === "MG";
       const vis = PANE_IDS.slice(0, LAYOUTS[layout].count);
       const mixed = !!targetKey && vis.some((pid2) => {
         const u = panes[pid2].studyUid || detail.study_uid;
         const k = (studyMeta[u] ?? (u === detail.study_uid ? detail : undefined))?.patient_key;
         return !!k && k !== targetKey;
       });
-      if (mixed) {
-        // 다른 환자로의 전환 — 활성 페인만 바꾸면 이전 환자 영상이 격자에 남아 섞이므로 전체 재행잉
-        hangAll(tree.uid, tree.series, tgtMg || tgtMgRef.current);
-        setStatus("검사 전환 — 다른 환자이므로 화면 전체를 이 검사로 표시했습니다 (혼합 비교는 ⇄ Compare/+Add 사용)");
-        return;
+
+      // ★★ 규정: **탭으로 검사를 바꾸면 언제나** 그 검사의 규칙대로 다시 건다.
+      //    ① HP 규칙을 이 검사로 **다시 매칭**한다 — 'HP 가 이긴다' 는 것은 검사마다 맞는
+      //       규칙을 다시 찾아 적용한다는 뜻이지, 화면을 얼리는 것이 아니다.
+      //       ⚠ 실제 사고: HP 가 걸려 있으면 분할을 '아예 건드리지 않아', MG 창(1×1)에서
+      //         CT 탭으로 가면 CT 가 1×1 로 남았다(설정은 2×2). 반대 방향도 같았다 —
+      //         한 검사의 분할이 다른 모든 검사를 따라다녔다.
+      //    ② 규칙이 없으면 설정(뷰어 공통/뷰어별) 표를 따른다.
+      //    ③ 모달리티를 못 읽으면 강제하지 않는다(위에서 1회 조회까지 했다).
+      // ⚠ 예외를 두지 않는다 — 같은 환자든 다른 환자든, 모달리티가 같든 다르든 구분하지 않는다.
+      //   분기가 있으면 그 분기가 곧 구멍이 된다(직전 구현의 `targetMod !== curMod` 가 그랬다).
+      //
+      // ⚠ 설정 로드 레이스 — 창이 방금 리로드됐거나(prefs effect 미완) 로드가 실패했으면
+      //   hang2dSrcRef 가 비어 있어 resolveHang2d 가 null 을 주고, 그러면 이전 격자가
+      //   상속된다. 여기서는 async 라 1회 채울 수 있다.
+      if (!Object.keys(hang2dSrcRef.current).length) {
+        try {
+          const r = await api.getSetting("viewer.prefs");
+          const v = r.value as { hanging2d?: Record<string, string | { s: string; i: string }>;
+                                 hanging2d_common_on?: boolean;
+                                 hanging2d_by_viewer?: Record<string, Record<string, string | { s: string; i: string }>> };
+          hang2dSrcRef.current = { hanging2d: v.hanging2d, hanging2d_common_on: v.hanging2d_common_on,
+                                   hanging2d_by_viewer: v.hanging2d_by_viewer };
+        } catch { /* 그래도 없으면 아래 1x1 폴백이 이전 격자 상속만은 막는다 */ }
       }
-      const s = tree.series[0];
-      const uil = (tgtMg || tgtMgRef.current) ? null : userIlRef.current;   // 맘모는 타일 분할 금지
-      // 맘모로 전환하면 MG 분할(좌우 열)로 되돌린다 — 안 그러면 2D-MG 가 성립하지 않는다
-      if (tgtMg || tgtMgRef.current) {
-        const lk = mgCfgRef.current.layout;
-        if (LAYOUTS[lk]) setLayout(lk);
+      const hpRulesNow = hpRulesRef.current;
+      const hpStudy = (fullDetailRef.current[id] ?? (isMain ? detail : undefined)
+        ?? { modality: targetMod, study_desc: studyMeta[tree.uid]?.study_desc ?? "",
+             study_date: studyMeta[tree.uid]?.study_date ?? "" }) as unknown as Record<string, unknown>;
+      const hpMatch = hpRulesNow.length
+        ? hpPickRule(hpRulesNow, hpStudy, tree.series.map((x) => x.series_desc || ""))
+        : null;
+      let count: number;
+      if (hpMatch && targetMod !== "MG") {
+        // MG 는 HP 밖 — 맘모 규정(mg_join)이 결정적이다(applyHp 도 같은 예외를 둔다).
+        const vd = hpMatch.displays?.find((d) => d.role === "viewer");
+        const sg = vd?.grid ?? hpMatch.s;
+        const key = `${Math.min(sg.r, 10)}x${Math.min(sg.c, 10)}`;
+        setHpName(hpMatch.name);
+        hpAppliedRef.current = true;                     // 같은 틱의 후속 판정이 옛값을 안 보게
+        if (LAYOUTS[key]) { setLayout(key as keyof typeof LAYOUTS); setMaximized(null); }
+        const ig = hpMatch.i && (hpMatch.i.r > 1 || hpMatch.i.c > 1)
+          ? { r: Math.min(hpMatch.i.r, 10), c: Math.min(hpMatch.i.c, 10) } : null;
+        hang2dImgRef.current = ig;
+        hpIlRef.current = ig;
+        setImgLay(ig ?? { r: 1, c: 1 });
+        count = LAYOUTS[key]?.count ?? 1;
+      } else {
+        setHpName("기본");
+        hpAppliedRef.current = false;
+        hpIlRef.current = null;
+        count = applyHangFor(targetMod, false, "1x1");   // 방금 판정 — HP 없음. 못 구하면 1×1
       }
-      patch(activePane, { ...initPane(tree.uid), series: s, il: uil ?? undefined,
-                          index: alignTileIndex(Math.floor(s.instances.length / 2),
-                                                (uil?.r ?? 1) * (uil?.c ?? 1), s.instances.length) });
+      // 맘모는 Select 로 시작한다 — 확대 모드가 남아 있으면 유방을 클릭하는 순간 화면이 움직인다
+      if (targetMod === "MG") { setTool(null); setMouseMode("select"); }
+      hangAll(tree.uid, tree.series, targetMod === "MG", count);
+      setStatus(mixed
+        ? `검사 전환 — 다른 환자이므로 화면 전체를 이 검사로 표시했습니다${targetMod ? ` (${targetMod} 분할)` : ""}`
+        : `검사 전환${targetMod ? ` — ${targetMod} 분할로 배치했습니다` : ""}`);
     } catch { setStatus("검사 전환 실패"); }
   };
   loadIntoActiveRef.current = loadIntoActive;  // 동기 리스너에서 최신 클로저 사용
 
-  /* 탭 닫기: 목록에서 제거 + 해당 검사를 보이던 페인은 주 검사로 복귀 */
-  const closeTab = (id: number) => {
+  /* 탭 닫기(이 창 안에서만): 목록에서 제거 + 해당 검사를 보이던 페인은 주 검사로 복귀 */
+  const dropTabLocal = (id: number) => {
     const tab = openTabs.find((t) => t.id === id);
     setOpenTabs((prev) => prev.filter((t) => t.id !== id));
     // 닫은 검사를 판독 도크가 계속 보고 있으면 주 검사로 되돌린다(화면에 없는 검사의 판독문 방지)
@@ -1681,6 +1781,16 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
       }
       return next;
     });
+  };
+  dropTabLocalRef.current = dropTabLocal;   // 동기 리스너에서 최신 클로저 사용
+
+  /* 탭 ✕ — 이 창에서 지우고 **다른 모니터 창에도 알린다.**
+   *  안 알리면 닫은 탭이 이 창에서만 사라지고, 다른 창은 자기 목록에 계속 들고 있다가
+   *  openTabs 가 바뀌는 순간 savePersistedTabs 로 공유 레지스트리에 **되살려 놓는다**
+   *  (다음 뷰어 오픈 때 유령 탭으로 다시 나타난다). */
+  const closeTab = (id: number) => {
+    dropTabLocal(id);
+    postViewerDelTab(id, window.name);
   };
 
   /** 지금 화면 구성을 규칙 형태로 읽어낸다 — '직접설정' 저장의 입력.
@@ -1986,6 +2096,9 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // 다학제 협진 관전 중(제어권 없음) — 단축키로 화면을 흔들 수 없다. Master 화면을 그대로 따라간다.
+      // (채팅 입력은 위 INPUT 예외로 이미 빠져나가므로 대화는 그대로 된다)
+      if (collabRO.current) return;
       if (e.key.toLowerCase() === "t") { tHeld.current = true; return; }  // T 홀드 시작
       if (e.key === "Delete" && tHeld.current) {  // T+Del = 오버레이 토글 (In Viewer 패리티)
         e.preventDefault();
@@ -4144,6 +4257,58 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
     const merged = tree.series.some((ts) => series.some((s) => s.series_uid === ts.series_uid));
     return merged ? series : tree.series;
   }, [activeUid, series, priorTrees, detail.study_uid]);
+
+  /* ── 다학제 협진(Co-Reading) ──────────────────────────────────────────────
+     Master 의 화면 상태를 JSON 으로 미러링한다(픽셀 전송이 아니다 — lib/collabState 주석).
+     여기서 하는 일은 셋뿐이다: 현재 상태를 훅에 넘기고, 수신 스냅샷을 뷰어 상태로 되돌리고,
+     읽기전용 여부를 키보드 가드에 알린다. 나머지(세션 수명·제어권·커서·WebRTC)는 훅 안에 있다. */
+  // 시리즈 uid → 노드 해석기. 미러 스냅샷은 uid 만 싣기 때문에(용량) 받는 쪽이 자기 트리에서 찾는다.
+  // effect 에서 갱신한다(렌더 중 ref 쓰기 금지). 트리 로드 직후 한 스냅샷 정도는 못 찾을 수 있는데,
+  // applyPane 이 그때 이전 시리즈를 유지하고 다음 스냅샷(100ms 뒤)이 맞춰 준다.
+  const resolveSeriesRef = useRef<(uid: string) => SeriesNode | null>(() => null);
+  useEffect(() => {
+    resolveSeriesRef.current = (uid: string) =>
+      thumbSeries.find((x) => x.series_uid === uid)
+      ?? series.find((x) => x.series_uid === uid)
+      ?? Object.values(priorTrees).flatMap((t) => t.series).find((x) => x.series_uid === uid)
+      ?? null;
+  }, [thumbSeries, series, priorTrees]);
+
+  const applySnapshot = useCallback((snap: CollabSnapshot) => {
+    const resolve = (uid: string) => resolveSeriesRef.current(uid);
+    setLayout(snap.layout as keyof typeof LAYOUTS);
+    setPanes((prev) => {
+      const next: Record<string, PaneState> = { ...prev };
+      for (const [pid, ps] of Object.entries(snap.panes)) {
+        next[pid] = applyPane(prev[pid] ?? initPane(ps.u), ps, resolve) as PaneState;
+      }
+      return next;
+    });
+    setActivePane(snap.active);
+    setSelSeries(snap.sel);
+    setMaximized(snap.max);
+    if (snap.col?.length) setColFr(snap.col);
+    if (snap.row?.length) setRowFr(snap.row);
+  }, []);
+
+  const cl = useCollab({
+    studyId: dockDetail.id,
+    source: { studyId: dockDetail.id, layout, panes, activePane, selSeries, maximized, colFr, rowFr },
+    applySnapshot,
+  });
+  useEffect(() => { collabRO.current = cl.readOnly; }, [cl.readOnly]);
+
+  // Slave 따라가기 — Master 가 다른 검사로 옮기면 이 창도 그 검사를 연다.
+  // 미러 스냅샷은 '한 검사 안의 화면 상태'만 담는다(시리즈 uid·줌·W/L…). 검사 자체가 바뀌는 것은
+  // 열람권 발급을 동반하는 별개 사건이라 서버 이벤트(exam)로 오고, 그 결과가 session.study_id 다.
+  const lastFollowed = useRef(0);
+  useEffect(() => {
+    const want = cl.session?.study_id ?? 0;
+    if (!want || cl.isHost || want === dockDetail.id || want === lastFollowed.current) return;
+    lastFollowed.current = want;
+    void loadIntoActiveRef.current(want);
+  }, [cl.session?.study_id, cl.isHost, dockDetail.id]);
+
   const allInstances = useMemo(
     () => thumbSeries.flatMap((s) => s.instances.map((i, idx) => ({ s, i, idx }))),
     [thumbSeries],
@@ -4489,6 +4654,8 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         <ViewerContextMenu x={ctxMenu.x} y={ctxMenu.y} items={buildCtxItems(ctxMenu.pid)}
                            onClose={() => setCtxMenu(null)} />
       )}
+      {/* 다학제 협진 초대 — 어느 화면을 보고 있든 뜬다. 수락하면 그 검사를 함께 보는 상태로 들어간다. */}
+      <CollabInviteBanner invite={cl.invite} onAccept={cl.acceptInvite} onDecline={cl.declineInvite} />
       {/* 드롭 Circle Menu — 시리즈를 페인에 놓으면 Open/Combine/Combine all 선택(INFINITT Circle Menu 등가) */}
       {circle && (() => {
         const c = circle;
@@ -4602,6 +4769,21 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
             ))}
           </span>
         )}
+        {/* 다학제 협진 — 이 검사를 다른 사용자와 실시간으로 함께 본다(같은 병원·타 병원 모두).
+            세션 중에는 우측 패널이 참가자·화상·채팅으로 바뀌므로 토글은 세션이 없을 때만 쓴다. */}
+        <button title={cl.session
+                  ? (cl.isHost ? "협진 진행 중 (Master) — 우측 패널에서 관리" : "협진 참여 중 (Slave)")
+                  : "다학제 협진 — 친구를 초대해 이 검사를 함께 봅니다"}
+                onClick={() => { if (!cl.session) setCollabDockOpen((v) => !v); }}
+                disabled={!!cl.session}
+                style={{ padding: "3px 10px", marginRight: 4, fontWeight: 700,
+                         ...(cl.session
+                           ? { background: "var(--stat-final)", color: "#04210f", borderColor: "var(--stat-final)" }
+                           : collabDockOpen
+                             ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }
+                             : {}) }}>
+          협진{cl.session ? ` · ${cl.session.participants.filter((p) => p.state === "joined").length}` : ""}
+        </button>
         {/* 3D 뷰어(MPR/MIP) — 내장 Axial/Sagittal/Coronal + MIP 로 뷰포트 전환(재클릭 시 2D 복귀) */}
         <button title="3D 뷰어 — MPR(Axial/Sagittal/Coronal) + MIP 재구성 (CT/MR 볼륨). 다시 누르면 2D 복귀"
                 onClick={() => setMprOn((m) => !m)}
@@ -4854,6 +5036,18 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
         {prefs.paletteSide === "right" && saintBar}
         {paletteRight && palette}
         {!paletteOpen && paletteRight && <ToolsHandle dir="left" onClick={() => setPaletteOpen(true)} />}
+        {/* ── 다학제 협진 패널 — 세션 중이면 참가자·제어권·화상·룸채팅, 아니면 친구/메신저 도크 ──
+            도크에서 [초대]를 누르면 세션이 없을 때 자동으로 먼저 연다(사용자가 '세션 만들기'와
+            '초대'를 두 단계로 나눠 생각할 이유가 없다). */}
+        {cl.session
+          ? <CollabSessionPanel session={cl.session} isHost={cl.isHost} meId={cl.meId}
+                                onLeave={() => void cl.leaveSession()} />
+          : <CollabDock open={collabDockOpen} onClose={() => setCollabDockOpen(false)}
+                        inviteLabel="협진 초대"
+                        onInvite={(u) => {
+                          const label = `${detail.modality} ${detail.body_part || detail.patient_name} ${detail.study_date}`;
+                          void cl.startSession(label).then((s) => s && cl.inviteUser(u, s.code));
+                        }} />}
         {prefs.reportDock && !reportCollapsed && (
           <Splitter dir="v" onEnd={persistViewerSizes}
                     onDrag={(dx) => setPrefs((p) => ({ ...p, dockW: clampSz(p.dockW - dx, 180, 480) }))} />

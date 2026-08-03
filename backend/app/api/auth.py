@@ -131,6 +131,37 @@ def client_login_force(body: ClientLoginRequest, request: Request, db: Session =
     return _client_login_ok(db, account, hospital)
 
 
+@router.post("/logout")
+def logout(request: Request, db: Session = Depends(get_db)) -> dict:
+    """로그아웃 — 서버 세션 종료.
+
+    왜 신설했나: 지금까지 프론트 로그아웃은 저장소의 JWT 만 지웠다(api.ts setToken(null)).
+    서버의 ActiveSession 행은 남아 있어, 같은 계정으로 곧바로 다시 로그인하면 find_live 가
+    그 유령 세션을 보고 **없어야 할 중복 로그인 인계 프롬프트**를 띄웠다.
+
+    자격이 없거나 만료돼도 200 을 준다(401 로 막지 않는다): 이 엔드포인트는 파괴만 하고,
+    만료된 토큰으로 로그아웃하는 경우에도 세션은 반드시 끊겨야 하기 때문이다.
+    sid 를 아는 주체만 그 세션을 끊을 수 있으므로 남의 세션을 끊는 데는 쓸 수 없다.
+    """
+    import jwt as pyjwt
+
+    from app.services import session_service
+    from app.services.auth_service import decode_token
+
+    sid = ""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer ") and auth[7:].strip():
+        try:
+            sid = str(decode_token(auth[7:].strip()).get("sid") or "")
+        except pyjwt.PyJWTError:
+            sid = ""   # 만료·위조 토큰 — 끊을 세션을 알 수 없다(그래도 200)
+    ended = False
+    if sid:
+        ended = session_service.end(db, sid)
+        db.commit()
+    return {"ok": True, "cleared": ended}
+
+
 @router.get("/session-status")
 def session_status(db: Session = Depends(get_db), user: dict = Depends(current_user)) -> dict:
     """세션 poll — 인계 예고(종료 카운트다운) 여부 반환 + 하트비트(last_seen 갱신).

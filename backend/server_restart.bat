@@ -1,7 +1,7 @@
 @echo off
 rem Saintview backend restart/stop - invoked by server-control API via Task Scheduler.
 rem Scheduler-owned process: survives even when the backend (caller) dies.
-rem Usage: server_restart.bat [restart|stop]  (target PID read from restart.pid)
+rem Usage: server_restart.bat [restart|stop] [port]  (target PID read from restart.pid)
 set MODE=%1
 if "%MODE%"=="" set MODE=restart
 
@@ -19,5 +19,11 @@ for /f "tokens=1,* delims==" %%a in ('findstr /c:"SAINTVIEW_DATABASE_URL=" "%~dp
 if defined SVDB set "SVDB=%SVDB:"=%"
 if defined SVDB set "SAINTVIEW_DATABASE_URL=%SVDB%"
 cd /d %~dp0
-start "Saintview Backend" /min py -3.11 -m uvicorn app.main:app --port 8000 --log-level warning
+rem Port comes from %2 - the server-control API passes the port it is ACTUALLY listening on.
+rem Hardcoding it breaks non-default deployments: the revived listener binds one port while
+rem every access path (vite proxy / nginx proxy_pass) still points at the old one, so the
+rem admin console says "reconnecting shortly" and the web never comes back.
+set PORT=%2
+if "%PORT%"=="" set PORT=8000
+start "Saintview Backend" /min py -3.11 -m uvicorn app.main:app --port %PORT% --log-level warning
 exit /b 0

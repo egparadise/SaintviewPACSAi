@@ -7,7 +7,8 @@ import {
 } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, normMgJoin, type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
-import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, APP_VERSION, APP_VERSION_LABEL } from "../lib/version";
+import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, BUILD_SHA, VERSION_LABEL } from "../lib/version";
+import { clearCrashLog, readCrashLog, type CrashEntry } from "../components/ErrorBoundary";
 import { normOverlayCfg, type OverlayCfg } from "../lib/overlayFields";
 import { OverlayLayoutEditor } from "../components/OverlayLayoutEditor";
 import { type CompareBasis, CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS,
@@ -186,6 +187,53 @@ function Hanging2dEditor({ map, onChange, mg, onMg }: {
         · MG 행의 Series/Image 분할 대신 <b>2D-MG 분할</b>이 적용됩니다(맘모는 페인당 1장 고정). 이미 열려 있는 뷰어에는 다음에 검사를 열 때 반영됩니다.
       </div>}
     </>
+  );
+}
+
+/** 오류 기록 — 화면이 백지가 되거나 영상이 안 뜬 원인을 **새로고침 뒤에도** 볼 수 있게.
+ *
+ * 왜 필요한가: 사용자는 이상이 생기면 새로고침으로 넘어간다. 그 순간 콘솔이 날아가
+ * 원인이 영영 안 남아, 신고는 늘 "가끔 죽는데 새로고침하면 됩니다" 로만 들어왔다.
+ * ErrorBoundary·전역 핸들러가 localStorage 링버퍼에 적어 두고, 여기서 통째로 복사한다. */
+function CrashLogPanel() {
+  const [items, setItems] = useState<CrashEntry[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => { setItems(readCrashLog()); }, []);
+
+  const text = items.map((e) =>
+    `[${e.at}] ${e.where}${e.count && e.count > 1 ? ` ×${e.count}` : ""}\n`
+    + `build=${e.build}  url=${e.url}\n${e.message}\n${e.stack}\n${e.componentStack}`
+  ).join("\n────────────────────\n");
+
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <b style={{ fontSize: 13 }}>오류 기록</b>
+        <span style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>
+          {items.length ? `${items.length}건 (최근 순)` : "기록 없음 — 정상입니다"}
+        </span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button style={{ fontSize: 11 }} disabled={!items.length}
+                  onClick={() => setOpen((v) => !v)}>{open ? "접기" : "펼치기"}</button>
+          <button style={{ fontSize: 11 }} disabled={!items.length}
+                  onClick={() => void navigator.clipboard?.writeText(text)}>전체 복사</button>
+          <button style={{ fontSize: 11 }} disabled={!items.length}
+                  onClick={() => { clearCrashLog(); setItems([]); setOpen(false); }}>지우기</button>
+        </span>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 4 }}>
+        화면이 백지가 되거나 영상이 뜨지 않았을 때 <b>새로고침해도 여기에 남습니다</b>.
+        [전체 복사] 로 담아 개발자에게 전달하면 원인을 바로 찾을 수 있습니다.
+      </div>
+      {open && (
+        <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11,
+                      background: "var(--bg-canvas)", border: "1px solid var(--border)",
+                      borderRadius: 6, padding: 9, marginTop: 7, maxHeight: 280, overflow: "auto" }}>
+          {text}
+        </pre>
+      )}
+    </div>
   );
 }
 
@@ -660,11 +708,11 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             {scope === "system" ? "서버 운영" : scope === "hospital" ? "병원별 배치 구성" : "사용자·판독 환경"}
           </span>
           {/* 버전 칩 — 클릭하면 정보(Information) 페이지로 이동 */}
-          <span onClick={() => setPage("about")} title={`${APP_NAME} ${APP_VERSION_LABEL} (적용일 ${APP_RELEASE_DATE}) — 클릭하면 정보 페이지로 이동`}
+          <span onClick={() => setPage("about")} title={`${APP_NAME} ${VERSION_LABEL} (적용일 ${APP_RELEASE_DATE}) — 클릭하면 정보 페이지로 이동`}
                 style={{ marginLeft: "auto", marginRight: 8, padding: "1px 8px", borderRadius: 10, cursor: "pointer",
                          border: "1px solid var(--border)", background: "var(--bg-canvas)",
                          fontSize: 11, fontWeight: 700, color: "var(--text-secondary)" }}>
-            {APP_VERSION_LABEL}
+            {VERSION_LABEL}
           </span>
           <button style={{ marginRight: 6 }} title={maxed ? "기본 크기로 복원" : "전체 화면으로 크게 보기"}
                   onClick={() => setMaxed((m) => !m)}>{maxed ? "❐ 복원" : "⬜ 최대화"}</button>
@@ -2232,13 +2280,15 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             {page === "about" && (
               <Group title="정보 (Information)">
                 <Row label="제품명"><b>{APP_NAME}</b></Row>
-                <Row label="현재 Version"><b style={{ fontSize: 14 }}>{APP_VERSION}</b></Row>
+                <Row label="현재 Version"><b style={{ fontSize: 14, letterSpacing: 0.3 }}>{VERSION_LABEL}</b></Row>
+                <Row label="배포 커밋">{BUILD_SHA || "— (개발 서버)"}</Row>
                 <Row label="버전 적용일자">{APP_RELEASE_DATE}</Row>
                 <Row label="제조사"><b>{APP_VENDOR}</b></Row>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7, marginTop: 6 }}>
                   버전 표기는 <b>major.minor.patch</b> — minor 는 개발 차수, patch 는 차수 내 보정 릴리스입니다.
                   설정 창 상단의 버전 칩을 클릭하면 이 화면으로 옵니다.
                 </div>
+                <CrashLogPanel />
               </Group>
             )}
 

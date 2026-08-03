@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteCommonjs } from '@originjs/vite-plugin-commonjs'
@@ -30,6 +31,17 @@ function httpsOption() {
 // https://vite.dev/config/
 // Cornerstone3D 공식 Vite 가이드: codec(CJS/WASM) ESM 변환 + 워커 설정
 export default defineConfig({
+  define: {
+    // 배포 커밋 — "지금 서버에 어느 버전이 돌고 있나" 를 화면에서 확인하기 위해.
+    // ⚠ 실제 사고: 수정을 배포했는데 증상이 계속돼 원인을 찾았더니 **옛 빌드**가 돌고 있었다.
+    //   화면에 커밋이 없으면 사용자에게는 그걸 알 방법이 없다.
+    // (버전 번호 자체는 lib/version.ts 가 단일 소스다 — 여기서는 해시만 보탠다)
+    __BUILD_SHA__: JSON.stringify((() => {
+      try {
+        return execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim()
+      } catch { return '' }
+    })()),
+  },
   plugins: [viteCommonjs(), react()],
   optimizeDeps: {
     exclude: ['@cornerstonejs/dicom-image-loader'],
@@ -45,8 +57,10 @@ export default defineConfig({
     allowedHosts: true,      // Vite Host 헤더 체크 우회(Tailscale IP·MagicDNS 호스트 허용)
     https: httpsOption(),    // 항상 자체서명 HTTPS(원격 secure context 보장) — http 폴백 없음
     proxy: {
-      '/api': 'http://127.0.0.1:8000',        // 백엔드 FastAPI (⚠ localhost 는 Windows 에서 ::1 먼저
-                                              //    시도해 연결당 ~200ms 를 잃는다 — 실측 214ms→7ms)
+      // 백엔드 FastAPI (⚠ localhost 는 Windows 에서 ::1 먼저 시도해 연결당 ~200ms 를 잃는다 — 실측 214ms→7ms)
+      // ⚠ ws:true 필수 — 다학제 협진이 WS /api/collab/ws 를 쓴다. 없으면 업그레이드가 프록시를
+      //   통과하지 못해 협진만 조용히 연결 실패한다(REST 는 멀쩡해서 원인이 잘 안 보인다).
+      '/api': { target: 'http://127.0.0.1:8000', ws: true },
       '/dicom-web': 'http://127.0.0.1:3000',  // Orthanc DICOMweb (OHIF nginx 경유)
       '/orthanc': {                            // 썸네일 프리뷰 — Orthanc 네이티브 /instances/.../preview
         target: 'http://127.0.0.1:8042',

@@ -1,5 +1,130 @@
 // 뷰어 설정 공용 정의 — Viewer2D와 SettingsModal이 함께 사용 (경량, cornerstone 미포함)
 
+/* ══════════════════ 2D 행잉 — 모달리티별 분할 적용 규정 ══════════════════
+ * ⚠ 실제로 났던 사고: CT(Series 2×2)를 보다가 탭으로 DR/MG 검사를 열면 **CT 의 2×2 가 그대로
+ *   남았다.** 화면은 4칸인데 DR 은 시리즈가 1~2개라 나머지 칸이 빈 채로 있어 "영상이 안 뜬다"
+ *   처럼 보였고, DR·MG 자기 설정(Series 1×1)은 무시됐다.
+ *
+ *   원인은 둘이었다.
+ *     ① 선택 로직이 Viewer2D·ViewerInfi **각자의 effect 안에 인라인**으로 들어 있어, 주 검사
+ *        modality 로 딱 한 번만 계산되고 버려졌다 — 탭 전환에는 재계산 지점이 아예 없었다.
+ *     ② 전체 재행잉(hangAll)이 **현재** 분할로 페인을 채워서, 새 검사가 옛 격자에 그대로 들어갔다.
+ *
+ * 그래서 '어떤 modality 를 열 때 어떤 분할인가' 를 이 순수 함수들에 못박고, 뷰어는 검사가
+ * 바뀔 때마다 이것을 다시 부른다. 규칙이 두 군데로 갈리지 않게 하는 것이 목적이다.
+ *
+ * 우선순위 (변경 금지 — 사용자 확정 규정):
+ *   ① 행잉 프로토콜(HP)이 **선택**되면 그것이 이긴다. HP 기본은 해제.
+ *   ② HP 해제 + '이 공통 설정을 모든 뷰어에 우선 적용' **체크** → 공통 표 **만**.
+ *   ③ 그 체크 **해제** → 그 뷰어(SaintView/I-View/T-View) 개별 표 **만**. 공통으로 폴백하지 않는다.
+ *   ④ MG 는 어느 표에도 안 걸리고 언제나 맘모 규정(mg_join).
+ * ⚠ ②③ 에 폴백을 넣으면 "공통 체크를 껐는데 공통 값이 계속 먹는다" 가 되어 규정이 무의미해진다.
+ *   폴백은 **같은 맵 안의 '*'(기타 전체)** 행 하나뿐이다.
+ */
+export type Hang2dVal = string | { s?: string; i?: string };
+export interface Hang2dPrefs {
+  hanging2d?: Record<string, Hang2dVal>;                          // 공통 맵
+  hanging2d_common_on?: boolean;                                  // 공통 우선 적용 (미저장=on)
+  hanging2d_by_viewer?: Record<string, Record<string, Hang2dVal>>; // 뷰어별 맵 (sv/ty/infi)
+}
+export type Hang2dViewer = "sv" | "ty" | "infi";
+
+/** 스킨 → 2D 행잉 맵 키. Viewer2D 는 SaintView(sv)/T-View(ty) 스킨을 공유하지만 맵은 뷰어별로 따로다.
+ *  호출부마다 삼항을 쓰면 또 갈리므로 산출을 여기 한 곳으로 모은다. */
+export function hang2dViewerKey(skin?: string): Hang2dViewer {
+  return skin === "saint" || skin === "sv" ? "sv" : skin === "infi" ? "infi" : "ty";
+}
+
+/** '기타(전체)' 행 키 — 그 맵에 행이 없는 나머지 모달리티를 받는다(같은 맵 안에서만, 규정 ②③). */
+export const HANG2D_ANY = "*";
+
+/** 구/신 형식 정규화 — 값이 없거나 빈 칸이면 null(=설정 없음). 구 형식은 문자열(Series 분할만)이다. */
+export function normHang2d(v?: Hang2dVal): { s?: string; i?: string } | null {
+  if (!v) return null;
+  if (typeof v === "string") return v ? { s: v } : null;
+  const s = v.s || undefined, i = v.i || undefined;
+  return s || i ? { s, i } : null;
+}
+
+/** 2D 행잉 선택 — 위 규정 ①②③④ 의 **유일한** 구현. 두 뷰어(Viewer2D=sv/ty, ViewerInfi=infi)가 이것만 부른다.
+ *  반환 null = '설정 없음' → 호출부의 자동 규칙으로 넘어간다. */
+export function pickHang2d(prefs: Hang2dPrefs | undefined, viewer: Hang2dViewer, modality: string):
+  { s?: string; i?: string } | null {
+  if (!prefs || !modality) return null;
+  if (modality.toUpperCase() === "MG") return null;         // ④ 맘모는 mg_join 규정 — 2D 행잉 표 밖
+  const commonOn = prefs.hanging2d_common_on ?? true;       // 미저장 계정 = 체크 on (구 계정 보호)
+  const src = commonOn ? (prefs.hanging2d ?? {})            // ② 공통만
+                       : (prefs.hanging2d_by_viewer?.[viewer] ?? {});   // ③ 그 뷰어만
+  return normHang2d(src[modality]) ?? normHang2d(src[HANG2D_ANY]);      // 같은 맵 안의 '*' 만
+}
+
+export interface Hang2dResolved {
+  /** Series 분할 키(예 "2x2") — null 이면 뷰어가 현재 값을 유지한다 */
+  s: string | null;
+  /** Image(페인 내 타일) 분할 — null 이면 1×1 */
+  i: { r: number; c: number } | null;
+}
+
+/** MG 분할 지정 — layout("2x2") + 방식. series=true 면 뷰당 페인 하나(Series 분할),
+ *  false 면 페인 하나에 타일(Image 분할).
+ *  문자열만 주면 구 호출(Series 분할)로 취급한다 — 이 저장소의 맘모는 mg_join(페인당 1장) 이라
+ *  현재 호출부는 전부 문자열이다. */
+export type MgLayoutSpec = string | { layout: string; series: boolean } | null | undefined;
+
+/**
+ * 이 검사(modality)를 열 때 걸 분할.
+ *
+ * MG 는 2D 행잉 표 밖이라 pickHang2d 가 null 을 준다 — 대신 **맘모 전용 규정**을 쓴다.
+ * mgLayout 을 넘기지 않으면(2D-MG 꺼짐 등) MG 도 분할을 강제하지 않는다.
+ *
+ * ⚠ 이 함수는 '지금 화면이 무엇인가' 를 **인자로 받지 않는다** — 직전에 무엇을 보고 있었는지가
+ *   결과에 영향을 줄 수 없는 구조다. 그것이 "탭을 바꾸면 언제나 설정을 따른다" 규정의 근거다.
+ */
+export function resolveHang2d(
+  prefs: Hang2dPrefs | undefined,
+  viewer: Hang2dViewer,
+  modality: string,
+  mgLayout?: MgLayoutSpec,
+  /** 지금 **행잉 프로토콜이 걸려 있는가**. 걸려 있으면 분할은 HP 가 정한다(규정 ①). */
+  hpActive = false,
+): Hang2dResolved {
+  if (hpActive) return { s: null, i: null };      // ① HP 가 정한다 — 건드리지 않는다
+  // ⚠ trim 이 필요하다 — 공백만 있는 값은 '모른다' 이지 '   ' 라는 모달리티가 아니다.
+  //   trim 없이 넘기면 pickHang2d 가 '*'(기타 전체)로 폴백해, 모달리티를 못 읽은 상황에서
+  //   엉뚱한 분할을 **강제**한다. 모르면 강제하지 않는 것이 규정이다.
+  const mod = String(modality || "").trim().toUpperCase();
+  if (mod === "MG") {
+    // MG 는 맘모 규정(mg_join). ⚠ 분할 **방식**을 반영해야 한다 — Image 분할이면
+    //   Series 1×1 + 페인 안 타일이다. 방식을 무시하고 layout 을 Series 로만 돌려주면
+    //   탭으로 MG 에 왔을 때 모양이 어긋난다.
+    if (!mgLayout) return { s: null, i: null };          // 2D-MG 꺼짐 — 강제하지 않는다
+    const m = typeof mgLayout === "string" ? { layout: mgLayout, series: true } : mgLayout;
+    if (!m.layout) return { s: null, i: null };
+    if (m.series) return { s: m.layout, i: null };       // Series 분할 — 뷰당 페인 1칸
+    const rc = rcOf(m.layout);
+    return { s: "1x1", i: rc && (rc.r > 1 || rc.c > 1) ? rc : null };   // Image 분할
+  }
+  const hv = pickHang2d(prefs, viewer, mod);
+  const s = hv?.s || null;
+  const i = hv?.i ? rcOf(hv.i) : null;
+  return { s, i: i && (i.r > 1 || i.c > 1) ? i : null };
+}
+
+/** "2x3" → {r:2,c:3}. 형식이 아니면 null. */
+function rcOf(key: string): { r: number; c: number } | null {
+  const m = /^(\d+)x(\d+)$/.exec(String(key).trim());
+  if (!m) return null;
+  const r = Number(m[1]), c = Number(m[2]);
+  return r > 0 && c > 0 ? { r, c } : null;
+}
+
+/** 분할 키의 페인 수. ⚠ setLayout 직후에는 state 가 아직 옛값이라, 새 분할로 페인을 채울 때는
+ *  **이 값**을 써야 한다(그 혼동이 빈 칸 사고의 절반이었다). */
+export function paneCountOf(layoutKey: string | null | undefined, fallback = 1): number {
+  const rc = layoutKey ? rcOf(layoutKey) : null;
+  return rc ? rc.r * rc.c : fallback;
+}
+
 /** Mammo(MG) view 분류 — series_desc 파싱(laterality R/L + view CC/MLO).
  *  DICOM ImageLaterality/ViewPosition 이 미노출이라 first-cut(검사명 파싱). 정확도 필요 시 백엔드 태그 노출로 강화. */
 export function mammoView(desc: string): { lat: "R" | "L" | ""; view: "CC" | "MLO" | "" } {

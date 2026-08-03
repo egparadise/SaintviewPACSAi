@@ -2943,7 +2943,10 @@ export function Worklist() {
       if (ovMon != null) {
         const feat = await screenFeatures([ovMon], "width=1500,height=920");   // 지정 모니터 실좌표(감지 가능 시)
         const name = nameFor(ovMon);
-        postViewerAddTab(d0.id, d0.study_uid, tabLabel);   // 다른 열린 뷰어 창은 탭만 추가(리로드 없음)
+        // 다른 열린 뷰어 창은 탭만 추가(리로드 없음). 대상 창(name)은 바로 아래에서 URL 로
+        // 통째로 로드되므로 제외한다 — 안 그러면 곧 버려질 문서가 study+seriesTree 를 한 번 더
+        // 왕복하고 sv_viewer_tabs 를 다시 써서 선등록으로 없앤 경합이 되살아난다.
+        postViewerAddTab(d0.id, d0.study_uid, tabLabel, name);
         const w = window.open(urlFor(ovMon), name, feat);
         applyWindowBounds(w, feat);
         if (w) { openedViewerWindows.set(name, w); w.focus(); }
@@ -2970,8 +2973,8 @@ export function Worklist() {
       const target = slots[viewerRoundRobin % slots.length];
       viewerRoundRobin += 1;
       const targetName = nameFor(target.index);
-      // (1) 이미 열린 다른 뷰어 창들 → 탭만 추가(리로드 없음). 대상 창은 아래 URL 로 직접 로드됨.
-      postViewerAddTab(d0.id, d0.study_uid, tabLabel);
+      // (1) 이미 열린 다른 뷰어 창들 → 탭만 추가(리로드 없음). 대상 창은 아래 URL 로 직접 로드되므로 제외.
+      postViewerAddTab(d0.id, d0.study_uid, tabLabel, targetName);
       // (2) 대상 모니터 창만 열기/네비게이트(=그 뷰어만 전체 리프레시) + 해당 모니터에 배치.
       const w = window.open(urlFor(target.index), targetName, target.features);
       applyWindowBounds(w, target.features);

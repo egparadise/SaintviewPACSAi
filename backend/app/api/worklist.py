@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import current_user, require_effective
+from app.api.deps import current_user
 from app.db import get_db
 from app.models import Study
 from app.services.study_service import (
@@ -110,101 +113,74 @@ def _scoped_hospital(db: Session, user: dict, selected: int = 0) -> int | None:
     return None
 
 
-def _require_study(db: Session, study_id: int, user: dict) -> Study:
+def _require_study(db: Session, study_id: int, user: dict, allow_collab: bool = False) -> Study:
     """검사 단위 병원 스코프 가드 — 시스템관리자=전체, 병원 소속=자기 병원 검사만.
-    없거나 타 병원이면 404(존재 은닉). 모든 per-study 엔드포인트 단일 진입점(테넌시 IDOR 차단)."""
+    없거나 타 병원이면 404(존재 은닉). 모든 per-study 엔드포인트 단일 진입점(테넌시 IDOR 차단).
+
+    allow_collab: 협진(다학제) 임시 열람권을 인정할지. **기본은 False(거부)** 다.
+
+    ⚠ 왜 기본이 거부인가 — 이 함수는 GET 뿐 아니라 PUT/POST 도 함께 쓴다
+      (bookmark·memo·priority·key-images·presentation·annotations·send-gsps·send-kos·analyze).
+      그중 상당수는 별도 권한 게이트 없이 이 가드 하나에 의존한다. 그러니 여기서 협진을
+      무조건 통과시키면 **게스트가 타 병원 검사의 주석을 덮어쓰는** 경로가 즉시 생긴다.
+      그래서 opt-in 으로 뒤집었다: 새 엔드포인트가 생겨도 아무것도 하지 않으면 안전하다.
+
+    True 를 주는 곳은 **게스트 뷰어가 화면을 그리는 데 실제로 필요한 조회 4개뿐**이다
+    (검사 상세·시리즈 트리·인스턴스·GSPS). 통과 시 감사로그를 남긴다.
+    """
     study = db.get(Study, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     is_sys_admin = user.get("role") == "admin" and not user.get("hid")
     if not is_sys_admin and user.get("hid") and study.hospital_id != user.get("hid"):
-        raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
+        if not (allow_collab and _collab_may_read(db, user, study_id)):
+            raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     return study
+
+
+# 협진 열람 감사 중복 억제 — (uid, study_id) 당 이 초 안에는 한 번만 기록한다.
+# 뷰어는 검사 하나를 여는 동안 per-study 엔드포인트를 수십 번 때리므로(상세·시리즈·판독·
+# 썸네일…) 그대로 남기면 감사 테이블이 같은 줄로 뒤덮여 정작 사건을 못 찾는다.
+_COLLAB_AUDIT_TTL = 300.0
+_collab_audit_seen: dict[tuple[int, int], float] = {}
+
+
+def _collab_may_read(db: Session, user: dict, study_id: int) -> bool:
+    """협진 임시 열람권 판정 + 감사. 실패는 조용히 False(존재 은닉 유지)."""
+    from app.models import AuditLog
+
+    uid = user.get("uid")
+    if not uid:
+        return False
+    try:
+        from app.services.collab_service import has_active_grant
+
+        if not has_active_grant(db, int(uid), int(study_id)):
+            return False
+    except Exception:  # noqa: BLE001 — 협진 조회 실패가 기존 테넌시 판정을 흔들면 안 된다
+        log.debug("협진 열람권 조회 실패(거부로 처리)", exc_info=True)
+        return False
+    key = (int(uid), int(study_id))
+    now = time.monotonic()
+    if _collab_audit_seen.get(key, 0.0) < now:
+        _collab_audit_seen[key] = now + _COLLAB_AUDIT_TTL
+        if len(_collab_audit_seen) > 4096:      # 무한 성장 방지 — 만료분 청소
+            for k, exp in list(_collab_audit_seen.items()):
+                if exp < now:
+                    _collab_audit_seen.pop(k, None)
+        try:
+            db.add(AuditLog(account_id=int(uid), action="collab_study_read",
+                            target_type="study", target_id=str(study_id),
+                            detail={"via": "collab_grant", "username": user.get("sub", "")}))
+            db.commit()
+        except Exception:  # noqa: BLE001 — 감사 실패로 판독 화면이 죽으면 안 된다
+            db.rollback()
+            log.warning("협진 열람 감사로그 기록 실패 (study_id=%s)", study_id, exc_info=True)
+    return True
 
 
 class NlQueryBody(BaseModel):
     text: str
-
-
-class ExportBody(BaseModel):
-    ids: list[int]
-    fmt: str = "zip"    # zip = 폴더/USB 저장용(DICOMDIR 포함) · iso = CD 굽기용 이미지
-
-
-@router.post("/studies/export")
-def export_studies(
-    body: ExportBody,
-    db: Session = Depends(get_db),
-    user: dict = Depends(require_effective("image.print")),
-):
-    """선택 검사의 DICOM 을 미디어(ZIP/ISO)로 내보낸다 — CD·USB·로컬 저장 공용.
-
-    ⚠ 브라우저는 CD 를 직접 구울 수 없다. fmt=iso 는 굽기용 이미지를 만들어 줄 뿐이고,
-    실제 굽기는 Windows 탐색기의 '디스크 이미지 굽기'로 사용자가 마무리한다.
-    """
-    from fastapi.responses import Response
-
-    from app.dicom.orthanc import client_for_hospital
-    from app.services.export_service import MAX_STUDIES, build_media_zip, zip_to_iso
-
-    ids = list(dict.fromkeys(body.ids or []))
-    if not ids:
-        raise HTTPException(status_code=400, detail="내보낼 검사를 선택하세요")
-    if len(ids) > MAX_STUDIES:
-        raise HTTPException(status_code=400, detail=f"한 번에 최대 {MAX_STUDIES}건까지 내보낼 수 있습니다")
-
-    # 검사마다 병원 스코프 가드(테넌시 IDOR 차단) + Orthanc 리소스 수집
-    studies = [_require_study(db, sid, user) for sid in ids]
-    hids = {st.hospital_id for st in studies}
-    if len(hids) > 1:
-        raise HTTPException(status_code=400, detail="서로 다른 병원의 검사는 함께 내보낼 수 없습니다")
-    missing = [st.id for st in studies if not st.orthanc_id]
-    if missing:
-        raise HTTPException(status_code=409, detail=f"영상이 없는 검사가 있습니다(#{missing[0]})")
-
-    # 병원별 Orthanc 우선, 없으면 공용 Orthanc 로 폴백 — 배포에 따라 실제 보관 위치가 다르다
-    from app.dicom.orthanc import OrthancClient
-    candidates = [client_for_hospital(db, next(iter(hids))), OrthancClient()]
-    seen: set[str] = set()
-    last: Exception | None = None
-    zip_bytes = b""
-    for client in candidates:
-        base = str(getattr(client, "_client", None) and client._client.base_url or "")
-        if base in seen:
-            continue
-        seen.add(base)
-        try:
-            zip_bytes = build_media_zip(client, [st.orthanc_id for st in studies])
-            break
-        except Exception as exc:                                # noqa: BLE001
-            last = exc
-            log.warning("내보내기 미디어 생성 실패 (orthanc=%s): %s", base, exc)
-    if not zip_bytes:
-        raise HTTPException(
-            status_code=502,
-            detail="영상 미디어를 만들지 못했습니다 — Orthanc 연결/보관 상태를 확인하세요"
-                   + (f" ({last})" if last else ""),
-        )
-
-    label = (studies[0].study_date or "SAINTVIEW")[:8]
-    if body.fmt == "iso":
-        try:
-            data = zip_to_iso(zip_bytes, f"SV_{label}")
-        except ModuleNotFoundError:
-            raise HTTPException(
-                status_code=501,
-                detail="ISO 생성 모듈(pycdlib)이 설치되지 않았습니다 — pip install pycdlib",
-            ) from None
-        except Exception as exc:                                # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"ISO 생성 실패: {exc}") from exc
-        return Response(
-            content=data, media_type="application/x-iso9660-image",
-            headers={"Content-Disposition": f'attachment; filename="saintview_{label}.iso"'},
-        )
-    return Response(
-        content=zip_bytes, media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="saintview_{label}.zip"'},
-    )
 
 
 @router.post("/worklist/nl-query")
@@ -219,7 +195,7 @@ def nl_query(body: NlQueryBody, user: dict = Depends(current_user)):
 
 @router.get("/studies/{study_id}")
 def get_study(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
-    _require_study(db, study_id, user)   # 병원 스코프 가드
+    _require_study(db, study_id, user, allow_collab=True)   # 병원 스코프 가드 (협진 게스트 조회 허용)
     detail = study_detail(db, study_id)
     if not detail:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
@@ -308,13 +284,83 @@ def set_priority(
     return {"ok": True, "emergency": study.emergency}
 
 
+# series-tree 캐시 — 열기·탭 전환·비교에서 반복 호출되는데 Orthanc 왕복이 인스턴스 수에 비례한다
+# (CT 200장 ≈ 116ms). 구조는 검사 수신이 끝나면 거의 불변이므로 짧은 TTL 로 캐시해 재오픈을 즉시화.
+# ⚠ Exam Control(소프트 삭제·재귀속)은 캐시 뒤에 매번 오버레이하므로 QC 변경은 즉시 반영된다.
+_TREE_CACHE: "OrderedDict[str, tuple[float, list]]" = OrderedDict()
+_TREE_TTL = 60.0
+_TREE_MAX = 128
+_TREE_LOCK = threading.Lock()
+
+
+def invalidate_series_tree(orthanc_id: str = "") -> None:
+    """구조 변경(Import·수신·QC 이동) 시 캐시 무효화. 인자 없으면 전체."""
+    with _TREE_LOCK:
+        if orthanc_id:
+            _TREE_CACHE.pop(orthanc_id, None)
+        else:
+            _TREE_CACHE.clear()
+
+
+def _cached_series_tree(client, orthanc_id: str) -> list:
+    now = time.time()
+    with _TREE_LOCK:
+        hit = _TREE_CACHE.get(orthanc_id)
+        if hit and now - hit[0] < _TREE_TTL:
+            _TREE_CACHE.move_to_end(orthanc_id)
+            return hit[1]
+    tree = client.series_tree(orthanc_id)
+    _put_series_tree(orthanc_id, tree)
+    return tree
+
+
+def _put_series_tree(orthanc_id: str, tree: list) -> None:
+    now = time.time()
+    with _TREE_LOCK:
+        _TREE_CACHE[orthanc_id] = (now, tree)
+        _TREE_CACHE.move_to_end(orthanc_id)
+        while len(_TREE_CACHE) > _TREE_MAX:
+            _TREE_CACHE.popitem(last=False)
+
+
+def cached_series_tree_multi(clients, orthanc_id: str) -> list:
+    """여러 Orthanc 후보 중 **실제로 이 검사를 가진 곳**의 시리즈 트리. 결과만 캐시한다.
+
+    배포에 따라 영상이 병원 전용 컨테이너에 있기도, 공용에 있기도 해서 후보가 여럿이다.
+
+    ⚠ 후보를 하나씩 _cached_series_tree 로 돌리면 안 된다: 캐시 키가 orthanc_id 뿐이라
+      첫 후보의 **빈 결과가 캐시에 앉고**, 두 번째 후보 시도가 그 빈 값을 캐시 적중으로
+      돌려받아 폴백이 통째로 무력화된다(반출이 0장으로 조용히 끝난다).
+      그래서 2번째 후보부터는 캐시를 거치지 않고 직접 묻고, 성공한 쪽으로 캐시를 덮는다.
+    """
+    clients = list(clients)
+    if not orthanc_id or not clients:
+        return []
+    try:
+        tree = _cached_series_tree(clients[0], orthanc_id)
+    except Exception:  # noqa: BLE001 — 이 후보에 없거나 미가용 — 다음 후보로
+        log.warning("series-tree 조회 실패 (orthanc=%s, 1번 후보)", orthanc_id)
+        tree = []
+    if tree:
+        return tree
+    for c in clients[1:]:
+        try:
+            tree = c.series_tree(orthanc_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if tree:
+            _put_series_tree(orthanc_id, tree)   # 실제로 가진 곳의 결과로 캐시를 덮는다
+            return tree
+    return []
+
+
 @router.get("/studies/{study_id}/series-tree")
 def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depends(current_user)):
     """시리즈→인스턴스 트리 + 썸네일 URL — 자체 뷰어 세로 썸네일용."""
     from app.config import get_settings
     from app.dicom.orthanc import OrthancClient
 
-    study = _require_study(db, study_id, user)
+    study = _require_study(db, study_id, user, allow_collab=True)   # 협진 게스트 조회 허용
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
@@ -326,7 +372,7 @@ def series_tree(study_id: int, db: Session = Depends(get_db), user: dict = Depen
     client = OrthancClient()
     try:
         # alive() 사전 왕복 제거 — 실패는 아래 호출이 곧바로 드러난다(열기당 GET /system 1회 절감)
-        tree = client.series_tree(study.orthanc_id)
+        tree = _cached_series_tree(client, study.orthanc_id)
     except _httpx.HTTPError as e:
         # Orthanc 미가용/HTTP 오류만 우아 강등(빈 트리) — 코드 버그류는 그대로 500 으로 노출
         logging.getLogger("saintview.worklist").warning(
@@ -351,7 +397,7 @@ def study_instances(study_id: int, db: Session = Depends(get_db), user: dict = D
     from app.config import get_settings
     from app.dicom.orthanc import OrthancClient
 
-    study = _require_study(db, study_id, user)
+    study = _require_study(db, study_id, user, allow_collab=True)   # 협진 게스트 조회 허용
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:
@@ -517,6 +563,7 @@ async def import_dicom(
                 orthanc_id=sid,
             )
             registered += 1
+            invalidate_series_tree(sid)   # 새 인스턴스 추가 — 트리 캐시 무효화(즉시 반영)
             # 수신 검사와 동일: 자동 AI 초안 큐잉(중복 가드)
             from sqlalchemy import select as _select
 
@@ -853,7 +900,8 @@ def load_gsps(study_id: int, db: Session = Depends(get_db), user: dict = Depends
     from app.dicom.orthanc import OrthancClient
     from pydicom import dcmread
 
-    study = _require_study(db, study_id, user)
+    # 협진 게스트도 호스트가 저장해 둔 주석(PR)을 봐야 논의가 된다 — 읽기 전용
+    study = _require_study(db, study_id, user, allow_collab=True)
     if not study:
         raise HTTPException(status_code=404, detail="검사를 찾을 수 없습니다")
     if not study.orthanc_id:

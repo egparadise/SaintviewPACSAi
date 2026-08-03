@@ -41,6 +41,45 @@ export interface MgCfg {
 /** MG 모드가 지원하는 Image layout — 사용자 요구(1:2 · 2:2 · 2:3) */
 export const MG_LAYOUTS = ["1x2", "2x2", "2x3"] as const;
 
+/** 인스턴스 한 장의 뷰 판정 — DICOM 태그 우선. 태그가 없으면 호출부가 시리즈 설명 파싱으로 폴백한다. */
+export interface MgViewSource { view_position?: string | null; laterality?: string | null }
+export function mgInstView(inst: MgViewSource | null | undefined):
+  { lat: "R" | "L" | ""; view: "CC" | "MLO" | "" } {
+  const latRaw = String(inst?.laterality ?? "").trim().toUpperCase();
+  const vpRaw = String(inst?.view_position ?? "").trim().toUpperCase();
+  const lat = latRaw === "R" || latRaw === "L" ? latRaw : "";
+  // ViewPosition 은 "CC"/"MLO" 외에 "ML"·"LM"·"XCCL" 같은 변형이 있다 — MLO 계열을 넓게 잡되
+  // CC 는 정확히(XCCL 이 CC 로 새면 배치가 틀어진다).
+  const view = vpRaw.includes("MLO") ? "MLO" : vpRaw === "CC" ? "CC" : "";
+  return { lat, view };
+}
+
+/**
+ * MG 4-view 표준 순서 [R CC, L CC, R MLO, L MLO] 로 걸 인스턴스 **인덱스 순열**.
+ *
+ * ⚠ 왜 필요한가(실제 증상): 4뷰가 한 시리즈에 든 검사는 저장 순서(instance_number)대로
+ *   깔려 **L 유방이 화면 왼쪽**에 왔다. 표준은 환자를 마주 본 배치 — R 이 왼쪽, L 이 오른쪽,
+ *   흉벽이 가운데에서 맞닿는다. 화면에 보이는 큰 LCC/RCC 글자는 픽셀에 구워진 것이라
+ *   코드가 읽을 수 없다 — 근거는 (0018,5101) ViewPosition / (0020,0062) ImageLaterality 뿐이다.
+ *
+ * ⚠ **네 뷰를 전부 확실히 알 때만 재배열한다.** 태그가 없거나 중복이면 원래 순서를
+ *   그대로 돌려준다 — 확신 없이 섞으면 구운 글자와 실제 위치가 어긋나 더 위험하다.
+ */
+export function mgOrderIndexes(instances: readonly MgViewSource[]): number[] {
+  const id = instances.map((_, i) => i);
+  if (instances.length !== 4) return id;
+  const slot = (v: { lat: string; view: string }) =>
+    v.lat === "R" && v.view === "CC" ? 0 : v.lat === "L" && v.view === "CC" ? 1
+    : v.lat === "R" && v.view === "MLO" ? 2 : v.lat === "L" && v.view === "MLO" ? 3 : -1;
+  const out: number[] = [-1, -1, -1, -1];
+  for (let i = 0; i < 4; i++) {
+    const k = slot(mgInstView(instances[i]));
+    if (k < 0 || out[k] >= 0) return id;      // 판정 불가 또는 중복 — 손대지 않는다
+    out[k] = i;
+  }
+  return out;
+}
+
 export const DEFAULT_MG_CFG: MgCfg = {
   on: true, layout: "2x2", margin: 2, thr: 12, detect: "auto", blind_ratio: false, ratio: 38,
 };
@@ -171,12 +210,23 @@ function _remember(ck: string, out: MgProbe): MgProbe {
   return out;
 }
 
-/** 화면에 이미 뜬 <img> 에서 조직 경계상자 산출(동기, 추가 네트워크 0. SOP+임계 캐시). */
+/** 이 이미지를 지금 분석할 수 있는가 — 디코드가 끝나야 캔버스에 그릴 수 있다. */
+export const mgReadable = (img: HTMLImageElement | null | undefined): boolean =>
+  !!img && img.complete && img.naturalWidth > 1 && img.naturalHeight > 1;
+
+/** 화면에 이미 뜬 <img> 에서 조직 경계상자 산출(동기, 추가 네트워크 0. SOP+임계 캐시).
+ *
+ * ⚠ **아직 디코드되지 않은 이미지는 캐시하지 않는다.** 그 경우에도 analyze 가 blind 를
+ *   돌려주고 그것이 BOXES 에 **영구 저장**되면, 한 번 이르게 물어본 SOP 는 그 세션 내내
+ *   2D-MG 보정을 받지 못한다 — "간헐적으로 적용이 안 된다" 의 정체가 이것이다
+ *   (브라우저 캐시에 있어 빨리 뜬 프레임일수록 더 잘 걸린다).
+ *   실패는 캐시하지 않는다 — URL 경로(mgProbeUrl)가 이미 같은 규칙을 쓴다. */
 export function mgProbe(sop: string, img: HTMLImageElement, thr: number): MgProbe {
   if (!sop) return { kind: "blind" };
   const ck = _key(sop, thr);
   const hit = BOXES.get(ck);
   if (hit !== undefined) return hit;
+  if (!mgReadable(img)) return { kind: "blind" };   // 다음 기회에 다시 — 기억하지 않는다
   return _remember(ck, analyze(img, thr));
 }
 

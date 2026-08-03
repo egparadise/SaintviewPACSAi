@@ -127,6 +127,11 @@ class OrthancClient:
                 "pixel_spacing": _floats(itags.get("PixelSpacing") or itags.get("ImagerPixelSpacing", "")),       # [row, col] mm
                 "position": _floats(itags.get("ImagePositionPatient", "")),    # [x,y,z]
                 "orientation": _floats(itags.get("ImageOrientationPatient", "")),  # [rx..cz] 6개
+                # MG 4-view 표준 배치용 — 어느 장이 어느 뷰인지 알 근거는 이 두 태그뿐이다.
+                # (화면에 보이는 큰 LCC/RCC 글자는 픽셀에 구워진 것이라 코드가 읽을 수 없다)
+                "view_position": str(itags.get("ViewPosition", "") or "").strip().upper(),
+                "laterality": str(itags.get("ImageLaterality", "")
+                                  or itags.get("Laterality", "") or "").strip().upper(),
             }
 
         r = self._client.get(f"/studies/{orthanc_study_id}/series")
@@ -140,7 +145,8 @@ class OrthancClient:
             ir = self._client.get(
                 f"/studies/{orthanc_study_id}/instances",
                 params={"requestedTags": "SOPInstanceUID;InstanceNumber;Rows;Columns;"
-                                         "PixelSpacing;ImagerPixelSpacing;ImagePositionPatient;ImageOrientationPatient"},
+                                         "PixelSpacing;ImagerPixelSpacing;ImagePositionPatient;ImageOrientationPatient;"
+                                         "ViewPosition;ImageLaterality;Laterality"},
                 timeout=120,
             )
             if ir.status_code == 200:

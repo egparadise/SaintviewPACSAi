@@ -26,10 +26,11 @@ import { ReportDock } from "../components/ReportDock";
 import { useDictation } from "../lib/useDictation";
 import { ViewerContextMenu, type CtxItem } from "../components/ViewerContextMenu";
 import { screenFeatures, screenFeaturesList, placeCompareSlaves, placePriorAdjacent, mmManaged } from "../lib/screens";
-import { onStudySync, onViewerAddTab, onViewerCloseAll, postStudySync, postViewerAddTab, postViewerCloseAll } from "../lib/sync";
+import { onStudySync, onViewerAddTab, onViewerCloseAll, onViewerDelTab, postStudySync, postViewerAddTab, postViewerCloseAll, postViewerDelTab } from "../lib/sync";
 import { alignTileIndex, compareCandidates, hasMammoView, mammoOrder, mammoView,
-         hpPickRule, hpPickPrior,
-         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource } from "../lib/viewerConfig";
+         hpPickRule, hpPickPrior, pickHang2d, HANG2D_ANY,
+         type CompareBasis, type HpRule, type HpCapture, type HpSlotSource,
+         type Hang2dPrefs } from "../lib/viewerConfig";
 import { HpSaveDialog } from "../components/HpSaveDialog";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgLayoutLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
@@ -614,14 +615,19 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
       const defMap: Record<string, { s?: { r: number; c: number } | null; i?: { r: number; c: number } | null }> =
         { ...(prefsV.infi_default_layout ?? {}) };
       {
+        // ⚠ 우선순위 판정은 lib/viewerConfig.pickHang2d **한 곳에만** 있다.
+        //   예전에는 이 자리와 Viewer2D 에 같은 삼항이 각자 있어, 규정을 한쪽에서만 고치면
+        //   두 뷰어가 다르게 반응했다(같은 체크박스를 눌러도 결과가 갈리는 증상).
         const toRC = (s?: string) => { if (!s) return null; const [rr, cc] = s.split("x").map(Number); return { r: rr || 1, c: cc || 1 }; };
-        const toE = (val?: string | { s: string; i: string }) =>
-          !val ? null : typeof val === "string" ? { s: toRC(val), i: null } : { s: toRC(val.s), i: toRC(val.i) };
+        const src: Hang2dPrefs = { hanging2d: prefsV.hanging2d,
+                                   hanging2d_common_on: prefsV.hanging2d_common_on,
+                                   hanging2d_by_viewer: prefsV.hanging2d_by_viewer };
         const commonH = prefsV.hanging2d ?? {};
         const perVH = prefsV.hanging2d_by_viewer?.infi ?? {};
-        const commonOn = prefsV.hanging2d_common_on ?? true;
         for (const mm of new Set([...Object.keys(commonH), ...Object.keys(perVH)])) {
-          const h = commonOn ? (toE(commonH[mm]) ?? toE(perVH[mm])) : (toE(perVH[mm]) ?? toE(commonH[mm]));
+          if (mm === HANG2D_ANY) continue;          // '*' 는 행이 없는 모달리티가 pickHang2d 안에서 받는다
+          const hv = pickHang2d(src, "infi", mm);
+          const h = hv ? { s: toRC(hv.s), i: toRC(hv.i) } : null;
           if (h && (h.s || h.i)) defMap[mm] = { s: h.s ?? defMap[mm]?.s ?? null, i: h.i ?? defMap[mm]?.i ?? null };
         }
       }
@@ -761,8 +767,12 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   };
   // 검사 닫기(실행) — 누적 목록에서 제거 후 남은 검사로 재구성(전부 닫히면 워크리스트로)
   const proceedCloseExam = (i: number) => {
+    const closedId = exams[i]?.d.id;
     const remain = exams.filter((_, k) => k !== i).map((e) => e.d.id);
     localStorage.setItem(EXAMS_KEY, JSON.stringify(remain));
+    // ★ 다른 모니터 창에도 알린다 — 안 알리면 그 창들이 닫힌 검사를 계속 들고 있다가
+    //   자기 목록을 저장하는 순간 공유 레지스트리에 **되살려 놓는다**(유령 탭).
+    if (closedId) postViewerDelTab(closedId, window.name);
     if (!remain.length) {
       gotoWorklist();
       window.close();
@@ -1162,6 +1172,11 @@ void applyHpSources(rule);
         } catch { /* quota */ }
       } catch { /* 조회 실패 — 탭 미추가 */ }
     })();
+  }), []);
+  // 다른 모니터 창에서 Exam 탭을 닫았다 — 이 창 목록에서도 뺀다(되살아나지 않게).
+  // 공유 레지스트리(EXAMS_KEY)는 발신 창이 이미 정리했으므로 여기선 화면 정합만 맞춘다.
+  useEffect(() => onViewerDelTab((id) => {
+    setExams((es) => (es.some((x) => x.d.id === id) ? es.filter((x) => x.d.id !== id) : es));
   }), []);
   const takeSnap = (): Snap => ({
     vis: panesRef.current.map((p) => ({

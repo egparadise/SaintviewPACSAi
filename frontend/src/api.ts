@@ -70,19 +70,77 @@ export function ensureToken(timeoutMs = 3000): Promise<boolean> {
   });
 }
 
+/** 서버 로그아웃 — 세션 행 종료. 그래야 곧바로 다시 로그인할 때
+ *  없어야 할 '다른 곳에서 로그인 중' 인계 프롬프트가 뜨지 않는다.
+ *  ⚠ req() 를 쓰지 않는다 — req 의 401 처리기가 다시 setToken(null) 을 불러 무한 재귀한다.
+ *  실패는 무시한다(로그아웃은 로컬 상태 정리가 우선). */
+function serverLogout(prevToken: string) {
+  try {
+    void fetch(`${BASE}/api/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${prevToken}` },
+    }).catch(() => { /* 오프라인·서버 다운 — 무시 */ });
+  } catch { /* 무시 */ }
+}
+
+/** 현재 토큰 — 다학제 협진 WebSocket 전용 접근자.
+ *  fetch 경로는 req() 가 알아서 헤더를 붙이지만, 브라우저 WebSocket API 는 헤더를 못 붙여
+ *  토큰을 **서브프로토콜**로 넘겨야 한다(lib/collab.ts 참조).
+ *  폴백 순서는 부팅 경로와 동일 — 메모리 우선(새 창 인계 커버), 없으면 저장소. */
+export function getToken(): string | null {
+  return token ?? localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token");
+}
+
 export function setToken(t: string | null, remember = false) {
+  const prev = token;
   token = t;
   window.__svToken = t;
   sessionStorage.removeItem("sv_token");
   localStorage.removeItem("sv_token");
   if (t) (remember ? localStorage : sessionStorage).setItem("sv_token", t);
+  // ⚠ 토큰이 **있었을 때만** 서버 로그아웃을 보낸다. 자격이 0인 호출자는 서버에 끊을
+  //   세션도 없으므로 보낼 이유가 애초에 없고, 보내면 남의 상태를 건드릴 표면만 생긴다
+  //   (로그인 화면에서 비번을 한 번 틀리면 401 → setToken(null) 이 여기를 지난다).
+  else if (prev) serverLogout(prev);
 }
 
 export function hasToken() {
   return !!token;
 }
 
+/* ⚡ GET 인플라이트 합류(dedupe) — 같은 GET 이 짧은 시간에 중복 발사되는 것을 1회로 합친다.
+ *
+ * 뷰어 열기 1회에 실측으로 `GET /api/studies/{id}` 가 4회(워크리스트 onSelect ×2 · doAction ·
+ * 뷰어창), `GET /api/settings/viewer.prefs` 가 5회 발사됐다. 원격(RTT 큰 회선)에서는 이 중복이
+ * 그대로 지연이 된다. 진행 중인 동일 GET 이 있으면 그 Promise 에 합류시키고, 완료 후에도
+ * 아주 짧게(TTL) 결과를 공유해 마운트 폭풍을 흡수한다.
+ * ⚠ 상태가 바뀌는 요청과 폴링을 방해하면 안 되므로 (a) GET 만 (b) TTL 을 아주 짧게 (c) 화이트리스트
+ *   경로(열기 경로에서만 중복되는 읽기)만 적용한다. */
+const DEDUPE_TTL_MS = 1500;
+const DEDUPE_RE = /^\/api\/(studies\/\d+$|settings\/|hospitals\/\d+\/image-format$|auth\/profile$)/;
+const _inflight = new Map<string, { at: number; p: Promise<unknown> }>();
+
+function dedupeKey(path: string, init?: RequestInit): string | null {
+  const isGet = !init?.method || init.method.toUpperCase() === "GET";
+  if (!isGet || !DEDUPE_RE.test(path)) return null;
+  return path;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const key = dedupeKey(path, init);
+  if (key) {
+    const hit = _inflight.get(key);
+    if (hit && Date.now() - hit.at < DEDUPE_TTL_MS) return hit.p as Promise<T>;
+    const p = reqRaw<T>(path, init);
+    _inflight.set(key, { at: Date.now(), p: p as Promise<unknown> });
+    // 실패는 캐시하지 않는다(다음 호출이 정상 재시도하도록)
+    p.catch(() => _inflight.delete(key));
+    return p;
+  }
+  return reqRaw<T>(path, init);
+}
+
+async function reqRaw<T>(path: string, init?: RequestInit): Promise<T> {
   // FormData(파일 업로드)는 브라우저가 multipart boundary 를 직접 설정 — Content-Type 강제 금지
   const isForm = init?.body instanceof FormData;
   // 일시 장애 자동 재시도 — 백엔드 재시작/프록시 순단(502/503/504, 네트워크 오류) 시
@@ -112,7 +170,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
       continue;
     }
-    if (res.status === 401) {
+    if (res.status === 401 && !path.startsWith("/api/collab/")) {
+      // ⚠ 협진 경로는 전역 로그아웃에서 **면제**한다.
+      //   실제 사고: 협진 계정 행이 없는 사용자의 /api/collab/* 가 401 을 내자 이 처리기가
+      //   '세션 만료' 로 오인해 강제 리로드 — 협진 버튼을 누르는 순간 로그인 화면으로 튕겼다.
+      //   백엔드는 403 으로 고쳤지만, 구 백엔드가 섞인 배포 전환기에도 튕기지 않도록
+      //   프론트에도 같은 선을 긋는다. 진짜 세션 만료는 다음 일반 API 호출이 처리한다.
       setToken(null);
       window.location.reload();
     }
@@ -560,6 +623,47 @@ export const api = {
     req<HospitalScu>(`/api/hospitals/${hid}/scu`, { method: "PUT", body: JSON.stringify(body) }),
   /** 내 유효 권한 (병원 매트릭스 반영 — 워크리스트/뷰어 게이트용) */
   permMe: () => req<PermMe>("/api/perm/me"),
+
+  // ── 다학제 협진(Co-Reading) — 실시간 경로는 lib/collab.ts(WebSocket)가 담당하고,
+  //    여기는 최초 로드 목록과 WS 가 끊겼을 때도 되어야 하는 조작만 맡는다. ──
+  collabDirectory: (q = "", otherOnly = false) =>
+    req<{ items: CollabUser[]; caps: Record<string, string> }>(
+      `/api/collab/directory?q=${encodeURIComponent(q)}${otherOnly ? "&other_only=true" : ""}`),
+  collabFriends: () => req<CollabFriends>("/api/collab/friends"),
+  collabRequestFriend: (target_id: number, message = "") =>
+    req<{ ok: boolean; result: string }>("/api/collab/friends/request",
+      { method: "POST", body: JSON.stringify({ target_id, message }) }),
+  collabRespondFriend: (other_id: number, accept: boolean) =>
+    req<{ ok: boolean }>("/api/collab/friends/respond",
+      { method: "POST", body: JSON.stringify({ other_id, accept }) }),
+  collabBlockFriend: (other_id: number, blocked: boolean) =>
+    req<{ ok: boolean }>(`/api/collab/friends/block?blocked=${blocked}`,
+      { method: "POST", body: JSON.stringify({ other_id }) }),
+  collabRemoveFriend: (other_id: number) =>
+    req<{ ok: boolean }>("/api/collab/friends/remove",
+      { method: "POST", body: JSON.stringify({ other_id }) }),
+  /** 룸 백필 — WS 로는 신규만 오므로 과거 메시지는 여기서 읽는다(before_id = 무한 스크롤) */
+  collabMessages: (room: string, before_id = 0) =>
+    req<{ items: CollabMessage[] }>(
+      `/api/collab/messages?room=${encodeURIComponent(room)}${before_id ? `&before_id=${before_id}` : ""}`),
+  collabMarkRead: (room: string) =>
+    req<{ ok: boolean; marked: number }>("/api/collab/messages/read",
+      { method: "POST", body: JSON.stringify({ room }) }),
+  collabOpenSession: (study_id: number, title = "") =>
+    req<CollabSession>("/api/collab/sessions",
+      { method: "POST", body: JSON.stringify({ study_id, title }) }),
+  collabSessions: () => req<{ items: CollabSession[] }>("/api/collab/sessions"),
+  collabSession: (code: string) => req<CollabSession>(`/api/collab/sessions/${code}`),
+  collabInvite: (code: string, target_id: number) =>
+    req<CollabSession>(`/api/collab/sessions/${code}/invite`,
+      { method: "POST", body: JSON.stringify({ target_id }) }),
+  collabDecline: (code: string) =>
+    req<{ ok: boolean }>(`/api/collab/sessions/${code}/decline`, { method: "POST" }),
+  collabLeave: (code: string) =>
+    req<{ ok: boolean }>(`/api/collab/sessions/${code}/leave`, { method: "POST" }),
+  /** 세션 종료(Master 전용) — 전 참가자의 임시 열람권이 이 시점에 무효화된다 */
+  collabClose: (code: string) =>
+    req<{ ok: boolean }>(`/api/collab/sessions/${code}/close`, { method: "POST" }),
   /** 검사 관리 작업 (삭제/이동/매칭/언매칭/복제 — 유효 권한 강제, 403 시 안내) */
   studyAdminAction: (id: number, body: { action: StudyAdminActionKind; target_hid?: number; order_id?: number | string }) =>
     req<{ ok: boolean; detail?: string }>(`/api/studies/${id}/admin-action`, { method: "POST", body: JSON.stringify(body) }),
@@ -778,23 +882,31 @@ export const api = {
     req<{ locked: boolean }>(`/api/studies/${studyId}/report-lock`, {
       method: "POST", body: JSON.stringify({ locked }) }),
 
-  /** 검사 DICOM 내보내기 — fmt=zip(DICOMDIR 포함, 폴더·USB 저장용) / iso(CD 굽기용 이미지).
-   *  응답이 바이너리라 req() 를 쓰지 않고 직접 fetch 한다. */
-  exportStudies: async (ids: number[], fmt: "zip" | "iso"): Promise<Blob> => {
-    const res = await fetch(`${BASE}/api/studies/export`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ ids, fmt }),
-    });
-    if (!res.ok) {
-      let msg = `내보내기 실패 (HTTP ${res.status})`;
-      try { const j = await res.json(); if (j?.detail) msg = String(j.detail); } catch { /* 본문 없음 */ }
-      throw new Error(msg);
-    }
-    return res.blob();
+  // ── DICOM 내보내기 — 선택 검사를 폴더/USB · ZIP · CD용 ISO 로 반출 ──
+  //
+  // ⚠ 예전에는 `POST /api/studies/export` 하나가 ZIP **전체를 메모리에 만들어** Blob 으로
+  //   돌려줬다. 그 구현은 4MB 마다 버퍼를 되감았는데 ZipFile 이 tell() 을 중앙 디렉터리
+  //   오프셋으로 쓰기 때문에 **4MB 를 넘는 반출이 전부 깨진 ZIP** 이었다(실제 DICOM 반출은
+  //   사실상 전부 여기 해당). 지금은 서버가 스트리밍하고, 폴더 저장은 목록을 받아
+  //   한 장씩 기록한다(진행률 표시 가능 + 메모리 상한).
+  exportManifest: (studyIds: string) =>
+    req<{ studies: { id: number; patient_key: string; patient_name: string; study_date: string;
+                     modality: string; study_desc: string; count: number;
+                     files: { path: string; sop_uid: string; series_uid: string }[] }[];
+          total_files: number }>(`/api/export/manifest?study_ids=${encodeURIComponent(studyIds)}`),
+  /** 단일 DICOM — 폴더/USB 저장이 한 장씩 받아 기록한다 */
+  exportFile: async (studyId: number, sopUid: string): Promise<ArrayBuffer> => {
+    const r = await fetch(
+      `${BASE}/api/export/file?study_id=${studyId}&sop_uid=${encodeURIComponent(sopUid)}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+    if (!r.ok) throw new Error(`영상 취득 실패 (${r.status})`);
+    return r.arrayBuffer();
+  },
+  /** ZIP·ISO 내려받기 URL — 브라우저가 직접 받도록 토큰을 쿼리로 실어 준다(다운로드는 헤더를 못 붙임) */
+  exportPackageUrl: (studyIds: string, format: "zip" | "iso") => {
+    const t = token ?? localStorage.getItem("sv_token") ?? sessionStorage.getItem("sv_token") ?? "";
+    return `${BASE}/api/export/package?study_ids=${encodeURIComponent(studyIds)}`
+         + `&format=${format}&token=${encodeURIComponent(t)}`;
   },
 };
 
@@ -993,6 +1105,18 @@ export interface ModalityTestResult {
 }
 export interface HospitalScu { name: string; ae_title: string; ip: string; port: number }
 export interface PermMe { role: string; hospital_id: number | null; perms: string[] }
+
+// 다학제 협진 — 서버 표현은 lib/collab.ts 가 단일 원천이다(WS 이벤트와 같은 모양이어야 하므로).
+// 여기서는 재수출만 해 호출부가 api 하나만 import 해도 되게 한다.
+export type { CollabUser, CollabSeat, CollabSession, CollabMessage } from "./lib/collab";
+import type { CollabUser, CollabSession, CollabMessage } from "./lib/collab";
+export interface CollabFriends {
+  friends: CollabUser[];
+  incoming: CollabUser[];   // 내가 받은 요청
+  outgoing: CollabUser[];   // 내가 보낸 요청
+  blocked: CollabUser[];
+  unread: Record<string, number>;   // room_key → 안읽음 수
+}
 export type StudyAdminActionKind = "delete" | "move" | "match" | "unmatch" | "copy";
 
 /* ── 유효 권한 게이트 (레인 W) — GET /api/perm/me 1회 로드·캐시 ──
@@ -1182,6 +1306,11 @@ export interface InstanceNode {
   orientation: number[];     // ImageOrientationPatient 6개
   series_uid?: string;       // Combine(여러 시리즈를 한 시리즈처럼) 시 인스턴스의 원본 시리즈 UID — 렌더 URL 이 이를 우선 사용
   study_uid?: string;        // Combine 시 인스턴스의 원본 검사 UID — 다른 검사(과거/비교) 시리즈 결합 시 정확한 스터디로 요청
+  // MG 4-view 표준 배치 근거 — (0018,5101) ViewPosition / (0020,0062) ImageLaterality.
+  // 4뷰가 한 시리즈에 든 검사는 이 태그 말고는 어느 장이 어느 뷰인지 알 방법이 없다
+  // (화면의 큰 LCC/RCC 글자는 픽셀에 구워진 것이라 코드가 못 읽는다). lib/mgHang.mgOrderIndexes 참조.
+  view_position?: string;
+  laterality?: string;
 }
 
 export interface SeriesNode {
