@@ -60,6 +60,7 @@ import { screenFeatures, screenFeaturesList } from "../lib/screens";
 import { showToast } from "../lib/toast";
 import { onStudySync, postStudySync, postViewerAddTab } from "../lib/sync";
 import { Splitter, clampSz } from "../lib/Splitter";
+import { useLocale } from "../lib/useLocale";
 
 const Viewer3D = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
 const ImportDialog = lazy(() => import("./ImportDialog").then((m) => ({ default: m.ImportDialog })));
@@ -2432,6 +2433,7 @@ function SvPerfCard({ mods }: { mods: Record<string, number> }) {
 }
 
 export function Worklist() {
+  useLocale();   // 언어가 바뀌면 이 화면 전체를 다시 그린다
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [searchText, setSearchText] = useState("");
   const [datePreset, setDatePreset] = useState("all");

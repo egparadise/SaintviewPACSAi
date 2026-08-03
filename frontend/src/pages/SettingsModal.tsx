@@ -6,6 +6,7 @@ import {
   INFI_COLUMNS, SV_COLUMNS, SVINFI_PANELS, SVINFI_PANEL_LABEL, type ViewerKey,
 } from "./Worklist";
 import { GridPicker } from "../lib/GridPicker";
+import { LOCALES, DEFAULT_LOCALE, getLocale, setLocale as applyLocale, coverage, t as tr } from "../lib/i18n";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, MG_LAYOUT_DESC, mgLayoutLabel, normMgJoin,
          type MgJoinPrefs, type MgLayoutKey } from "../lib/mgJoin";
 import { APP_NAME, APP_RELEASE_DATE, APP_VENDOR, BUILD_SHA, VERSION_LABEL } from "../lib/version";
@@ -34,6 +35,7 @@ import {
   type TreeNode,
   type WorklistTab,
 } from "./WorklistTree";
+import { useLocale } from "../lib/useLocale";
 
 /** 05 Mode Profile — 백엔드 mode.profiles JSON 항목 (07 A.7 v1) */
 interface ModeProfile {
@@ -225,6 +227,7 @@ function CrashLogPanel() {
 export function SettingsModal({ role, onClose, scope = "viewer" }: {
   role: string; onClose: () => void; scope?: SettingsScope;
 }) {
+  useLocale();   // 언어가 바뀌면 이 화면 전체를 다시 그린다
   const isAdmin = role === "admin";
   // 현재 스코프에서 보이는 탭만 (단계별 분리)
   const visibleTabs = TREE.filter((t) => t.scope === scope && (!t.admin || isAdmin));
@@ -235,6 +238,8 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
   const [saved, setSaved] = useState("");
   // 저장이 끝나면 하단 Cancel 이 '닫기' 로 바뀐다(저장 전에는 취소 의미라 Cancel 유지)
   const [savedOnce, setSavedOnce] = useState(false);
+  // 표시 언어 — localStorage 로 즉시 반영하고 viewer.prefs.locale 에도 저장(계정 로밍)
+  const [locale, setLocaleState] = useState<string>(getLocale());
 
   // ── 상태 (페이지별) ──
   const [refreshSec, setRefreshSec] = useState(0);   // 0 = 수동(SEARCH 누를 때만 갱신) — 기본
@@ -480,6 +485,9 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
         setH2dMap(norm);
       }
       const vv = v as { hanging2d_common_on?: boolean; hanging2d_by_viewer?: Record<string, Record<string, { s: string; i: string }>> };
+      // 표시 언어 — 계정에 저장된 값이 있으면 따라간다(다른 기기에서 바꾼 경우)
+      const lc = (v as { locale?: string }).locale;
+      if (lc && LOCALES.some((l) => l.code === lc) && lc !== getLocale()) { setLocaleState(lc); applyLocale(lc); }
       if (vv.hanging2d_common_on !== undefined) setH2dCommonOn(!!vv.hanging2d_common_on);
       if (vv.hanging2d_by_viewer) setH2dByViewer(vv.hanging2d_by_viewer);
       { const mj = normMgJoin((v as { mg_join?: unknown }).mg_join); setMgJoin(mj); mgOnDefLoaded.current = mj.on_default; }
@@ -588,6 +596,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
     const curV = (await api.getSetting("viewer.prefs").catch(() => ({ value: {} }))).value;
     await api.putSetting("viewer.prefs", {
       ...curV,
+      locale,
       hanging2d: h2dMap,
       hanging2d_common_on: h2dCommonOn,
       hanging2d_by_viewer: h2dByViewer,
@@ -714,7 +723,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                        background: page === t.key ? "var(--accent-subtle)" : undefined,
                        color: page === t.key ? "var(--text-primary)" : "var(--text-secondary)",
                      }}>
-                  <FolderIcon /> {t.label}
+                  <FolderIcon /> {tr(t.label)}
                 </div>
                 {/* 하위 항목 — 부모 아래 들여쓰기로 표시(워크리스트·뷰어 공통의 뷰어별 페이지) */}
                 {visibleTabs.filter((c) => (c as { parent?: string }).parent === t.key).map((c) => (
@@ -725,7 +734,7 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                          background: page === c.key ? "var(--accent-subtle)" : undefined,
                          color: page === c.key ? "var(--text-primary)" : "var(--text-secondary)",
                        }}>
-                    <span style={{ opacity: 0.6 }}>└</span> {c.label}
+                    <span style={{ opacity: 0.6 }}>└</span> {tr(c.label)}
                   </div>
                 ))}
               </div>
@@ -876,6 +885,37 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
             )}
             {page === "env" && (
               <>
+                <Group title={tr("표시 언어")}>
+                  <Row label={tr("표시 언어")}>
+                    <span style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <select value={locale} style={{ width: 180 }}
+                              onChange={(e) => {
+                                const c = e.target.value;
+                                setLocaleState(c);
+                                applyLocale(c);   // 즉시 반영(문서 lang/dir + 구독 화면)
+                              }}>
+                        {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+                      </select>
+                      {(() => {
+                        const cv = coverage(locale);
+                        const pct = cv.total ? Math.round((cv.done / cv.total) * 100) : 0;
+                        return (
+                          <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                            {locale === DEFAULT_LOCALE
+                              ? "원문 언어입니다."
+                              : `핵심 UI 번역 ${cv.done}/${cv.total} (${pct}%) — 번역이 없는 문구는 한국어로 표시됩니다.`}
+                          </span>
+                        );
+                      })()}
+                    </span>
+                  </Row>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                    워크리스트·뷰어·설정에 공통 적용됩니다(선택 즉시 반영, 계정에 저장).
+                    아랍어는 화면 방향이 <b>오른쪽 → 왼쪽</b>으로 바뀝니다.<br />
+                    ⚠ 현재 번역은 <b>자주 쓰는 화면</b>(설정 항목·워크리스트 조작·뷰어 도구·공통 버튼)부터
+                    적용돼 있습니다. 설정 화면의 긴 설명문 등 나머지는 아직 한국어로 나옵니다.
+                  </div>
+                </Group>
                 <Group title="워크리스트 동작">
                   <Row label="갱신 방식">
                     <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

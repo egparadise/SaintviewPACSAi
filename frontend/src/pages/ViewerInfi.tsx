@@ -35,6 +35,7 @@ import { HpSaveDialog } from "../components/HpSaveDialog";
 import { DEFAULT_MG_JOIN, MG_LAYOUTS, mgGridLabel, mgSameXf, mgSide, mgTx, mgZoom, normMgJoin, tissueBBox,
          type MgBBox, type MgJoinPrefs } from "../lib/mgJoin";
 import { fieldsAt, normOverlayCfg, ovFieldValue, overlayFor, type OverlayCfg } from "../lib/overlayFields";
+import { useLocale } from "../lib/useLocale";
 
 // 해부학 아이콘 — 심장(CTR)/척추(Spine)/측만(Cobb)/골반+다리(Limb) 그림 (em 크기 = 칩 글리프에 맞춰 확대)
 const ANATOMY_ICONS: Record<string, React.ReactNode> = {
@@ -369,6 +370,7 @@ export function ViewerInfi({ detail, onClose, addDetail, stackDetail, keySops, w
   withOpen?: { mode: "add" | "stack"; ids: number[] } | null;  // Study With Open
   navFilter?: Record<string, string>;  // ◀▶ 탐색 목록 필터(모니터 배정 탭) — 없으면 전체 목록
 }) {
+  useLocale();   // 언어가 바뀌면 이 화면 전체를 다시 그린다
   const [series, setSeries] = useState<SeriesNode[]>([]);
   // 과거검사(Related Exam) 시리즈 — Sync With Other Exams 용 (클릭 시 로드)
   const [priorSeries, setPriorSeries] = useState<{ uid: string; label: string; s: SeriesNode }[]>([]);

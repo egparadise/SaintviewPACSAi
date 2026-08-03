@@ -32,6 +32,7 @@ import { DICOMWEB_ROOT, renderedParams, setImageFormat } from "../lib/imageForma
 import { isWasmPipeline, onWasmFrame, setWasmPipeline, wasmFrameUrl } from "../lib/wasmPixels";
 import { cancelWarm, prefetchAround, warmSeries } from "../lib/framePrefetch";
 import { rawAt, samplePixels } from "../lib/pixelTools";
+import { useLocale } from "../lib/useLocale";
 
 // 내장 MPR/MIP — 새 창 없이 현재 뷰포트 영역에 Axial/Sagittal/Coronal+MIP 표시
 const Viewer3DEmbed = lazy(() => import("./Viewer3D").then((m) => ({ default: m.Viewer3D })));
@@ -503,6 +504,7 @@ export function Viewer2D({ detail, onClose, addDetail, stackDetail, keySops, wit
   navFilter?: Record<string, string>;  // ◀▶ 탐색 목록 필터(모니터 배정 탭) — 없으면 전체 목록
   skin?: "ty" | "saint";             // SAINT VIEW 스킨 — 상단 가로 메뉴 툴바 + 세로 팔레트 숨김 (엔진·기능 동일)
 }) {
+  useLocale();   // 언어가 바뀌면 이 화면 전체를 다시 그린다
   const [prefs, setPrefs] = useState<ViewerPrefs>(DEFAULT_PREFS);
   // 병원별 영상 전송 형식 로드 — 관리자 설정(JPEG 품질/PNG)을 rendered 호출에 반영
   useEffect(() => {

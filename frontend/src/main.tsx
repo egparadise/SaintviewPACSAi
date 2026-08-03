@@ -1,4 +1,5 @@
 import { StrictMode } from 'react'
+import { applyDocumentLocale } from "./lib/i18n";
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { ErrorBoundary, installGlobalCrashLog, isChunkLoadError, reloadOnceForChunk } from './components/ErrorBoundary'
@@ -30,6 +31,7 @@ window.addEventListener('unhandledrejection', (e) => {
   } catch { /* 무시 */ }
 })
 
+applyDocumentLocale();   // <html lang/dir> — 아랍어는 RTL
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary label="Saintview PACS AI">
