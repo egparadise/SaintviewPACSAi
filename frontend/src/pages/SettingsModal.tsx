@@ -13,6 +13,7 @@ import { normOverlayCfg, type OverlayCfg } from "../lib/overlayFields";
 import { OverlayLayoutEditor } from "../components/OverlayLayoutEditor";
 import { type CompareBasis, CLIENT_VIEWERS, DEFAULT_CLIENT_VIEWER, DEFAULT_HP_DISPLAYS, DEFAULT_WL_PRESETS, TOOLBAR_DEFS,
          HP_MODALITIES, HP_BP_SOURCES, HP_BP_SOURCE_DEFAULT, HP_SLOT_SOURCES,
+         HANG2D_ANY,
          type HpDisplay, type HpRule, type HpSlotSource, type WlPreset } from "../lib/viewerConfig";
 import { IN_PALETTE } from "../lib/infiConfig";
 import { screenApiIssue } from "../lib/screens";
@@ -139,7 +140,11 @@ function UsageTop({ usage, labelOf, onReset }: {
 interface DicomNode { name: string; role: "scu" | "scp" | "both"; ae_title: string; ip: string; port: number }
 
 /** 2D 행잉 편집기 — 모달리티별 Series/Image 분할(공통·뷰어별 공용). */
-const HANG2D_MODS = ["CR", "DR", "MG", "US", "CT", "MR", "XA", "NM", "PT"];
+// 2D 행잉 편집기의 행 목록.
+// ⚠ 여기 없는 모달리티는 **설정 자체가 불가능**하다(실제로 DX·OT 가 빠져 있어 그 검사들은
+//   공통 레이아웃이 영영 적용되지 않았다). 마지막 "*" 는 **행이 없는 모달리티 전체**에
+//   적용되는 기본값 — pickHang2d 가 이미 폴백으로 읽고 있었지만 UI 가 만들 길이 없었다.
+const HANG2D_MODS = ["CR", "DR", "DX", "MG", "US", "CT", "MR", "XA", "NM", "PT", "OT", HANG2D_ANY];
 function Hanging2dEditor({ map, onChange, mg, onMg }: {
   map: Record<string, { s: string; i: string }>;
   onChange: (m: string, next: { s: string; i: string }) => void;
@@ -154,7 +159,12 @@ function Hanging2dEditor({ map, onChange, mg, onMg }: {
         const cur = map[m] ?? { s: "1x1", i: "1x1" };
         return (
           <div key={m} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <b style={{ width: 42, fontSize: 12 }}>{m}</b>
+            <b style={{ width: 42, fontSize: 12 }}
+               title={m === HANG2D_ANY
+                 ? "기타 — 위에 자기 행이 없는 모든 모달리티에 적용되는 기본 분할"
+                 : `${m} 검사를 열 때 적용할 분할`}>
+              {m === HANG2D_ANY ? "기타*" : m}
+            </b>
             <GridPicker label="Series" max={10} value={parseG(cur.s)} onPick={(g) => onChange(m, { ...cur, s: gStr(g) })} />
             <GridPicker label="Image" max={10} value={parseG(cur.i)} onPick={(g) => onChange(m, { ...cur, i: gStr(g) })} />
             {m === "MG" && mg && onMg && (
