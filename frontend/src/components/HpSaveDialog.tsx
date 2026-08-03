@@ -23,7 +23,8 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
   const [desc, setDesc] = useState("");
   const [sources, setSources] = useState<string[]>([...HP_BP_SOURCE_DEFAULT]);
   const [priority, setPriority] = useState(false);
-  const [onOpen, setOnOpen] = useState(true);
+  // 행잉의 기본은 '적용되지 않음' — 검사를 열 때는 뷰어 공통 Layout 이 기본이다
+  const [onOpen, setOnOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -134,7 +135,7 @@ export function HpSaveDialog({ capture, study, onClose, onSaved }: {
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: "pointer" }}
-                 title="검사를 열 때 이 규칙을 자동으로 적용합니다">
+                 title="켜면 검사를 열 때 자동 적용합니다. 꺼두면(기본) 뷰어 공통 Layout 이 적용되고, 이 규칙은 HP 메뉴에서 직접 고를 때만 걸립니다.">
             <input type="checkbox" checked={onOpen} onChange={(e) => setOnOpen(e.target.checked)} />
             Exam 열 때 HP 사용
           </label>

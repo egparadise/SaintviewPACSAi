@@ -1767,7 +1767,13 @@ export function SettingsModal({ role, onClose, scope = "viewer" }: {
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 5 }}>
                   체크 시 SaintView/I-View/T-View 각 뷰어의 개별 2D 행잉보다 <b>이 공통 설정이 우선</b>합니다.
                   해제하면 각 뷰어(뷰어 공통 &gt; SaintView/I-View/T-View)의 개별 설정을 사용합니다.<br />
-                  검사를 열 때 모달리티별 기본 분할 — <b>Series</b>(뷰포트 개수) + <b>Image</b>(페인 내 이미지 타일). 그리드에서 선택.
+                  검사를 열 때 모달리티별 기본 분할 — <b>Series</b>(뷰포트 개수) + <b>Image</b>(페인 내 이미지 타일). 그리드에서 선택.<br />
+                  <b>기타*</b> 행은 자기 행이 없는 모든 모달리티에 적용되는 기본값입니다.<br />
+                  <span style={{ color: "var(--text-primary)" }}>
+                    적용 순서 — ① 이 <b>공통 Layout</b>(기본) → ② 위 체크를 해제하면 <b>뷰어별 Layout</b> →
+                    ③ <b>행잉(HP)</b> 은 이와 별도로, 뷰어의 HP 메뉴에서 <b>직접 고를 때만</b> 적용됩니다
+                    (행잉의 기본은 <b>적용되지 않음</b> — 규칙의 &lsquo;Exam 열 때 HP 사용&rsquo; 을 켜야 자동 적용).
+                  </span>
                 </div>
                 <Hanging2dEditor map={h2dMap} onChange={(m, next) => setH2dMap((p) => ({ ...p, [m]: next }))}
                                  mg={mgJoin} onMg={setMgJoin} />
@@ -2558,7 +2564,9 @@ function ReadingItemEditor({ kind, items, reload }: {
 
 /* ── 행잉 프로토콜 편집기 (설정>행잉) — 좌측 프로토콜 카드 목록 + 우측 기본정보·옵션·디스플레이 레이아웃 ── */
 const HP_OPTIONS: { key: keyof HpRule; label: string; desc: string }[] = [
-  { key: "use_on_exam_open", label: "Exam 열 때 HP 사용", desc: "검사 열 때 이 프로토콜을 자동 적용" },
+  { key: "use_on_exam_open", label: "Exam 열 때 HP 사용",
+    desc: "검사 열 때 이 프로토콜을 자동 적용합니다. 꺼두면(기본) 뷰어 공통 Layout 이 적용되고, "
+        + "이 프로토콜은 뷰어의 HP 메뉴에서 직접 고를 때만 걸립니다." },
   { key: "full_link", label: "전체 링크", desc: "모든 페인을 함께 조작(동기)" },
   { key: "full_scroll_sync", label: "전체 스크롤 동기화", desc: "페인 스크롤을 함께 이동" },
   { key: "cross_link", label: "Cross Link 사용", desc: "교차 해부학 위치 동기(다른 시리즈)" },
@@ -2592,7 +2600,8 @@ function HpProtocolEditor({ rules, onChange, monitors, monitorCfg }: {
   const newRule = (): HpRule => ({
     id: `hp${Date.now().toString(36)}`, name: "새 프로토콜", modality: "", body_part: "", projection: "",
     description: "", s: { r: 1, c: 1 }, i: { r: 1, c: 1 }, wl: "",
-    use_on_exam_open: true, full_link: false, full_scroll_sync: false, cross_link: false, scout_image: false,
+    use_on_exam_open: false,   // 행잉의 기본은 '적용되지 않음' — 뷰어 공통 Layout 이 기본이다
+    full_link: false, full_scroll_sync: false, cross_link: false, scout_image: false,
     displays: DEFAULT_HP_DISPLAYS(),
   });
   const addNew = () => { const r = newRule(); void onChange([...rules, r]); setSelId(r.id); setDraft(r); setDirty(false); };

@@ -279,11 +279,16 @@ export function hpMatches(
 }
 
 /** 자동 적용할 규칙 하나 — '가장 우선 적용'(priority) 규칙을 먼저 훑고, 없으면 등록 순서.
- *  use_on_exam_open === false 인 규칙은 자동 적용 대상에서 제외(메뉴로 수동 적용). */
+ *
+ *  ⚠ **행잉의 기본은 '적용되지 않음'** 이다(우선순위 규정).
+ *     검사를 열 때의 기본 분할은 **뷰어 공통 Layout**(공통 체크 해제 시 뷰어별 Layout)이고,
+ *     행잉 프로토콜은 그와 **별도**로 뷰어의 HP 메뉴에서 사용자가 고를 때 적용된다.
+ *     따라서 자동 적용은 `use_on_exam_open === true` 로 **명시적으로 켠 규칙만** 대상이다
+ *     (미설정·레거시 규칙은 자동 적용하지 않는다 — 예전에는 `!== false` 라 기본이 켜짐이었다). */
 export function hpPickRule(
   rules: HpRule[], study: Record<string, unknown>, seriesDescs: string[] = [],
 ): HpRule | null {
-  const usable = rules.filter((r) => r.use_on_exam_open !== false);
+  const usable = rules.filter((r) => r.use_on_exam_open === true);
   const ordered = [...usable.filter((r) => r.priority), ...usable.filter((r) => !r.priority)];
   return ordered.find((r) => hpMatches(r, study, seriesDescs)) ?? null;
 }
@@ -353,7 +358,7 @@ export function buildHpRule(
     wl: cap.wl ?? "",
     bp_sources: base.bp_sources ?? [...HP_BP_SOURCE_DEFAULT],
     priority: !!base.priority,
-    use_on_exam_open: base.use_on_exam_open !== false,
+    use_on_exam_open: base.use_on_exam_open === true,   // 기본 = 자동 적용 안 함
     full_link: !!x.auto_sync,
     full_scroll_sync: !!x.sync_other,
     cross_link: !!x.crosslink,
@@ -382,7 +387,7 @@ export interface HpRule {
   i: { r: number; c: number };  // Image layout
   wl?: string;          // "center,width" (빈값=기본)
   // 옵션 (그림) — 뷰어 런타임 반영
-  use_on_exam_open?: boolean;   // Exam 열 때 HP 자동 사용
+  use_on_exam_open?: boolean;   // Exam 열 때 HP 자동 사용(기본 꺼짐 — 미설정=수동 선택 시에만 적용)
   full_link?: boolean;          // 전체 링크(페인 동기)
   full_scroll_sync?: boolean;   // 전체 스크롤 동기화
   cross_link?: boolean;         // Cross Link(교차 위치 동기)
